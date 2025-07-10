@@ -1,0 +1,80 @@
+D ENGINE LICENSE AGREEMENT
+==========================
+
+Copyright (c) [2025] Alexandre Delangre. All rights reserved.
+
+This License Agreement ("Agreement") governs your access to and use of the D Engine software ("Software") developed by Alexandre Delangre ("Author"). By downloading, accessing, or using any part of the Software, you agree to the following terms:
+
+---
+
+1. LICENSE GRANT
+----------------
+The Author grants you a limited, non-exclusive, non-transferable, and revocable license to use, view, and evaluate the source code of D Engine solely:
+- For **personal**, **educational**, or **evaluation** purposes;
+- As an **active subscriber** to D Engine under a valid agreement or platform provided by the Author;
+- Subject to the restrictions in this License.
+
+No other rights are granted. In particular, no license is granted to redistribute, sublicense, modify, or use the Software in commercial products unless explicitly authorized in writing by the Author.
+
+---
+
+2. PROPRIETARY RIGHTS AND RESTRICTIONS
+--------------------------------------
+- All rights, title, and interest in the Software, including all intellectual property rights, remain the sole and exclusive property of the Author.
+- You may not:
+  - Redistribute, sell, sublicense, or publish any part of the Software;
+  - Use the Software without an active subscription agreement with the Author;
+  - Reverse engineer, decompile, or attempt to extract the source code from compiled binaries;
+  - Use the Software to train, develop, or enhance AI models or similar technologies.
+
+---
+
+3. CONTRIBUTIONS
+----------------
+By submitting any suggestions, improvements, patches, bug reports, or other feedback ("Contributions") to the Author, you agree that:
+- Contributions are made **voluntarily** and **without expectation of compensation**;
+- All Contributions become the **sole and exclusive property** of the Author;
+- The Author has the unrestricted right to use, modify, and incorporate Contributions into the Software or other products without any obligation to you.
+
+You represent that you have the legal right to make such Contributions and that they do not infringe on any third-party rights.
+
+---
+
+4. TERMINATION
+--------------
+This License is automatically terminated if you:
+- Violate any term of this Agreement;
+- Use the Software after your subscription has ended;
+- Attempt to use the Software for commercial or redistributable purposes without explicit written permission.
+
+Upon termination, you must cease all use of the Software and destroy all local copies.
+
+---
+
+5. DISCLAIMER OF WARRANTY
+--------------------------
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. THE AUTHOR DISCLAIMS ALL WARRANTIES, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+---
+
+6. LIMITATION OF LIABILITY
+---------------------------
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING FROM THE USE OF THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+---
+
+7. GOVERNING LAW
+----------------
+This License is governed by and construed in accordance with the laws of France. Any disputes shall be exclusively resolved in the courts located in Marseille, France.
+
+---
+
+8. CONTACT
+----------
+For licensing inquiries, partnerships, or written permissions:
+**Email**: alexandre.delangre9@gmail.com  
+**Author**: Alexandre Delangre
+
+---
+
+Thank you for supporting D Engine.

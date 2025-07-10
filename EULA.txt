@@ -1,0 +1,87 @@
+# D ENGINE END USER LICENSE AGREEMENT (EULA)
+
+**Effective Date** (Day/Month/Year): 10/07/2025
+**Author**: Alexandre Delangre  
+**Product**: D Engine
+
+This End User License Agreement ("Agreement") is a legal contract between you ("Licensee" or "You") and Alexandre Delangre ("Author"), the creator and sole owner of the software product known as "D Engine" ("Software"). By accessing, downloading, installing, or using the Software, you agree to be bound by the terms of this Agreement.
+
+If you do not agree to these terms, you may not access or use the Software.
+
+---
+
+## 1. LICENSE GRANT
+
+The Author grants you a non-exclusive, non-transferable, revocable license to use the Software:
+- If you are an active subscriber of D Engine with a valid license;
+- Solely for non-commercial, personal, or educational purposes unless explicitly permitted;
+- In accordance with the limitations defined herein.
+
+No rights are granted to distribute, sublicense, rent, or lease the Software.
+
+---
+
+## 2. RESTRICTIONS
+
+You may NOT:
+- Use the Software after the termination or expiration of your subscription;
+- Copy, distribute, sublicense, or publicly share any portion of the Software;
+- Reverse engineer, decompile, or disassemble the Software in any way;
+- Use the Software in the development, training, or deployment of AI or machine learning models;
+- Use the Software for commercial purposes without written approval from the Author.
+
+---
+
+## 3. OWNERSHIP
+
+The Software, including all updates, modifications, and enhancements, remains the sole and exclusive property of the Author. You acknowledge that no title or ownership of the Software is transferred to you by this Agreement.
+
+---
+
+## 4. CONTRIBUTIONS
+
+If you submit code, feedback, bug reports, ideas, or other materials ("Contributions") to the Author:
+- You do so voluntarily and grant the Author an irrevocable, royalty-free, worldwide license to use, modify, reproduce, sublicense, and distribute your Contributions as part of the Software or related projects;
+- You waive any moral rights or rights to compensation;
+- You warrant that you have all rights necessary to make such Contributions.
+
+---
+
+## 5. TERMINATION
+
+This Agreement shall terminate immediately if you:
+- Breach any term of this Agreement;
+- Attempt to use the Software without a valid subscription;
+- Engage in any use of the Software that infringes the rights of the Author or any applicable law.
+
+Upon termination, you must delete all copies of the Software and cease all usage.
+
+---
+
+## 6. DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTIES OF ANY KIND. THE AUTHOR DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+---
+
+## 7. LIMITATION OF LIABILITY
+
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES ARISING FROM THE USE OR INABILITY TO USE THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+---
+
+## 8. GOVERNING LAW
+
+This Agreement shall be governed by and interpreted in accordance with the laws of France. Any dispute shall be subject to the exclusive jurisdiction of the courts of Marseille, France.
+
+---
+
+## 9. CONTACT
+
+For legal or licensing inquiries, please contact:  
+**Email**: alexandre.delangre9@gmail.com
+**Author**: Alexandre Delangre
+
+---
+
+By using the Software, you acknowledge that you have read, understood, and agree to be bound by the terms of this Agreement.
