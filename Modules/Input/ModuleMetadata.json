@@ -1,0 +1,9 @@
+{
+  "Name": "Input",
+  "ID": "Input",
+  "Category": "SoftCore",
+  "DefaultEnabled": true,
+  "Keywords": [ "keyboard", "mouse", "controller", "input" ],
+  "Dependencies": [],
+  "Description": "Handles input from keyboard, mouse, and gamepad. Supports key mapping and action binding."
+}

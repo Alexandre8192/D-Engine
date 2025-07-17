@@ -1,0 +1,9 @@
+{
+  "Name": "Vehicles",
+  "ID": "Vehicles",
+  "Category": "Feature",
+  "DefaultEnabled": false,
+  "Keywords": [ "vehicle", "car", "plane", "physics", "movement" ],
+  "Dependencies": [ "Physics" ],
+  "Description": "Adds support for vehicle-like actors with advanced physics and controls."
+}

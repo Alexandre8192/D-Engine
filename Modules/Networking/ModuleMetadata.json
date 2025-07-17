@@ -1,0 +1,9 @@
+{
+  "Name": "Networking",
+  "ID": "Networking",
+  "Category": "Feature",
+  "DefaultEnabled": false,
+  "Keywords": [ "multiplayer", "network", "socket", "client", "server", "replication" ],
+  "Dependencies": [],
+  "Description": "Provides basic multiplayer support including client/server sockets, message dispatching, and remote actor sync."
+}
