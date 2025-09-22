@@ -1,0 +1,93 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Fichiers sources">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Fichiers d%27en-tête">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Fichiers de ressources">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Source">
+      <UniqueIdentifier>{c8cdb831-bcc4-48ad-ba4f-935d1d6e62a6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Core">
+      <UniqueIdentifier>{d8732830-c86e-40fe-9cdb-ca42f808933a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Core\Memory">
+      <UniqueIdentifier>{f4cc87c8-55fa-4854-9f2c-72a320fa5794}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Core\Plateform">
+      <UniqueIdentifier>{65782549-8e68-4d68-9a07-1b1b21297bee}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Source\Core\CoreMinimal.hpp">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Logger.hpp">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Timer.hpp">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Types.hpp">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\Alignment.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\Allocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\ArenaAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\DefaultAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\MemoryConfig.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\OOM.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\PoolAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\StackAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\ThreadSafety.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\TrackingAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Plateform\PlatformCompiler.hpp">
+      <Filter>Source\Core\Plateform</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Plateform\PlatformDefines.hpp">
+      <Filter>Source\Core\Plateform</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Plateform\PlatformMacros.hpp">
+      <Filter>Source\Core\Plateform</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Plateform\PlatformTypes.hpp">
+      <Filter>Source\Core\Plateform</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Core\Memory\Allocator.cpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
