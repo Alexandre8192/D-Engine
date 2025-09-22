@@ -15,9 +15,12 @@ namespace dng::core {
 
     // Runtime policy takes precedence when available; falls back to compile-time gate.
     inline bool ShouldFatalOnOOM() noexcept {
-        const auto& cfg = MemoryConfig::GetGlobal();
-        if (cfg.fatal_on_oom) return true;
-        return DNG_MEM_FATAL_ON_OOM != 0;
+        if constexpr (CompiledFatalOnOOM()) {
+            return MemoryConfig::GetGlobal().fatal_on_oom;
+        }
+        else {
+            return CompiledFatalOnOOM();
+        }
     }
 
     // Fatal OOM handler: must not return.
@@ -69,5 +72,9 @@ namespace dng::core {
 // It delegates to the runtime policy (fatal vs non-fatal) via OnAllocFailure().
 #define DNG_MEM_CHECK_OOM(size, align, where) \
     do { ::dng::core::OnAllocFailure((size), (align), (where), __FILE__, __LINE__); } while(0)
+
+
+
+
 
 

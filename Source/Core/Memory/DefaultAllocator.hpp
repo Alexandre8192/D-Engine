@@ -40,12 +40,6 @@ namespace dng::core {
         struct alignas(alignof(std::max_align_t)) AllocationHeader {
             void* rawPtr;     // original pointer returned by ::operator new
             u32   magic;      // debug guard
-            // pad so the header size is a multiple of max_align_t
-            u8    reserved[
-                (sizeof(std::max_align_t) - sizeof(void*) - sizeof(u32) > 0)
-                    ? (sizeof(std::max_align_t) - sizeof(void*) - sizeof(u32))
-                    : 1
-            ];
         };
 
         static_assert(sizeof(AllocationHeader) % alignof(std::max_align_t) == 0,
@@ -173,5 +167,6 @@ namespace dng::core {
     };
 
 } // namespace dng::core
+
 
 

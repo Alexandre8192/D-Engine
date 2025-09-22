@@ -130,16 +130,18 @@
 // ============================================================================
 namespace dng::core
 {
+#if !defined(DNG_CORE_MEMORYCONFIG_CONSTANTS_DEFINED)
+#define DNG_CORE_MEMORYCONFIG_CONSTANTS_DEFINED
     // clang-format off
-    inline constexpr bool kCompiledTracking = (DNG_MEM_TRACKING != 0);
-    inline constexpr bool kCompiledStatsOnly = (DNG_MEM_STATS_ONLY != 0);
-    inline constexpr bool kCompiledFatalOnOOM = (DNG_MEM_FATAL_ON_OOM != 0);
-    inline constexpr bool kCompiledGuards = (DNG_MEM_GUARDS != 0);
-    inline constexpr bool kCompiledPoisonOnFree = (DNG_MEM_POISON_ON_FREE != 0);
-    inline constexpr bool kCompiledCaptureCallsite = (DNG_MEM_CAPTURE_CALLSITE != 0);
-    inline constexpr bool kCompiledReportOnExit = (DNG_MEM_REPORT_ON_EXIT != 0);
-    inline constexpr bool kCompiledThreadSafe = (DNG_MEM_THREAD_SAFE != 0);
-    inline constexpr int  kCompiledThreadPolicy = DNG_MEM_THREAD_POLICY;
+    constexpr bool CompiledTracking() noexcept { return DNG_MEM_TRACKING != 0; }
+    constexpr bool CompiledStatsOnly() noexcept { return DNG_MEM_STATS_ONLY != 0; }
+    constexpr bool CompiledFatalOnOOM() noexcept { return DNG_MEM_FATAL_ON_OOM != 0; }
+    constexpr bool CompiledGuards() noexcept { return DNG_MEM_GUARDS != 0; }
+    constexpr bool CompiledPoisonOnFree() noexcept { return DNG_MEM_POISON_ON_FREE != 0; }
+    constexpr bool CompiledCaptureCallsite() noexcept { return DNG_MEM_CAPTURE_CALLSITE != 0; }
+    constexpr bool CompiledReportOnExit() noexcept { return DNG_MEM_REPORT_ON_EXIT != 0; }
+    constexpr bool CompiledThreadSafe() noexcept { return DNG_MEM_THREAD_SAFE != 0; }
+    constexpr int  CompiledThreadPolicy() noexcept { return DNG_MEM_THREAD_POLICY; }
     // clang-format on
 
     // Invariants:
@@ -154,17 +156,17 @@ namespace dng::core
     struct MemoryConfig
     {
         // --- Runtime toggles (effective only if compiled in) -----------------
-        bool enable_tracking = kCompiledTracking;           // default: ON when compiled in
-        bool enable_stats_only = kCompiledStatsOnly;        // default: ON when compiled in
-        bool fatal_on_oom = kCompiledFatalOnOOM;            // default: ON when compiled in
-        bool enable_guards = kCompiledGuards;               // default: ON when compiled in
-        bool poison_on_free = kCompiledPoisonOnFree;        // default: ON when compiled in
-        bool capture_callsite = kCompiledCaptureCallsite;   // default: ON when compiled in
-        bool report_on_exit = kCompiledReportOnExit;        // default: ON when compiled in
+        bool enable_tracking = CompiledTracking();           // default: ON when compiled in
+        bool enable_stats_only = CompiledStatsOnly();        // default: ON when compiled in
+        bool fatal_on_oom = CompiledFatalOnOOM();            // default: ON when compiled in
+        bool enable_guards = CompiledGuards();               // default: ON when compiled in
+        bool poison_on_free = CompiledPoisonOnFree();        // default: ON when compiled in
+        bool capture_callsite = CompiledCaptureCallsite();   // default: ON when compiled in
+        bool report_on_exit = CompiledReportOnExit();        // default: ON when compiled in
 
         // Thread safety: prefer per-allocator policy; this is a coarse global knob.
-        bool global_thread_safe = kCompiledThreadSafe;
-        int  global_thread_policy = kCompiledThreadPolicy; // 0 = none, 1 = mutex
+        bool global_thread_safe = CompiledThreadSafe();
+        int  global_thread_policy = CompiledThreadPolicy(); // 0 = none, 1 = mutex
 
         // ---------------------------------------------------------------------
         // Singleton access
@@ -181,7 +183,7 @@ namespace dng::core
         // ---------------------------------------------------------------------
         void SetEnableTracking(bool v) noexcept
         {
-            if constexpr (kCompiledTracking)
+            if constexpr (CompiledTracking())
             {
                 enable_tracking = v;
             }
@@ -194,7 +196,7 @@ namespace dng::core
 
         void SetEnableStatsOnly(bool v) noexcept
         {
-            if constexpr (kCompiledStatsOnly)
+            if constexpr (CompiledStatsOnly())
             {
                 enable_stats_only = v;
             }
@@ -207,7 +209,7 @@ namespace dng::core
 
         void SetFatalOnOOM(bool v) noexcept
         {
-            if constexpr (kCompiledFatalOnOOM)
+            if constexpr (CompiledFatalOnOOM())
             {
                 fatal_on_oom = v;
             }
@@ -220,7 +222,7 @@ namespace dng::core
 
         void SetEnableGuards(bool v) noexcept
         {
-            if constexpr (kCompiledGuards)
+            if constexpr (CompiledGuards())
             {
                 enable_guards = v;
             }
@@ -233,7 +235,7 @@ namespace dng::core
 
         void SetPoisonOnFree(bool v) noexcept
         {
-            if constexpr (kCompiledPoisonOnFree)
+            if constexpr (CompiledPoisonOnFree())
             {
                 poison_on_free = v;
             }
@@ -246,7 +248,7 @@ namespace dng::core
 
         void SetCaptureCallsite(bool v) noexcept
         {
-            if constexpr (kCompiledCaptureCallsite)
+            if constexpr (CompiledCaptureCallsite())
             {
                 capture_callsite = v;
             }
@@ -259,7 +261,7 @@ namespace dng::core
 
         void SetReportOnExit(bool v) noexcept
         {
-            if constexpr (kCompiledReportOnExit)
+            if constexpr (CompiledReportOnExit())
             {
                 report_on_exit = v;
             }
@@ -272,7 +274,7 @@ namespace dng::core
 
         void SetGlobalThreadSafe(bool v) noexcept
         {
-            if constexpr (kCompiledThreadSafe)
+            if constexpr (CompiledThreadSafe())
             {
                 global_thread_safe = v;
             }
@@ -285,7 +287,7 @@ namespace dng::core
 
         void SetGlobalThreadPolicy(int policy) noexcept
         {
-            if constexpr (kCompiledThreadSafe)
+            if constexpr (CompiledThreadSafe())
             {
                 if (policy == 0 || policy == 1)
                 {
@@ -304,6 +306,7 @@ namespace dng::core
         }
     };
 
+#endif // DNG_CORE_MEMORYCONFIG_CONSTANTS_DEFINED
 } // namespace dng::core
 
 // ============================================================================
@@ -343,5 +346,9 @@ namespace dng::core
 // - When CT=0, we log explicit no-ops so users understand why toggles do nothing.
 //
 // ============================================================================
+
+
+
+
 
 
