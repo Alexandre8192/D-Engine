@@ -25,6 +25,7 @@
     <ClInclude Include="Source\Core\Memory\Allocator.hpp" />
     <ClInclude Include="Source\Core\Memory\ArenaAllocator.hpp" />
     <ClInclude Include="Source\Core\Memory\DefaultAllocator.hpp" />
+    <ClInclude Include="Source\Core\Memory\FrameAllocator.hpp" />
     <ClInclude Include="Source\Core\Memory\MemoryConfig.hpp" />
     <ClInclude Include="Source\Core\Memory\OOM.hpp" />
     <ClInclude Include="Source\Core\Memory\PoolAllocator.hpp" />
@@ -131,6 +132,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
       <AdditionalIncludeDirectories>$(ProjectDir)Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <UseStandardPreprocessor>true</UseStandardPreprocessor>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

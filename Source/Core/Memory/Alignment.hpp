@@ -8,17 +8,19 @@
 // - constexpr-friendly helpers (compile-time when possible).
 // - No surprises with signed integers: restrict integral helpers to UNSIGNED.
 // - Well-defined behavior for extreme values (saturation instead of UB).
+// NOTE ABOUT LOGGING:
+//   Most helpers here are constexpr to allow compile-time evaluation. We avoid
+//   emitting logs inside constexpr functions to retain that property. Where
+//   possible (pointer overloads), we add runtime logs.
 // ============================================================================
 
 #include <cstddef>      // std::size_t, std::max_align_t
 #include <cstdint>      // std::uintptr_t
 #include <limits>       // std::numeric_limits
 #include <type_traits>  // std::is_integral_v, std::is_unsigned_v
-#include <cassert>      // assert fallback if engine's assert not available
+#include <cassert>      // assert (kept for constexpr-safe checks)
 
-#ifndef DNG_ASSERT
-#define DNG_ASSERT(cond) assert(cond)
-#endif
+#include "Core/Logger.hpp" // DNG_LOG_*
 
 namespace dng::core
 {
@@ -93,6 +95,7 @@ namespace dng::core
             // so the "next" would overflow -> saturate.
             if (msb >= totalBits - 1)
             {
+                // No logging here (constexpr). The pointer overloads will log when applicable.
                 return HighestPow2();
             }
 
@@ -129,12 +132,6 @@ namespace dng::core
      *  - Result is a power-of-two.
      *  - Result >= alignof(std::max_align_t).
      *  - Result >= 1.
-     *
-     * Why saturation?
-     *  - For extremely large inputs (near SIZE_MAX), the "next" power-of-two
-     *    cannot be represented. Saturating to the largest representable power-of-two
-     *    is a deterministic, portable choice that avoids undefined behavior while
-     *    still honoring the "power-of-two" postcondition.
      */
     [[nodiscard]] constexpr usize NormalizeAlignment(usize alignment) noexcept
     {
@@ -156,14 +153,6 @@ namespace dng::core
     //   We constrain these templates to UNSIGNED integral types to avoid
     //   surprising results with negative values. If you have a signed value,
     //   cast it to an unsigned type (e.g., `usize`) first, then call AlignUp.
-    //
-    //   Example:
-    //       std::ptrdiff_t signedOffset = ...;
-    //       DNG_ASSERT(signedOffset >= 0);
-    //       usize u = static_cast<usize>(signedOffset);
-    //       usize aligned = AlignUp(u, 64);
-    //
-    // This keeps the contract simple and avoids silent wrap-around.
     // -------------------------------------------------------------------------
 
     /**
@@ -187,7 +176,8 @@ namespace dng::core
         // Overflow check before value + mask
         if (detail::add_would_overflow<T>(value, mask))
         {
-            DNG_ASSERT(false && "AlignUp overflow: value + (alignment-1) exceeds max");
+            // Keep assert (works in non-constexpr evaluation); do not use logger here.
+            assert(!"AlignUp overflow: value + (alignment-1) exceeds max");
             return (std::numeric_limits<T>::max)(); // clamp (defined, not UB)
         }
 
@@ -214,23 +204,33 @@ namespace dng::core
     // =========================================================================
     /**
      * @brief Aligns a pointer UP to the next multiple of 'alignment'.
+     *        Emits a runtime log if the pointer was not aligned and had to move.
      */
     [[nodiscard]] inline void* AlignUp(void* ptr, usize alignment) noexcept
     {
         const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(ptr);
         const std::uintptr_t aligned = static_cast<std::uintptr_t>(
             AlignUp<std::uintptr_t>(p, alignment));
+        if (aligned != p)
+        {
+            DNG_LOG_INFO("Alignment", "AlignUp adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
+        }
         return reinterpret_cast<void*>(aligned);
     }
 
     /**
      * @brief Aligns a pointer DOWN to the previous multiple of 'alignment'.
+     *        Emits a runtime log if the pointer was not aligned and had to move.
      */
     [[nodiscard]] inline void* AlignDown(void* ptr, usize alignment) noexcept
     {
         const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(ptr);
         const std::uintptr_t aligned = static_cast<std::uintptr_t>(
             AlignDown<std::uintptr_t>(p, alignment));
+        if (aligned != p)
+        {
+            DNG_LOG_INFO("Alignment", "AlignDown adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
+        }
         return reinterpret_cast<void*>(aligned);
     }
 
@@ -264,11 +264,17 @@ namespace dng::core
 
     /**
      * @brief Checks if a pointer is aligned to 'alignment'.
+     *        Logs at verbose level when misaligned.
      */
     [[nodiscard]] inline bool IsAligned(const void* ptr, usize alignment) noexcept
     {
         const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(ptr);
-        return IsAligned<std::uintptr_t>(p, alignment);
+        const bool ok = IsAligned<std::uintptr_t>(p, alignment);
+        if (!ok)
+        {
+            DNG_LOG_WARNING("Alignment", "Pointer {} is NOT aligned to {}", ptr, (size_t)NormalizeAlignment(alignment));
+        }
+        return ok;
     }
 
     // =========================================================================
