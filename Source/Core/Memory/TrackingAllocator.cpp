@@ -29,11 +29,11 @@
 //
 // ============================================================================
 
-#include "TrackingAllocator.hpp"
+#include "Core/Memory/TrackingAllocator.hpp"
 
 // Ensure memory config/log categories if they exist
-#include "Core/Memory/MemoryConfig.hpp" // DNG_MEM_TRACKING, DNG_MEM_LOG_VERBOSITY, etc. (if available)
-#include "../Logger.hpp"                // Logging macros (if available)
+#include "Core/Memory/MemoryConfig.hpp"     // DNG_MEM_TRACKING, DNG_MEM_LOG_VERBOSITY, etc. (if available)
+#include "Core/Logger.hpp"                  // Logging macros (if available)
 
 // Standard Library
 #include <iostream>
@@ -278,5 +278,3 @@ namespace dng::core {
 #endif // DNG_MEM_TRACKING
 
 } // namespace dng::core
-
-

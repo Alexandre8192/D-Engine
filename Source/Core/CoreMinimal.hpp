@@ -9,17 +9,17 @@
 //
 // Intent: Cross-platform, lightweight, no side effects, no runtime logic.
 
-#include "../Core/Plateform/PlatformDefines.hpp"	// Defines platform flags (Windows, Linux, 64-bit, etc.)
-#include "../Core/Plateform/PlatformCompiler.hpp"	// Detects compiler and defines FORCEINLINE etc.
-#include "../Core/Plateform/PlatformTypes.hpp"		// Platform pointer-size-safe types (SIZE_T, PTRINT, etc.)
-#include "../Core/Plateform/PlatformMacros.hpp"		// Likely, Unlikely, check/assert macros
-#include "../Core/Types.hpp"						// Core typedefs (int32, float32, etc.)
-#include "../Core/Logger.hpp"						// Basic logging system (safe for all modules)
-#include "../Core/Timer.hpp"						// Simple stopwatch and timing utilities
+#include "Core/Platform/PlatformDefines.hpp"	// Defines platform flags (Windows, Linux, 64-bit, etc.)
+#include "Core/Platform/PlatformCompiler.hpp"	// Detects compiler and defines FORCEINLINE etc.
+#include "Core/Platform/PlatformTypes.hpp"		// Platform pointer-size-safe types (SIZE_T, PTRINT, etc.)
+#include "Core/Platform/PlatformMacros.hpp"		// Likely, Unlikely, check/assert macros
+#include "Core/Types.hpp"						// Core typedefs (int32, float32, etc.)
+#include "Core/Logger.hpp"						// Basic logging system (safe for all modules)
+#include "Core/Timer.hpp"						// Simple stopwatch and timing utilities
 
 // Memory subsystem - core utilities only (other allocators are opt-in)
-#include "../Core/Memory/Alignment.hpp"		// Alignment utilities (constexpr, zero dependencies)
-#include "../Core/Memory/Allocator.hpp"		// Core allocator interface and AllocatorRef
+#include "Core/Memory/Alignment.hpp"		// Alignment utilities (constexpr, zero dependencies)
+#include "Core/Memory/Allocator.hpp"		// Core allocator interface and AllocatorRef
 
 // Other includes should be added only if they are minimal and always needed
 

@@ -300,5 +300,3 @@ namespace dng::core
     static_assert(!IsAligned<usize>(14, 8), "14 is not aligned to 8");
 
 } // namespace dng::core
-
-

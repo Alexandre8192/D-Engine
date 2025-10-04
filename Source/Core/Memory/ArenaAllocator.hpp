@@ -231,6 +231,3 @@ public:
     };
 
 } // namespace dng::core
-
-
-

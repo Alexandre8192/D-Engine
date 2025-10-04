@@ -5,9 +5,9 @@
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/Alignment.hpp"
-#include "Core/Memory/OOM.hpp" // OOM policy handling
-#include "Core/Plateform/PlatformDefines.hpp"
-#include "Core/Plateform/PlatformMacros.hpp"
+#include "Core/Memory/OOM.hpp"
+#include "Core/Platform/PlatformDefines.hpp"
+#include "Core/Platform/PlatformMacros.hpp"
 
 // std
 #include <new>        // std::nothrow
@@ -167,6 +167,3 @@ namespace dng::core {
     };
 
 } // namespace dng::core
-
-
-

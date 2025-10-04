@@ -288,5 +288,3 @@ namespace dng::core
     };
 
 } // namespace dng::core
-
-

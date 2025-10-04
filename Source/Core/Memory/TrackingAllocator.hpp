@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Allocator.hpp"
-#include "MemoryConfig.hpp"
+#include "Core/Memory/Allocator.hpp"
+#include "Core/Memory/MemoryConfig.hpp"
 #include <unordered_map>
 #include <atomic>
 #include <mutex>
@@ -428,5 +428,3 @@ namespace dng::core {
         (allocator)->AllocateTagged(size, alignment, DNG_ALLOC_INFO(tag, name))
 
 } // namespace dng::core
-
-

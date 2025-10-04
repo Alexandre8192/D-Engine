@@ -1,7 +1,7 @@
 #pragma once
-#include "../CoreMinimal.hpp"            // Logger + Types + Platform
-#include "Core/Memory/MemoryConfig.hpp"  // compile-time defaults + runtime cfg
-#include <cstdlib>                      // std::abort
+#include "Core/CoreMinimal.hpp"             // Logger + Types + Platform
+#include "Core/Memory/MemoryConfig.hpp"     // compile-time defaults + runtime cfg
+#include <cstdlib>                          // std::abort
 
 // Minimal logging fallbacks (allow usage before logger is included)
 #ifndef DNG_LOG_FATAL
@@ -72,9 +72,3 @@ namespace dng::core {
 // It delegates to the runtime policy (fatal vs non-fatal) via OnAllocFailure().
 #define DNG_MEM_CHECK_OOM(size, align, where) \
     do { ::dng::core::OnAllocFailure((size), (align), (where), __FILE__, __LINE__); } while(0)
-
-
-
-
-
-

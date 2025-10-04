@@ -31,10 +31,10 @@
     <ClInclude Include="Source\Core\Memory\StackAllocator.hpp" />
     <ClInclude Include="Source\Core\Memory\ThreadSafety.hpp" />
     <ClInclude Include="Source\Core\Memory\TrackingAllocator.hpp" />
-    <ClInclude Include="Source\Core\Plateform\PlatformCompiler.hpp" />
-    <ClInclude Include="Source\Core\Plateform\PlatformDefines.hpp" />
-    <ClInclude Include="Source\Core\Plateform\PlatformMacros.hpp" />
-    <ClInclude Include="Source\Core\Plateform\PlatformTypes.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformCompiler.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformDefines.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformMacros.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformTypes.hpp" />
     <ClInclude Include="Source\Core\Timer.hpp" />
     <ClInclude Include="Source\Core\Types.hpp" />
   </ItemGroup>

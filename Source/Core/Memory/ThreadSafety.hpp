@@ -250,5 +250,3 @@ namespace dng::core {
     using ThreadSafePoolAllocator = ThreadSafeAllocator<PoolAllocator>;
 
 } // namespace dng::core
-
-

@@ -22,7 +22,7 @@
     <Filter Include="Source\Core\Memory">
       <UniqueIdentifier>{f4cc87c8-55fa-4854-9f2c-72a320fa5794}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source\Core\Plateform">
+    <Filter Include="Source\Core\Platform">
       <UniqueIdentifier>{65782549-8e68-4d68-9a07-1b1b21297bee}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
@@ -69,17 +69,17 @@
     <ClInclude Include="Source\Core\Memory\TrackingAllocator.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Plateform\PlatformCompiler.hpp">
-      <Filter>Source\Core\Plateform</Filter>
+    <ClInclude Include="Source\Core\Platform\PlatformCompiler.hpp">
+      <Filter>Source\Core\Platform</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Plateform\PlatformDefines.hpp">
-      <Filter>Source\Core\Plateform</Filter>
+    <ClInclude Include="Source\Core\Platform\PlatformDefines.hpp">
+      <Filter>Source\Core\Platform</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Plateform\PlatformMacros.hpp">
-      <Filter>Source\Core\Plateform</Filter>
+    <ClInclude Include="Source\Core\Platform\PlatformMacros.hpp">
+      <Filter>Source\Core\Platform</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Plateform\PlatformTypes.hpp">
-      <Filter>Source\Core\Plateform</Filter>
+    <ClInclude Include="Source\Core\Platform\PlatformTypes.hpp">
+      <Filter>Source\Core\Platform</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
