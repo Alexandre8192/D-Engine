@@ -29,11 +29,14 @@
 //
 // ============================================================================
 
-#include "Core/Memory/TrackingAllocator.hpp"
+#include "TrackingAllocator.hpp"
 
 // Ensure memory config/log categories if they exist
-#include "Core/Memory/MemoryConfig.hpp"     // DNG_MEM_TRACKING, DNG_MEM_LOG_VERBOSITY, etc. (if available)
-#include "Core/Logger.hpp"                  // Logging macros (if available)
+#include "MemoryConfig.hpp"     // DNG_MEM_TRACKING, DNG_MEM_LOG_VERBOSITY, etc. (if available)
+
+#if __has_include("Logger.hpp")
+#include "Logger.hpp"
+#endif
 
 // Standard Library
 #include <iostream>

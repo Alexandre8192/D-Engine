@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Core\CoreMinimal.hpp" />
+    <ClInclude Include="Source\Core\Diagnostics\Check.hpp" />
     <ClInclude Include="Source\Core\Logger.hpp" />
     <ClInclude Include="Source\Core\Memory\Alignment.hpp" />
     <ClInclude Include="Source\Core\Memory\Allocator.hpp" />
@@ -29,6 +30,7 @@
     <ClInclude Include="Source\Core\Memory\MemoryConfig.hpp" />
     <ClInclude Include="Source\Core\Memory\OOM.hpp" />
     <ClInclude Include="Source\Core\Memory\PoolAllocator.hpp" />
+    <ClInclude Include="Source\Core\Memory\SmallObjectAllocator.hpp" />
     <ClInclude Include="Source\Core\Memory\StackAllocator.hpp" />
     <ClInclude Include="Source\Core\Memory\ThreadSafety.hpp" />
     <ClInclude Include="Source\Core\Memory\TrackingAllocator.hpp" />

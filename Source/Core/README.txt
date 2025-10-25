@@ -1,3 +1,5 @@
+[![CI — build-matrix](https://github.com/Alexandre8192/D-Engine/actions/workflows/ci.yml/badge.svg)](https://github.com/Alexandre8192/D-Engine/actions/workflows/ci.yml)
+
 # Core/Platform/ - Platform Layer Overview
 
 This directory contains all platform-related abstractions for D Engine.

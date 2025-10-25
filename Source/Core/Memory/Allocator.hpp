@@ -28,8 +28,8 @@
 #include <memory>       // std::construct_at, std::destroy_at (C++20)
 #include <limits>       // std::numeric_limits
 
-#include "Core/Types.hpp"                // usize, etc.
-#include "Core/Memory/Alignment.hpp"     // NormalizeAlignment(...)
+#include "../../Core/Types.hpp" // usize, etc.
+#include "Alignment.hpp"        // NormalizeAlignment(...)
 
 // Optional debug assert fallback if the engine assert is not available here.
 #ifndef DNG_ASSERT

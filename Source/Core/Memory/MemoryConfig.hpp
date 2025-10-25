@@ -124,6 +124,26 @@
 #   error "DNG_MEM_CAPTURE_CALLSITE must be 0 or 1"
 #endif
 
+// -----------------------------------------------------------------------------
+// New: paranoia/meta header toggle (Dev/Debug-friendly)
+// 0 = store minimal header (rawPtr+magic)  [default]
+// 1 = also store size+align in header      (runtime checks on free/realloc)
+// -----------------------------------------------------------------------------
+#ifndef DNG_MEM_PARANOID_META
+#   define DNG_MEM_PARANOID_META 0
+#endif
+#if (DNG_MEM_PARANOID_META != 0) && (DNG_MEM_PARANOID_META != 1)
+#   error "DNG_MEM_PARANOID_META must be 0 or 1"
+#endif
+
+// -----------------------------------------------------------------------------
+// New: global cap for "reasonable" alignments across all allocators
+// Use a power-of-two to preserve alignment properties. Default: 1 MiB.
+// -----------------------------------------------------------------------------
+#ifndef DNG_MAX_REASONABLE_ALIGNMENT
+#   define DNG_MAX_REASONABLE_ALIGNMENT (1u << 20)
+#endif
+
 // ============================================================================
 // Compile-time "capabilities" view (constexpr booleans)
 // These are the **ground truth** used throughout the engine.

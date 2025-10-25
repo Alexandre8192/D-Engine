@@ -16,7 +16,6 @@
 #include <limits>
 
 namespace dng::core {
-
     /**
      * Default system allocator (platform-agnostic).
      *
@@ -30,16 +29,22 @@ namespace dng::core {
      *  - Single code path, portable, supports any power-of-two alignment.
      *  - No reliance on platform-specific aligned allocation APIs.
      *
-     * Overhead: header is sized & aligned to alignof(std::max_align_t)
-     * (commonly 16 bytes on 64-bit targets).
+     * Overhead:
+     *  - Header is sized & aligned to alignof(std::max_align_t).
+     *  - With DNG_MEM_PARANOID_META=0 (default): rawPtr + magic (minimal).
+     *  - With DNG_MEM_PARANOID_META=1: also stores size+align for runtime checks.
      */
     class DefaultAllocator final : public IAllocator {
     private:
         static constexpr u32 HEADER_MAGIC = 0xD15A110Cu; // "D-alloc" fun magic (hex)
 
         struct alignas(alignof(std::max_align_t)) AllocationHeader {
-            void* rawPtr;     // original pointer returned by ::operator new
-            u32   magic;      // debug guard
+            void* rawPtr;  // original pointer returned by ::operator new
+            u32   magic;   // debug guard
+#if DNG_MEM_PARANOID_META
+            usize size;    // original requested size (post normalization)
+            usize align;   // original requested alignment (normalized)
+#endif
         };
 
         static_assert(sizeof(AllocationHeader) % alignof(std::max_align_t) == 0,
@@ -77,8 +82,8 @@ namespace dng::core {
             alignment = NormalizeAlignment(alignment);
             DNG_ASSERT(IsPowerOfTwo(alignment) && "NormalizeAlignment must produce power-of-two");
 
-            // (Optional guard) treat extremely large alignments as OOM (policy decision).
-            if (alignment > (static_cast<usize>(1) << 20)) { // 1 MiB boundary cap
+            // Global guard: treat extremely large alignments as OOM (policy decision).
+            if (alignment > static_cast<usize>(DNG_MAX_REASONABLE_ALIGNMENT)) {
                 DNG_MEM_CHECK_OOM(size, alignment, "DefaultAllocator::Allocate");
                 return nullptr;
             }
@@ -120,13 +125,17 @@ namespace dng::core {
                 );
             header->rawPtr = raw;
             header->magic = HEADER_MAGIC;
+#if DNG_MEM_PARANOID_META
+            header->size = size;
+            header->align = alignment;
+#endif
 
             DNG_CHECK(IsAligned(userPtr, alignment) && "Returned pointer is not properly aligned");
             return userPtr;
         }
 
         void Deallocate(void* ptr,
-            usize /*size*/ = 0,
+            usize size = 0,
             usize alignment = DEFAULT_ALIGNMENT) noexcept override
         {
             if (!ptr) return;
@@ -142,6 +151,16 @@ namespace dng::core {
 
             // Debug guard: avoid UB if a foreign/corrupted pointer is passed
             DNG_CHECK(IsHeaderValid(header) && "Pointer not owned by DefaultAllocator or corrupted");
+
+#if DNG_MEM_PARANOID_META
+            // In paranoia mode, validate the (size, alignment) contract at runtime.
+            if (IsHeaderValid(header)) {
+                DNG_ASSERT((size == 0 || size == header->size) &&
+                    "Deallocate size mismatch (must equal original allocation size)");
+                DNG_ASSERT(alignment == header->align &&
+                    "Deallocate alignment mismatch (must equal original allocation alignment)");
+            }
+#endif
 
             if (IsHeaderValid(header)) {
                 ::operator delete(header->rawPtr);
@@ -165,5 +184,4 @@ namespace dng::core {
             // Otherwise: return nullptr at call sites
         }
     };
-
 } // namespace dng::core

@@ -25,6 +25,9 @@
     <Filter Include="Source\Core\Platform">
       <UniqueIdentifier>{65782549-8e68-4d68-9a07-1b1b21297bee}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Core\Diagnostics">
+      <UniqueIdentifier>{3537924e-0f22-4c11-91be-df4dedee9b6d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Core\CoreMinimal.hpp">
@@ -82,6 +85,12 @@
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\Memory\FrameAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Diagnostics\Check.hpp">
+      <Filter>Source\Core\Diagnostics</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\SmallObjectAllocator.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
   </ItemGroup>

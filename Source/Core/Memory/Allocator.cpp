@@ -51,9 +51,11 @@
 //   debuggability, even if it feels verbose.
 // ============================================================================
 
-#include "Core/Memory/Allocator.hpp"
-#include "Core/Memory/OOM.hpp"      // DNG_MEM_CHECK_OOM(...) + OOM policy
-#include "Core/Logger.hpp"          // DNG_LOG_INFO/WARNING/ERROR/FATAL
+#include "Allocator.hpp"
+#include "OOM.hpp"      // DNG_MEM_CHECK_OOM(...) + OOM policy
+#if __has_include("Logger.hpp")
+#include "Logger.hpp"   // DNG_LOG_INFO/WARNING/ERROR/FATAL
+#endif
 
 #include <cstring>                  // std::memcpy
 #include <algorithm>                // std::min
