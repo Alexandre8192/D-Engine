@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Core/Memory/Allocator.hpp"
-#include "Core/Memory/MemoryConfig.hpp"
+#include "Allocator.hpp"
+#include "MemoryConfig.hpp"
+#include <array>
 #include <unordered_map>
 #include <atomic>
 #include <mutex>
@@ -140,6 +141,27 @@ namespace dng::core {
             current_bytes.fetch_sub(size);
             current_allocations.fetch_sub(1);
         }
+    };
+
+    // ---
+    // Purpose : Lightweight snapshot view consumed by leak diagnostics helpers.
+    // Contract: Encapsulates the CURRENT allocation footprint (bytes and active
+    //           allocation count) per AllocTag at capture time.
+    // Notes   : Populated by TrackingAllocator::CaptureView using relaxed atomic
+    //           loads so that snapshotting remains a low-overhead operation even
+    //           when the allocator is under contention.
+    // ---
+    struct TrackingSnapshotView
+    {
+        struct Tag
+        {
+            std::size_t bytes{ 0 };
+            std::size_t allocs{ 0 };
+        };
+
+        std::array<Tag, static_cast<std::size_t>(AllocTag::Count)> byTag{};
+        std::size_t totalBytes{ 0 };
+        std::size_t totalAllocs{ 0 };
     };
 
 #if DNG_MEM_TRACKING
@@ -358,6 +380,35 @@ namespace dng::core {
          */
         IAllocator* GetBaseAllocator() const noexcept {
             return m_baseAllocator;
+        }
+
+        // ---
+        // Purpose : Capture an instantaneous per-tag aggregate suitable for
+        //           leak snapshot comparisons.
+        // Contract: Thread-safe; may be called concurrently with Allocate /
+        //           Deallocate. Returns zeros when tracking/statistics support
+        //           is compiled out.
+        // Notes   : Relies solely on atomic counters (no heavy lock) to keep
+        //           the capture path inexpensive even under contention.
+        // ---
+        [[nodiscard]] TrackingSnapshotView CaptureView() const noexcept
+        {
+            TrackingSnapshotView view{};
+
+#if DNG_MEM_TRACKING_ENABLED
+            for (std::size_t i = 0; i < view.byTag.size(); ++i)
+            {
+                const auto& stats = m_stats[i];
+                const std::size_t bytes = stats.current_bytes.load(std::memory_order_relaxed);
+                const std::size_t allocs = stats.current_allocations.load(std::memory_order_relaxed);
+                view.byTag[i].bytes = bytes;
+                view.byTag[i].allocs = allocs;
+                view.totalBytes += bytes;
+                view.totalAllocs += allocs;
+            }
+#endif
+
+            return view;
         }
 
         // Forward declarations for methods implemented in task 7.2
