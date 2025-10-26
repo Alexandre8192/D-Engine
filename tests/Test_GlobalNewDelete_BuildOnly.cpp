@@ -13,7 +13,7 @@
 #include "Core/Memory/GlobalNewDelete.hpp"
 #include "Core/Memory/MemorySystem.hpp"
 
-int main()
+[[maybe_unused]] static int GlobalNewDelete_BuildOnly()
 {
     ::dng::memory::MemorySystem::Init();
 

@@ -1,17 +1,14 @@
 #pragma once
 // ============================================================================
 // D-Engine - Core/Memory/Alignment.hpp
-// Minimal, header-only alignment helpers (constexpr-first, zero heavy deps)
 // ----------------------------------------------------------------------------
-// DESIGN GOALS
-// - A single, easy-to-audit place for alignment policy.
-// - constexpr-friendly helpers (compile-time when possible).
-// - No surprises with signed integers: restrict integral helpers to UNSIGNED.
-// - Well-defined behavior for extreme values (saturation instead of UB).
-// NOTE ABOUT LOGGING:
-//   Most helpers here are constexpr to allow compile-time evaluation. We avoid
-//   emitting logs inside constexpr functions to retain that property. Where
-//   possible (pointer overloads), we add runtime logs.
+// Purpose : Centralize all alignment math (predicate helpers, normalization,
+//           and pointer/integer adjustment) in constexpr-friendly utilities.
+// Contract: Every allocator and caller must route alignment math through these
+//           helpers to guarantee power-of-two results >= alignof(max_align_t).
+// Notes   : Integer overloads are constrained to unsigned types; pointer
+//           variants emit logger diagnostics when adjustments occur. Saturation
+//           avoids UB on extreme inputs to keep behavior deterministic.
 // ============================================================================
 
 #include <cstddef>      // std::size_t, std::max_align_t
@@ -253,11 +250,10 @@ namespace dng::core
     /**
      * @brief Checks if an UNSIGNED integer value is aligned to 'alignment'.
      */
-    template <class T>
+    template <class T,
+              std::enable_if_t<std::is_integral_v<T> && std::is_unsigned_v<T>, int> = 0>
     [[nodiscard]] constexpr bool IsAligned(T value, usize alignment) noexcept
     {
-        static_assert(std::is_integral_v<T>, "IsAligned<T>: T must be integral");
-        static_assert(std::is_unsigned_v<T>, "IsAligned<T>: T must be UNSIGNED");
         const T a = static_cast<T>(NormalizeAlignment(alignment));
         return (value & (a - T{ 1 })) == T{ 0 };
     }

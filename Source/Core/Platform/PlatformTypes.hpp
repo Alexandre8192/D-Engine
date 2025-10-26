@@ -29,8 +29,11 @@ using uint64 = std::uint64_t;
 // -----------------------------
 using UPTRINT  = std::uintptr_t; // Unsigned integer with pointer size
 using PTRINT   = std::intptr_t;  // Signed integer with pointer size
+
+#if !DNG_PLATFORM_WINDOWS
 using SIZE_T   = std::size_t;    // Unsigned size type (matches sizeof)
 using SSIZE_T  = std::ptrdiff_t; // Signed size type
+#endif
 
 // -----------------------------
 // Small bool & char aliases (optional)
@@ -75,8 +78,8 @@ static_assert(sizeof(int64) == 8, "int64 must be 8 bytes");
 
 static_assert(sizeof(UPTRINT) == sizeof(void*), "UPTRINT must match pointer size");
 static_assert(sizeof(PTRINT)  == sizeof(void*), "PTRINT must match pointer size");
-static_assert(sizeof(SIZE_T)  == sizeof(void*), "SIZE_T must match pointer size or platform ABI");
-static_assert(sizeof(SSIZE_T) == sizeof(void*), "SSIZE_T must match pointer size or platform ABI");
+static_assert(sizeof(std::size_t)  == sizeof(void*), "std::size_t must match pointer size or platform ABI");
+static_assert(sizeof(std::ptrdiff_t) == sizeof(void*), "std::ptrdiff_t must match pointer size or platform ABI");
 
 #if DNG_PLATFORM_64BITS
 static_assert(sizeof(void*) == 8, "64-bit platform must have 8-byte pointers");

@@ -22,6 +22,17 @@ using uint16 = std::uint16_t;
 using uint32 = std::uint32_t;
 using uint64 = std::uint64_t;
 
+// ---- Short aliases (i*/u* pattern) ----
+using i8  = int8;
+using i16 = int16;
+using i32 = int32;
+using i64 = int64;
+
+using u8  = uint8;
+using u16 = uint16;
+using u32 = uint32;
+using u64 = uint64;
+
 // ---- Floating point ----
 using float32 = float;
 using float64 = double;

@@ -1,77 +1,49 @@
 #pragma once
+// ============================================================================
+// D-Engine - Core/Memory/PoolAllocator.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Serve fixed-size allocations with O(1) free-list performance while
+//           respecting the engine-wide allocator contract. Ideal for hot-path
+//           systems that repeatedly request equally-sized objects (e.g., ECS
+//           components, job descriptors).
+// Contract: Not thread-safe. Blocks are homogeneous: Allocate() succeeds only
+//           when `size == GetBlockSize()` and the caller provides an alignment
+//           that does not exceed GetBlockAlignment(). Deallocate() must receive
+//           the original (size, alignment). Exhaustion routes through
+//           DNG_MEM_CHECK_OOM so policy toggles remain in control.
+// Notes   : The allocator can either own its backing store (via a parent
+//           allocator) or wrap an externally managed buffer. Free-list nodes
+//           are embedded in freed blocks to avoid extra metadata.
+// ============================================================================
 
+#include "Core/Diagnostics/Check.hpp"
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/Alignment.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/OOM.hpp"
-#include <cstdint>   // std::uintptr_t, std::uint8_t
-#include <cstddef>   // std::size_t, std::max_align_t
-#include <climits>   // SIZE_MAX
-#include <limits>    // std::numeric_limits
-#include <new>       // std::nothrow
+#include "Core/Platform/PlatformCompiler.hpp"
 
-// Temporary logging/assert fallbacks (ASCII-only, no-ops if engine logger not included yet)
-
-#ifndef DNG_LOG_ERROR
-
-#define DNG_LOG_ERROR(category, msg, ...)   ((void)0)
-
-#endif
-
-#ifndef DNG_LOG_WARNING
-
-#define DNG_LOG_WARNING(category, msg, ...) ((void)0)
-
-#endif
-
-#ifndef DNG_LOG_FATAL
-
-#define DNG_LOG_FATAL(category, msg, ...)   ((void)0)
-
-#endif
-
-#ifndef DNG_CHECK
-
-#define DNG_CHECK(cond) do { if(!(cond)) { /* optional breakpoint in debug */ } } while(0)
-
-#endif
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 
 namespace dng::core {
 
-    /**
-
-     * Fixed-size block pool allocator.
-
-     *
-
-     * Contract:
-
-     *  - Allocate(size, alignment) succeeds only if:
-
-     *      * size == GetBlockSize()
-
-     *      * alignment <= GetBlockAlignment() and is a power-of-two (after normalization)
-
-     *    Otherwise: debug assert, return nullptr.
-
-     *  - Deallocate(ptr, size, alignment) requires the exact same (size, alignment)
-
-     *    as the original allocation (after normalization). On mismatch: debug assert,
-
-     *    pointer is ignored (no UB is triggered intentionally).
-
-     *
-
-     * Notes:
-
-     *  - The pool manages a contiguous backing store of N blocks.
-
-     *  - Free-list is embedded in blocks (singly linked).
-
-     *  - No per-allocation headers; block size is constant.
-
-     */
-
+    // ------------------------------------------------------------------------
+    // PoolAllocator
+    // ------------------------------------------------------------------------
+    // Purpose : Provide fixed-size allocations backed by an intrusive
+    //           free-list for predictable latency.
+    // Contract: Not thread-safe. Allocate() succeeds only when `size` matches
+    //           `GetBlockSize()` and `alignment` (normalized) is <=
+    //           `GetBlockAlignment()`. Deallocate() requires the same
+    //           `(size, alignment)` pair; mismatches are diagnosed in debug
+    //           builds but intentionally ignored in release to avoid UB. When
+    //           the pool exhausts, DNG_MEM_CHECK_OOM fires.
+    // Notes   : Free nodes reuse the payload storage (no extra headers).
+    //           Blocks can come from an owning parent allocator or an external
+    //           user-provided buffer.
+    // ------------------------------------------------------------------------
     class PoolAllocator : public IAllocator {
 
     private:

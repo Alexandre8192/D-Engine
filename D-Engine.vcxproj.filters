@@ -31,6 +31,9 @@
     <Filter Include="Source\Core\Containers">
       <UniqueIdentifier>{5a2c35f2-669e-4f4a-8fbb-47ec6c7a4582}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Tests">
+      <UniqueIdentifier>{3671bbbe-cbe0-4ab4-84e1-08ff95bc3746}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Core\CoreMinimal.hpp">
@@ -114,6 +117,9 @@
     <ClInclude Include="Source\Core\Memory\PageAllocator.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Diagnostics\Bench.hpp">
+      <Filter>Source\Core\Diagnostics</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp">
@@ -124,6 +130,15 @@
     </ClCompile>
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp">
       <Filter>Source\Core\Memory</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Test_BenchDriver.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Test_GlobalNewDelete_BuildOnly.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Test_StdAliases_BuildOnly.cpp">
+      <Filter>Source\Tests</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

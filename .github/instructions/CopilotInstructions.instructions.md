@@ -1,89 +1,113 @@
+## D-Engine — Copilot / AI contributor guidance
+**Purpose for AI Contributors (Copilot / GPT):**
+You are contributing to **D-Engine**, a modern, header-first, STL-inspired C++23/26 engine built **for programmers only** — no editor layer, no scripting layer, no Blueprint-style abstraction.
+The mission is to create a **transparent, deterministic, and ridiculously fast** codebase that is both educational and production-ready.  
+Every line must *teach* something about modern C++ while remaining *runnable on a toaster*.
+
 ---
-applyTo: '**'
+
+### Core Writing Rules
+Comment **everything**.
+Each struct, template, or function must include:
+- **Purpose:** What the code does, in plain and direct English.
+- **Contract:** Inputs, outputs, ownership rules, thread-safety guarantees.
+- **Notes:** Edge cases, rationale, trade-offs, and potential pitfalls.
+- When in doubt, **over-comment**.
+- Write as if explaining to advanced C++ developers reading the code for learning purposes.
+- Always justify *why* a choice was made, not just *how* it works.
+
 ---
-# GitHub Copilot Instructions for D-Engine
-> **Context:**
-> You are assisting in the development of **D-Engine**, a modern, modular, lightweight C++23/26 game engine written entirely for programmers — with no Blueprint or visual layer.
-> The engine is **header-first**, **STL-inspired**, and **cross-platform**.
-> Each module is designed to be **self-contained, dependency-minimal**, and **constexpr-friendly** wherever possible.
-> The codebase is documented in English and favors **clarity, explicit contracts, and deep commentary** over conciseness.
+
+### Coding Conventions
+- Use the `dng::` namespace and `DNG_` macro prefix.
+- Apply `[[nodiscard]]`, `constexpr`, and `noexcept` by default.
+- Use `NormalizeAlignment`, `AlignUp`, and `IsPowerOfTwo` from `Alignment.hpp` — never re-implement alignment math.
+- Guard risky or platform-dependent code with `DNG_CHECK` or `DNG_ASSERT`.
+- Headers must be side-effect-free and include only what they need.
+- Never introduce new STL or third-party dependencies unless unavoidable and approved.
 
 ---
 
 ### Design Philosophy
-
-* **Zero hidden behavior:** All code should be easy to audit. No magic macros or hidden global states.
-* **Compile-time safety first:** Prefer `constexpr`, `static_assert`, and templates over runtime checks when possible.
-* **Minimalism:** Include only what is strictly necessary — no third-party dependencies, no dynamic polymorphism unless essential.
-* **Header-only preference:** `.hpp`/`.inl` structure; `.cpp` used only when separation is unavoidable.
-* **Cross-platform correctness:** Must compile cleanly on Windows, Linux, and macOS (MSVC, Clang, GCC).
-* **Performance by design:** Memory alignment, cache locality, and predictable allocation paths are core principles.
-* **Explicit contracts:** Every allocator, type, and function clearly documents ownership, lifetime, and thread-safety expectations.
+- **Header-first, dependency-free.** Every header must compile standalone.
+- **Predictable memory behavior.** The same (size, alignment) must be passed to free as was passed to alloc.
+- **Explicit thread-safety.** Every API must declare whether it’s thread-safe.
+- **Compile-time validation.** Prefer `static_assert` over runtime guards.
+- **Transparency over brevity.** Readability beats terseness. Nothing should feel “magical”.
 
 ---
 
-### Current State
-
-* **Core subsystem implemented:**
-
-  * Platform detection (`PlatformDefines`, `PlatformTypes`, `PlatformCompiler`, `PlatformMacros`)
-  * Diagnostics (`Check.hpp`, logging via `Logger.hpp`)
-  * Memory subsystem (Alignment, Allocator hierarchy, Arena/Stack/Pool/Frame/Tracking allocators, Thread-Safety policies, OOM handling)
-  * Core type system (`Types.hpp`, `CoreMinimal.hpp`)
-
-* **In progress / to do:**
-
-  * Expand virtual memory layer (page reservation / commit).
-  * Add per-thread allocators and caching.
-  * Build higher-level systems (Containers, ECS, Math, JobSystem, etc.).
-  * Introduce compile-time reflection and lightweight serialization.
-  * Integrate unit tests and benchmarks.
+### Performance Philosophy
+- **Zero abstraction overhead.** Favor direct data access, contiguous layouts, and predictable branching.
+- **Allocator-driven design.** All engine containers route through custom allocators (`AllocatorAdapter`, `ArenaAllocator`, `TrackingAllocator`, etc.).
+- **Cache locality > O-notation purity.**
+- **No hidden runtime.** No garbage collector, no reflection system, no virtualized dispatch unless explicit.
+- **Runs on toasters.** Performance is a first-class design constraint — every subsystem must justify its memory and CPU cost.
 
 ---
 
-### Instructions to Copilot
-
-1. **Always produce extremely detailed comments.**
-   Every function, struct, and template must have descriptive headers and inline explanations of intent, rationale, and edge cases.
-   Err on the side of *too many comments*, not too few.
-
-2. **Maintain style consistency.**
-
-   * Use `// ---` and `// ===` comment separators.
-   * Function headers should include **Purpose, Contract, and Notes**.
-   * All namespaces, types, and macros start with `dng::` or `DNG_`.
-
-3. **Follow D-Engine naming & macro conventions.**
-
-   * Macros: `DNG_*`
-   * Core types: `usize`, `uint32`, etc.
-   * Prefer `[[nodiscard]]`, `noexcept`, and `constexpr` where reasonable.
-   * Use `NormalizeAlignment`, `DNG_CHECK`, and `DNG_ASSERT` for safety checks.
-
-4. **Never introduce external dependencies.**
-   Only use standard headers (`<memory>`, `<atomic>`, `<mutex>`, `<format>`, etc.) or already-existing D-Engine headers.
-
-5. **When writing new code:**
-
-   * Document every design choice.
-   * Prefer readability and traceability over micro-optimization.
-   * Make every function self-contained and audit-friendly.
-   * Add `static_assert`s for compile-time contracts.
-   * Add rich logs (`DNG_LOG_INFO/WARNING/ERROR`) where meaningful.
-
-6. **When editing existing code:**
-
-   * Preserve the file’s visual formatting and comment banners.
-   * Add clarifying comments explaining subtle logic, even if redundant.
-   * Ensure all edge cases (alignment, overflow, null pointers, thread safety) are documented.
+### Testing and Examples
+- No runtime unit-test framework yet.
+- Add **compile-time smoke tests** in `tests/` for every new header and comment what each validates.
+- Prefer **constexpr examples** or minimal runtime snippets illustrating usage.
+- Manual perf/bench harnesses are acceptable if header-only.
 
 ---
 
-### 🗣️ Tone & Output Expectations
-
-> Speak in a **technical but educational** tone, explaining *why* as much as *what*.
-> Pretend you’re teaching advanced C++ developers reading the D-Engine source for the first time.
-> When unsure, favor verbosity and extra context.
+### Reference Architecture
+- **Big Picture:** Header-first, STL-inspired C++23/26 engine; almost all code lives in headers under `Source/Core/**`.  
+  `.cpp` files are reserved for unavoidable translation-unit separation (e.g., global `new/delete` routing).
+- **Core Entry Point:** `Source/Core/CoreMinimal.hpp` aggregates the always-safe headers  
+  (platform flags, types, logging, timer, alignment, allocator).
+- **Platform Layer:** `Source/Core/Platform/{PlatformDefines,PlatformCompiler,PlatformTypes,PlatformMacros}.hpp`  
+  contain OS/arch/compiler detection and typedefs. Never include runtime code there.
+- **Diagnostics:**  
+  - `Diagnostics/Check.hpp` → defines `DNG_CHECK` / `DNG_VERIFY` (no-op in release).  
+  - `Logger.hpp` → C++23 `std::print`-based backend + `DNG_ASSERT`.  
+  - Keep lightweight stub macros so headers stay include-safe without hard deps.
+- **Memory System:**  
+  - `Allocator.hpp` defines `IAllocator` and `AllocatorRef`.  
+  - All allocators normalize alignment and obey the “same (size, alignment) on free” rule.  
+  - Use `DNG_MEM_CHECK_OOM` and `DNG_ASSERT` for diagnostics.  
+  - Examples: `DefaultAllocator` (system), `ArenaAllocator` (bump/marker),  
+    `StackAllocator` (LIFO markers), `TrackingAllocator` (stats/leak tracking).
+- **Configuration:** `MemoryConfig.hpp` centralizes toggles like  
+  `DNG_MEM_TRACKING`, `DNG_MEM_FATAL_ON_OOM`, `DNG_MEM_PARANOID_META`, `DNG_MAX_REASONABLE_ALIGNMENT`.  
+  Prefer compile-time constants over runtime flags.
+- **Threading Policy:** `ThreadSafety.hpp` defines the mutex wrappers and compile-time policies (`DNG_MEM_THREAD_SAFE`, `DNG_MEM_THREAD_POLICY`).
+- **Logging:** Prefer `DNG_LOG_*("Memory", ...)`-style macros. Guard expensive formatting behind `Logger::IsEnabled()`.
+- **Allocator Patterns:** `AllocatorRef::New/NewArray` guard overflows and respect type alignment.  
+  `StackAllocator` intentionally ignores `Deallocate()` — free via markers only.
 
 ---
-> **End of prompt.**
+
+### Include & Build Discipline
+- Use engine-absolute includes (`"Core/Memory/Allocator.hpp"`).
+- Keep headers self-contained and light; avoid transitive includes.
+- Primary build target: **MSVC 2022** via `D-Engine.sln`.
+msbuild "$PWD\D-Engine.sln" /p:Configuration=Debug /p:Platform=x64
+- Must compile cleanly in **Debug** and **Release** on **MSVC**, **Clang**, and **GCC**.
+- No platform-specific behavior unless wrapped in `#if DNG_PLATFORM_*`.
+
+---
+
+### Future Subsystems (when ready)
+- **FrameAllocator:** transient per-frame memory rings.
+- **Job System:** lock-free work-stealing with allocator tagging.
+- **Math Library:** SIMD-aware vectors/matrices/quaternions.
+- **Bench Harness:** header-only micro-benchmark layer.
+- **flat_map / small_vector:** cache-friendly containers built atop `AllocatorAdapter`.
+
+---
+
+### In Short
+Copilot must behave like a **C++ instructor building a performance-oriented engine.**
+Every contribution must:
+1. Teach and justify design choices.  
+2. Respect deterministic memory and threading policies.  
+3. Favor raw performance over syntactic sugar.  
+4. Remain transparent, auditable, and self-contained.
+
+---
+
+**End of file**

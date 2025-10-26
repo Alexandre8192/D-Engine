@@ -1,5 +1,17 @@
 #pragma once
+// ============================================================================
+// D-Engine - Core/Memory/StackAllocator.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Implement a strict LIFO allocator on top of `ArenaAllocator`, using
+//           markers to guarantee constant-time pop/rewind.
+// Contract: All pushes normalise alignment through the arena. Callers MUST free
+//           via `Pop(marker)` (thread-affine) or `Reset()`; `Deallocate()` is a
+//           documented no-op preserved only for the `IAllocator` interface.
+// Notes   : Not thread-safe. Debug builds maintain a marker stack to validate
+//           LIFO discipline and emit diagnostics on misuse.
+// ============================================================================
 
+#include "Core/Types.hpp"
 #include "Core/Memory/ArenaAllocator.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/OOM.hpp"   // Not used directly here if Arena handles OOM, but safe to include
@@ -60,13 +72,13 @@ namespace dng::core {
     public:
         StackMarker() noexcept = default;
 
-        bool IsValid() const noexcept {
+        [[nodiscard]] bool IsValid() const noexcept {
             return m_arenaMarker.IsValid() && m_stackIndex != SIZE_MAX;
         }
 
-        usize GetOffset() const noexcept { return m_arenaMarker.GetOffset(); }
-        usize GetStackIndex() const noexcept { return m_stackIndex; }
-        const ArenaMarker& GetArenaMarker() const noexcept { return m_arenaMarker; }
+        [[nodiscard]] usize GetOffset() const noexcept { return m_arenaMarker.GetOffset(); }
+        [[nodiscard]] usize GetStackIndex() const noexcept { return m_stackIndex; }
+        [[nodiscard]] const ArenaMarker& GetArenaMarker() const noexcept { return m_arenaMarker; }
     };
 
     class StackAllocator : public ArenaAllocator {
@@ -261,7 +273,7 @@ namespace dng::core {
         /**
          * @brief Returns current depth (Debug). In Release returns 0.
          */
-        usize GetStackDepth() const noexcept {
+        [[nodiscard]] usize GetStackDepth() const noexcept {
 #ifndef NDEBUG
             return m_markerStack.get_size();
 #else
@@ -289,6 +301,7 @@ namespace dng::core {
             DNG_LOG_FATAL("Memory", "StackAllocator: Deallocate() is not supported. Use Pop(marker) or Reset().");
             assert(false && "StackAllocator: Deallocate() is not supported. Use Pop(marker) or Reset().");
 #else
+            // Marker-only free policy: Deallocate() intentionally does nothing and documents the correct usage path.
             (void)ptr;
 #ifndef NDEBUG
             DNG_LOG_WARNING("Memory", "StackAllocator::Deallocate() is a no-op. Use Pop(marker) or Reset().");

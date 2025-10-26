@@ -1,44 +1,26 @@
 #pragma once
-
-// D-Engine - FrameAllocator (Linear/Scratch per frame)
-// ----------------------------------------------------
-// A fast, bump-pointer allocator intended for short-lived, per-frame allocations.
-// Release strategy: one-shot Reset() typically called at EndFrame().
-//
-// Design goals
-//  - Header-only, zero deps besides CoreMinimal subset.
-//  - Strict alignment guarantees via NormalizeAlignment().
-//  - No implicit synchronization (single-producer by default).
-//  - Configurable OOM policy (return nullptr vs fail fast via OOM.hpp policy).
-//  - Mark/rewind support for manual LIFO scopes.
-//  - Optional debug fills & guard knobs (cheap in Release).
-//
-// Non-goals (for now)
-//  - Multi-producer contention elimination (use a per-thread instance instead).
-//  - Automatic overflow chaining to a backing allocator (kept as TODO).
-//  - Page reservation/commit (will be provided by VirtualMemory layer later).
-//
-// Typical usage
-//  FrameAllocator frame(mem, size);
-//  // Per frame
-//  {
-//      auto* tmp = frame.Allocate(bytes, alignof(T));
-//      // ... use tmp temporaries ...
-//      frame.Reset(); // free all per-frame allocations
-//  }
-//
-//  // Scoped LIFO block
-//  {
-//      auto m = frame.GetMarker();
-//      void* a = frame.Allocate(128);
-//      void* b = frame.Allocate(64);
-//      frame.Rewind(m); // frees b then a in one shot
-//  }
+// ============================================================================
+// D-Engine - Core/Memory/FrameAllocator.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Provide a lightweight bump allocator for transient, per-frame
+//           workloads where allocations are bulk-released via Reset() or
+//           markers. Designed for zero abstraction overhead in hot paths.
+// Contract: Header-only and single-threaded by default; callers must normalize
+//           synchronization at a higher layer (e.g., per-thread instances).
+//           All Allocate() calls normalize alignment via NormalizeAlignment().
+//           Deallocate() is a documented no-op—memory is reclaimed only by
+//           Reset() / Rewind(marker). Optional poison fills are guarded by
+//           FrameAllocatorConfig and off by default in Release builds.
+// Notes   : Integrates with the wider allocator ecosystem by inheriting
+//           IAllocator so it can be wrapped (e.g., Tracking/Guard). Reset()
+//           forms the natural end-of-frame barrier.
+// ============================================================================
 
 #include "Core/Types.hpp"
 #include "Core/Memory/Alignment.hpp"    // NormalizeAlignment()
 #include "Core/Memory/MemoryConfig.hpp" // DNG_MEM_* knobs
 #include "Core/Memory/Allocator.hpp"    // IAllocator (for interface compatibility)
+#include "Core/Platform/PlatformCompiler.hpp"
 #include "Core/Platform/PlatformDefines.hpp"
 
 #include <cstddef>
@@ -59,12 +41,25 @@
 
 namespace dng::core {
 
-    /** Lightweight marker capturing the current bump offset. */
+    // ------------------------------------------------------------------------
+    // FrameMarker
+    // ------------------------------------------------------------------------
+    // Purpose : Capture the allocator offset so clients can perform scoped
+    //           rewinds without freeing each block individually.
+    // Contract: Markers are only valid with the allocator that created them.
+    //           Thread affinity follows the owning allocator instance.
+    // Notes   : Offset is stored as an absolute byte index from mBegin.
     struct FrameMarker {
         usize Offset{ 0 };
     };
 
-    /** Configuration flags for FrameAllocator behavior. */
+    // ------------------------------------------------------------------------
+    // FrameAllocatorConfig
+    // ------------------------------------------------------------------------
+    // Purpose : Capture optional diagnostics behaviour (return-null vs fatal
+    //           on OOM, poison buffers on Reset/Rewind).
+    // Contract: Safe to copy/compare trivially; no runtime allocations.
+    // Notes   : Defaults favour benign behaviour (null on OOM, no poison).
     struct FrameAllocatorConfig {
         // If true, Allocate() may return nullptr on OOM (caller must handle).
         // If false, triggers the engine OOM policy defined in OOM.hpp.
@@ -82,6 +77,18 @@ namespace dng::core {
      *  - This allocator DOES NOT own the backing buffer; you pass it in.
      *  - Integration with a VirtualMemory layer or a parent IAllocator can come later.
      */
+    // ------------------------------------------------------------------------
+    // FrameAllocator
+    // ------------------------------------------------------------------------
+    // Purpose : Linear allocator for transient workloads (frame or scope
+    //           lifetime) with optional marker/rewind support.
+    // Contract: Not thread-safe. Allocate() normalizes alignment, honours the
+    //           bReturnNullOnOOM toggle, and updates the bump pointer in O(1).
+    //           Deallocate() intentionally does nothing; Reset()/Rewind() are
+    //           the only reclamation mechanisms.
+    // Notes   : Backing storage is caller-owned. Future integration with a
+    //           virtual-memory layer can be layered on top without changing the
+    //           contract.
     class FrameAllocator final : public IAllocator {
     public:
         FrameAllocator(void* backingMemory, usize capacityBytes, FrameAllocatorConfig cfg = {}) noexcept
@@ -133,7 +140,7 @@ namespace dng::core {
         }
 
         void Deallocate(void* ptr, usize /*size*/, usize /*alignment*/) noexcept override {
-			// Intentionally a no-op. FrameAllocator frees massively on Reset()/Rewind().
+            // Intentionally a no-op. FrameAllocator frees en masse via Reset/Rewind.
             (void)ptr;
         }
 
@@ -151,7 +158,7 @@ namespace dng::core {
         }
 
         // Frame-specific API -------------------------------------------------------------------
-        /** Free ALL allocations done since last Reset()/construction. */
+    /** Free ALL allocations done since last Reset()/construction. */
         void Reset() noexcept {
             if (mConfig.bDebugPoisonOnReset) {
                 // Poison only the used range for visibility in tools
@@ -160,13 +167,13 @@ namespace dng::core {
             mPtr = mBegin;
         }
 
-        /** Capture current bump offset to allow LIFO rewind. */
-        [[nodiscard]] FrameMarker GetMarker() const noexcept {
+    /** Capture current bump offset to allow LIFO rewind. */
+    [[nodiscard]] FrameMarker GetMarker() const noexcept {
             return FrameMarker{ static_cast<usize>(mPtr - mBegin) };
         }
 
-        /** Rewind to a previously captured marker. */
-        void Rewind(FrameMarker marker) noexcept {
+    /** Rewind to a previously captured marker. */
+    void Rewind(FrameMarker marker) noexcept {
             u8* target = mBegin + marker.Offset;
             if (mConfig.bDebugPoisonOnReset && target < mPtr) {
                 std::memset(target, mConfig.DebugPoisonByte, static_cast<size_t>(mPtr - target));
@@ -221,8 +228,15 @@ namespace dng::core {
     };
 
     // -----------------------------------------------------------------------------------------
-    // Optional: minimal thread-local wrapper (one allocator per thread).
-    // Create once per thread at startup or on first use, Reset() at EndFrame per thread.
+    // ThreadLocalFrameAllocator
+    // -----------------------------------------------------------------------------------------
+    // Purpose : Provide a convenience wrapper that owns a FrameAllocator per
+    //           thread so callers can avoid synchronisation entirely.
+    // Contract: Construction forwards directly to FrameAllocator; Reset() must
+    //           be invoked by the owning thread at the end of its frame. No
+    //           cross-thread access is permitted.
+    // Notes   : Acts as a minimal façade; more elaborate policies (e.g.,
+    //           pooling) can layer on top.
     class ThreadLocalFrameAllocator final {
     public:
         ThreadLocalFrameAllocator(void* backing, usize bytes, FrameAllocatorConfig cfg = {}) noexcept

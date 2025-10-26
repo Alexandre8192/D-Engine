@@ -45,6 +45,9 @@ namespace dng
 {
 namespace memory
 {
+    using ::dng::core::AllocatorRef;
+    using ::dng::core::MemoryConfig;
+
     namespace detail
     {
         // ---------------------------------------------------------------------
@@ -140,30 +143,39 @@ namespace memory
         {
             if (globals.gameplayArena)
             {
+                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY,
+                    "DestroyGlobals: destroying gameplay arena (ptr={}, capacity={}, valid={})",
+                    static_cast<const void*>(globals.gameplayArena),
+                    static_cast<unsigned long long>(globals.gameplayArena->GetCapacity()),
+                    globals.gameplayArena->IsValid() ? "true" : "false");
                 std::destroy_at(globals.gameplayArena);
                 globals.gameplayArena = nullptr;
             }
 
             if (globals.audioArena)
             {
+                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying audio arena");
                 std::destroy_at(globals.audioArena);
                 globals.audioArena = nullptr;
             }
 
             if (globals.rendererArena)
             {
+                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying renderer arena");
                 std::destroy_at(globals.rendererArena);
                 globals.rendererArena = nullptr;
             }
 
             if (globals.smallObjectAllocator)
             {
+                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying small object allocator");
                 std::destroy_at(globals.smallObjectAllocator);
                 globals.smallObjectAllocator = nullptr;
             }
 
             if (globals.guardAllocator)
             {
+                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying guard allocator");
                 std::destroy_at(globals.guardAllocator);
                 globals.guardAllocator = nullptr;
             }
@@ -171,14 +183,17 @@ namespace memory
             if (globals.trackingAllocator)
             {
             #if DNG_MEM_TRACKING
+                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: reporting leaks");
                 globals.trackingAllocator->ReportLeaks();
             #endif
+                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying tracking allocator");
                 std::destroy_at(globals.trackingAllocator);
                 globals.trackingAllocator = nullptr;
             }
 
             if (globals.defaultAllocator)
             {
+                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying default allocator");
                 std::destroy_at(globals.defaultAllocator);
                 globals.defaultAllocator = nullptr;
             }
@@ -221,8 +236,6 @@ namespace memory
 
     } // namespace detail
 
-    using MemoryConfig = core::MemoryConfig;
-
     // -------------------------------------------------------------------------
     // MemorySystem
     // -------------------------------------------------------------------------
@@ -256,7 +269,7 @@ namespace memory
             auto* effectiveParent = static_cast<::dng::core::IAllocator*>(globals.trackingAllocator);
 #endif
 
-            SmallObjectConfig smallCfg{};
+            ::dng::core::SmallObjectConfig smallCfg{};
             smallCfg.ReturnNullOnOOM = !globals.activeConfig.fatal_on_oom;
             globals.smallObjectAllocator = new (globals.smallObjectStorage) detail::SmallObjectAllocator(effectiveParent, smallCfg);
 
@@ -270,14 +283,16 @@ namespace memory
                 "MemorySystem initialized (Tracking={}, ThreadSafe={})",
                 globals.activeConfig.enable_tracking ? "true" : "false",
                 globals.activeConfig.global_thread_safe ? "true" : "false");
+            constexpr const char* kGuardState =
+#if DNG_MEM_GUARDS
+                "ENABLED";
+#else
+                "DISABLED";
+#endif
+
             DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY,
                 "MemorySystem: GuardAllocator {}",
-#if DNG_MEM_GUARDS
-                "ENABLED"
-#else
-                "DISABLED"
-#endif
-            );
+                kGuardState);
 
             detail::AttachThreadStateUnlocked(globals);
         }
