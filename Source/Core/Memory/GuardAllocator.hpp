@@ -264,13 +264,16 @@ namespace memory
                     static_cast<unsigned long long>(alignment));
             }
 
+            const detail::usize commitSize = header->commitSize;
             auto* frontRedzoneBegin = commitBasePtr + detail::kHeaderStorage;
             const detail::usize frontRedzoneBytes = (header->frontPadding > detail::kHeaderStorage)
                 ? (header->frontPadding - detail::kHeaderStorage)
                 : 0;
             auto* userPtr = commitBasePtr + header->frontPadding;
             auto* backRedzoneBegin = userPtr + header->requestedSize;
-            auto* commitEnd = commitBasePtr + header->commitSize;
+            auto* commitEnd = commitBasePtr + commitSize;
+            void* reservedBase = header->reservedBase;
+            const detail::usize reservedSize = header->reservedSize;
 
             DNG_ASSERT(frontRedzoneBytes >= detail::kRedzoneBytes);
             DNG_ASSERT(commitEnd >= backRedzoneBegin + detail::kRedzoneBytes);
@@ -293,14 +296,12 @@ namespace memory
 
             // Flip the committed pages to PAGE_NOACCESS prior to release so any
             // stale pointers fault immediately, then return the reservation.
-            for (detail::usize offset = 0; offset < header->commitSize; offset += pageSize)
+            header->magic = 0; // poison header before guarding pages; touches occur while page RW.
+
+            for (detail::usize offset = 0; offset < commitSize; offset += pageSize)
             {
                 GuardPage(commitBasePtr + offset);
             }
-
-            void* reservedBase = header->reservedBase;
-            const detail::usize reservedSize = header->reservedSize;
-            header->magic = 0; // poison magic to catch double frees.
 
             Release(reservedBase, reservedSize);
 #endif

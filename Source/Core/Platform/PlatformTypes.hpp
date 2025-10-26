@@ -33,14 +33,6 @@ using SIZE_T   = std::size_t;    // Unsigned size type (matches sizeof)
 using SSIZE_T  = std::ptrdiff_t; // Signed size type
 
 // -----------------------------
-// Small bool & char aliases (optional)
-// -----------------------------
-using bool8  = uint8;     // Compact 8-bit boolean for serialization/binary blobs
-using char8  = char;      // UTF-8 code units; use std::u8string if you prefer strong typing
-using char16 = char16_t;  // UTF-16 code units
-using char32 = char32_t;  // UTF-32 code units
-
-// -----------------------------
 // Pointer-size helpers (optional)
 // -----------------------------
 // - IntPtrT<T32, T64>: select a type depending on pointer size (32 vs 64 bits).
@@ -59,6 +51,14 @@ inline constexpr bool  DNG_Is64Bit       = false;
 inline constexpr bool  DNG_Is32Bit       = true;
 inline constexpr int   DNG_PointerBits   = 32;
 #endif
+
+// -----------------------------
+// Small bool & char aliases (optional)
+// -----------------------------
+using bool8 = uint8;		// Compact 8-bit boolean for serialization/binary blobs
+using char8 = char;			// UTF-8 code units; use std::u8string if you prefer strong typing
+using char16 = char16_t;	// UTF-16 code units
+using char32 = char32_t;	// UTF-32 code units
 
 // -----------------------------
 // Sanity checks

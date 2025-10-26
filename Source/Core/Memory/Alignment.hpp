@@ -1,17 +1,14 @@
 #pragma once
 // ============================================================================
 // D-Engine - Core/Memory/Alignment.hpp
-// Minimal, header-only alignment helpers (constexpr-first, zero heavy deps)
 // ----------------------------------------------------------------------------
-// DESIGN GOALS
-// - A single, easy-to-audit place for alignment policy.
-// - constexpr-friendly helpers (compile-time when possible).
-// - No surprises with signed integers: restrict integral helpers to UNSIGNED.
-// - Well-defined behavior for extreme values (saturation instead of UB).
-// NOTE ABOUT LOGGING:
-//   Most helpers here are constexpr to allow compile-time evaluation. We avoid
-//   emitting logs inside constexpr functions to retain that property. Where
-//   possible (pointer overloads), we add runtime logs.
+// Purpose : Centralize all alignment math (predicate helpers, normalization,
+//           and pointer/integer adjustment) in constexpr-friendly utilities.
+// Contract: Every allocator and caller must route alignment math through these
+//           helpers to guarantee power-of-two results >= alignof(max_align_t).
+// Notes   : Integer overloads are constrained to unsigned types; pointer
+//           variants emit logger diagnostics when adjustments occur. Saturation
+//           avoids UB on extreme inputs to keep behavior deterministic.
 // ============================================================================
 
 #include <cstddef>      // std::size_t, std::max_align_t
@@ -253,11 +250,10 @@ namespace dng::core
     /**
      * @brief Checks if an UNSIGNED integer value is aligned to 'alignment'.
      */
-    template <class T>
+    template <class T,
+              std::enable_if_t<std::is_integral_v<T> && std::is_unsigned_v<T>, int> = 0>
     [[nodiscard]] constexpr bool IsAligned(T value, usize alignment) noexcept
     {
-        static_assert(std::is_integral_v<T>, "IsAligned<T>: T must be integral");
-        static_assert(std::is_unsigned_v<T>, "IsAligned<T>: T must be UNSIGNED");
         const T a = static_cast<T>(NormalizeAlignment(alignment));
         return (value & (a - T{ 1 })) == T{ 0 };
     }
@@ -291,18 +287,19 @@ namespace dng::core
     // NormalizeAlignment behavior
     static_assert(NormalizeAlignment(0) >= alignof(std::max_align_t),
         "Zero alignment maps to at least max_align_t");
-    static_assert(NormalizeAlignment(8) == 8,
-        "Normalize preserves valid power-of-two");
+    static_assert(NormalizeAlignment(32) == 32,
+        "Normalize preserves valid power-of-two >= max_align_t");
     static_assert(IsPowerOfTwo(NormalizeAlignment((std::numeric_limits<usize>::max)())),
         "Normalization returns a power-of-two even for extreme inputs");
 
     // AlignUp / AlignDown integer examples (use UNSIGNED types)
-    static_assert(AlignUp<usize>(13, 8) == 16, "13 aligned up to 8 -> 16");
-    static_assert(AlignDown<usize>(13, 8) == 8, "13 aligned down to 8 -> 8");
-    static_assert(AlignUp<usize>(16, 8) == 16, "16 already aligned up to 8");
-    static_assert(AlignDown<usize>(16, 8) == 16, "16 already aligned down to 8");
+    // Note: Use alignment >= alignof(std::max_align_t) for portable tests
+    static_assert(AlignUp<usize>(29, 32) == 32, "29 aligned up to 32 -> 32");
+    static_assert(AlignDown<usize>(29, 32) == 0, "29 aligned down to 32 -> 0");
+    static_assert(AlignUp<usize>(32, 32) == 32, "32 already aligned up to 32");
+    static_assert(AlignDown<usize>(32, 32) == 32, "32 already aligned down to 32");
 
-    static_assert(IsAligned<usize>(16, 8), "16 is aligned to 8");
-    static_assert(!IsAligned<usize>(14, 8), "14 is not aligned to 8");
+    static_assert(IsAligned<usize>(32, 32), "32 is aligned to 32");
+    static_assert(!IsAligned<usize>(30, 32), "30 is not aligned to 32");
 
 } // namespace dng::core

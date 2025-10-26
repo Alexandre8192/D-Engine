@@ -11,7 +11,7 @@
 #include "Core/Containers/StdAliases.hpp"
 #include "Core/Memory/MemorySystem.hpp"
 
-int main()
+[[maybe_unused]] static int StdAliases_BuildOnly()
 {
     ::dng::memory::MemorySystem::Init();
 

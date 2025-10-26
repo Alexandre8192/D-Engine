@@ -1,7 +1,7 @@
 #pragma once
-#include "Core/CoreMinimal.hpp"  // Logger + Types + Platform
-#include "MemoryConfig.hpp" // compile-time defaults + runtime cfg
-#include <cstdlib>          // std::abort
+#include "Core/CoreMinimal.hpp"             // Logger + Types + Platform
+#include "Core/Memory/MemoryConfig.hpp"     // compile-time defaults + runtime cfg
+#include <cstdlib>                          // std::abort
 
 // Minimal logging fallbacks (allow usage before logger is included)
 #ifndef DNG_LOG_FATAL

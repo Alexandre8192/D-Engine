@@ -1,24 +1,16 @@
 #pragma once
 // ============================================================================
-// D-Engine - Memory Core
-// File: Core/Memory/Allocator.hpp
+// D-Engine - Core/Memory/Allocator.hpp
 // ----------------------------------------------------------------------------
-// This header defines:
-//   - IAllocator: the engine's minimal allocator interface
-//   - AllocatorRef: a thin, non-owning wrapper around IAllocator*
-// 
-// DESIGN NOTES
-// ------------
-// * We keep the contract very explicit: callers may pass any `alignment`
-//   (including 0 = "default"), and implementations MUST normalize alignment.
-// * `Deallocate` / `Reallocate` require the SAME (size, alignment) that was
-//   used for the original allocation, unless a concrete allocator documents
-//   a different policy.
-// * The default Reallocate implementation (see Allocator.cpp) will allocate/
-//   copy/free to honor a requested alignment change; it does not attempt to
-//   re-align in place.
-// * This header does not depend on the engine's OOM policy; that is handled
-//   in the .cpp by DNG_MEM_CHECK_OOM(...).
+// Purpose : Declare the allocator contract (`IAllocator`) and a lightweight
+//           non-owning façade (`AllocatorRef`) that normalizes alignment and
+//           forwards typed construction helpers.
+// Contract: All allocate/reallocate/deallocate operations must use the exact
+//           `(size, alignment)` pair that was used when the block was acquired.
+//           Alignment parameters are always normalized via `NormalizeAlignment`.
+// Notes   : The default `Reallocate` implementation (see Allocator.cpp) follows
+//           the contract by allocate-copy-free; concrete allocators may provide
+//           faster paths but must document any deviation explicitly.
 // ============================================================================
 
 #include <cstddef>      // std::size_t
@@ -28,8 +20,8 @@
 #include <memory>       // std::construct_at, std::destroy_at (C++20)
 #include <limits>       // std::numeric_limits
 
-#include "../../Core/Types.hpp" // usize, etc.
-#include "Alignment.hpp"        // NormalizeAlignment(...)
+#include "Core/Types.hpp"            // usize, etc.
+#include "Core/Memory/Alignment.hpp" // NormalizeAlignment(...)
 
 // Optional debug assert fallback if the engine assert is not available here.
 #ifndef DNG_ASSERT
@@ -81,7 +73,7 @@ namespace dng::core
         // Contract: On success, the returned block is owned by the caller and
         //           must be released via Deallocate/Reallocate with the SAME
         //           `(size, alignment)` (see contract above).
-        virtual void* Allocate(usize size, usize alignment) noexcept = 0;
+    [[nodiscard]] virtual void* Allocate(usize size, usize alignment) noexcept = 0;
 
         // Free a block previously returned by Allocate/Reallocate.
         // `size` and `alignment` MUST match the original allocation of `ptr`
@@ -113,7 +105,7 @@ namespace dng::core
         // Overrides:
         // - A custom allocator is free to implement true in-place reallocation
         //   or re-alignment, as long as it preserves the public contract.
-        virtual void* Reallocate(void* ptr,
+        [[nodiscard]] virtual void* Reallocate(void* ptr,
             usize oldSize,
             usize newSize,
             usize alignment,

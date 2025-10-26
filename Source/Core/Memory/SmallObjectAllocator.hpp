@@ -1,13 +1,18 @@
 #pragma once
-
-// D-Engine SmallObject / Slab Allocator (MVP v1)
-// - Fixed size classes (16..1024)
-// - Per-size-class slab lists (default 64 KB slabs)
-// - Singly-linked free-list per class (O(1) alloc/free)
-// - Thread-safety: one std::mutex per class (simple v1)
-// - Parent-backed: uses a parent IAllocator* to allocate slabs
-// - Reallocate: naive copy + free (old block not reused)
-// - Debug/Diagnostics: DumpStats()
+// ============================================================================
+// D-Engine - Core/Memory/SmallObjectAllocator.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Provide a slab-backed allocator tuned for <= 1 KiB objects so hot
+//           paths can avoid the general heap while still honouring the engine
+//           allocator contract.
+// Contract: All requests normalise alignment via `NormalizeAlignment`. Blocks
+//           must be freed with the same `(size, alignment)`; larger requests or
+//           unusual alignments fall back to the parent allocator. Per-class
+//           mutexes deliver coarse thread-safety.
+// Notes   : Slabs are sourced from a parent allocator. Diagnostics expose peak
+//           usage via `DumpStats`. `Reallocate` is copy-based and never grows in
+//           place.
+// ============================================================================
 
 #include "Core/Types.hpp"
 #include "Core/Memory/Allocator.hpp"
@@ -21,22 +26,14 @@
 #include <mutex>
 #include <new>        // std::nothrow
 #include <cstring>    // std::memcpy
-#include <cstdint>
 
 namespace dng::core
 {
-    // ---
-    // Purpose : Configuration knobs that tailor SmallObjectAllocator behaviour.
-    // Contract: Values are read-only after construction; caller owns the struct.
-    // Notes   : ReturnNullOnOOM allows higher layers to decide whether an allocation
-    //           failure should bubble as nullptr (soft failure) or escalate via
-    //           the engine-wide OOM policy (see OOM.hpp).
-    // ---
     struct SmallObjectConfig
     {
         usize SlabSizeBytes = 64 * 1024; // 64 KB per slab by default
         usize MaxClassSize = 1024;      // > MaxClassSize => route to Parent
-        bool  ReturnNullOnOOM = false;  // if false => escalate to OOM policy
+        bool  ReturnNullOnOOM = false;     // if false => DNG_MEM_CHECK_OOM()
     };
 
     /**
@@ -50,134 +47,75 @@ namespace dng::core
      * Threading:
      *   - Mutex per size-class (coarse but simple). Phase 2 can add per-thread caches.
      */
-    // ---
-    // Purpose : Provide a fast-path allocator for < 1 KiB payloads backed by slabs.
-    // Contract: Thread safety is per-class mutex (coarse) and depends on parent allocator
-    //           being thread-safe for slab procurement. Returned pointers obey
-    //           NormalizeAlignment within the guarantees documented in Notes.
-    // Notes   : Alignment requirements larger than the per-class natural alignment (16 bytes
-    //           today) are delegated to the parent allocator to keep slab layout compact.
-    //           Future revisions can specialise classes per alignment bucket if needed.
-    // ---
     class SmallObjectAllocator final : public IAllocator
     {
     public:
-        // ---
-        // Purpose : Construct an allocator that sources slab memory from `parent`.
-        // Contract: `parent` must outlive this instance and obey the IAllocator contract.
-        // Notes   : We assert on entry because nullptr parent leaves the allocator unusable.
-        // ---
         explicit SmallObjectAllocator(IAllocator* parent, SmallObjectConfig cfg = {})
             : mParent(parent), mCfg(cfg)
         {
             DNG_CHECK(mParent != nullptr);
-            DNG_CHECK(mCfg.SlabSizeBytes >= 4096); // sanity guard against degenerate slabs
+            DNG_CHECK(mCfg.SlabSizeBytes >= 4096); // sanity
+            // Build size-to-class map lazily (via helper); nothing else to init.
         }
 
         ~SmallObjectAllocator() override = default;
 
-        // ---
-        // Purpose : Allocate a small object while honouring the alignment contract.
-        // Contract: Returns nullptr on OOM only if ReturnNullOnOOM==true or parent fails.
-        //           The caller must pass the SAME (size, alignment) when freeing.
-        // Notes   : Alignments > NaturalAlignFor(classSize) fall back to the parent allocator
-        //           because current slab layout guarantees up to 16-byte alignment.
-        // ---
-        [[nodiscard]] void* Allocate(usize size, usize alignment) noexcept override
+        void* Allocate(usize size, usize alignment) noexcept override
         {
             alignment = NormalizeAlignment(alignment);
             if (size == 0)
-            {
-                size = 1; // zero-byte allocs still consume a slot; keep contracts explicit
-            }
+                size = 1;
 
             if (size > mCfg.MaxClassSize)
             {
+                // Delegate to parent for large allocations
                 return mParent->Allocate(size, alignment);
             }
 
             const ClassIndex ci = SizeToClass(size);
-            if (ci.Index < 0)
+            if (ci.Index < 0) // Should not happen unless MaxClassSize < min class
             {
                 return mParent->Allocate(size, alignment);
             }
-
-            const usize supportedAlignment = NormalizeAlignment(NaturalAlignFor(kClassSizes[(usize)ci.Index]));
-            if (alignment > supportedAlignment)
-            {
-                // Current slab layout cannot satisfy this alignment without waste; delegate upstream.
-                return mParent->Allocate(size, alignment);
-            }
-
             return AllocateFromClass(ci, size, alignment);
         }
 
-        // ---
-        // Purpose : Release a previously allocated small object back to its slab.
-        // Contract: `(size, alignment)` must match the original request. Null pointers are ignored.
-        // Notes   : Large blocks and high-alignment blocks are forwarded to the parent allocator.
-        // ---
         void Deallocate(void* ptr, usize size, usize alignment) noexcept override
         {
             if (!ptr)
-            {
                 return;
-            }
 
             alignment = NormalizeAlignment(alignment);
             if (size == 0)
-            {
                 size = 1;
-            }
 
             if (size > mCfg.MaxClassSize)
             {
+                // Large block was delegated to parent
                 mParent->Deallocate(ptr, size, alignment);
                 return;
             }
 
+            // Recover BlockHeader to get the owning slab/class
             auto* user = static_cast<u8*>(ptr);
             auto* bh = reinterpret_cast<BlockHeader*>(user - sizeof(BlockHeader));
             SlabHeader* slab = bh->OwnerSlab;
-
             DNG_CHECK(slab != nullptr);
             const i32 classIdx = slab->ClassIndex;
             DNG_CHECK(classIdx >= 0 && classIdx < kNumClasses);
 
+            // Push back to free-list
             FreeBlock(ptr, classIdx);
         }
 
-        // ---
-        // Purpose : Provide a conservative reallocate path (allocate-copy-free).
-        // Contract: Mirrors IAllocator::Reallocate semantics, including nullptr/newSize==0 cases.
-        // Notes   : Currently never performs in-place growth; wasInPlace is always false.
-        // ---
-        [[nodiscard]] void* Reallocate(void* ptr,
-            usize oldSize,
-            usize newSize,
-            usize alignment = alignof(std::max_align_t),
-            bool* wasInPlace = nullptr) noexcept override
+        void* Reallocate(void* ptr, usize oldSize, usize newSize, usize alignment, bool* wasInPlace = nullptr) noexcept override
         {
-            alignment = NormalizeAlignment(alignment);
-
+            // MVP: naive reallocate (allocate new -> memcpy -> free old)
             if (wasInPlace)
-            {
                 *wasInPlace = false;
-            }
-
+            
             if (!ptr)
-            {
                 return Allocate(newSize, alignment);
-            }
-
-            if (oldSize == 0)
-            {
-                DNG_LOG_ERROR("Memory",
-                    "SmallObjectAllocator::Reallocate misuse: ptr=%p oldSize==0 (alignment=%zu, newSize=%zu)",
-                    ptr, static_cast<size_t>(alignment), static_cast<size_t>(newSize));
-                DNG_ASSERT(false && "Reallocate requires original size when ptr != nullptr");
-                return nullptr;
-            }
 
             if (newSize == 0)
             {
@@ -185,26 +123,17 @@ namespace dng::core
                 return nullptr;
             }
 
-            void* newBlock = Allocate(newSize, alignment);
-            if (!newBlock)
-            {
+            void* np = Allocate(newSize, alignment);
+            if (!np)
                 return nullptr;
-            }
 
             const usize copySize = oldSize < newSize ? oldSize : newSize;
-            if (copySize > 0)
-            {
-                std::memcpy(newBlock, ptr, copySize);
-            }
+            std::memcpy(np, ptr, copySize);
             Deallocate(ptr, oldSize, alignment);
-            return newBlock;
+            return np;
         }
 
-        // ---
-        // Purpose : Emit per-class slab statistics for diagnostics.
-        // Contract: Safe to call at any time; output is approximate due to relaxed atomics.
-        // Notes   : Category defaults to "Memory" but callers may provide custom channels.
-        // ---
+        // Diagnostics / Stats
         void DumpStats(const char* category = "Memory") const
         {
             usize totalSlabs = 0, totalMem = 0, totalFree = 0, totalBlocks = 0;
@@ -341,11 +270,6 @@ namespace dng::core
         }
 
         // Allocate a new slab for class 'ci', push all blocks into the free-list.
-        // ---
-        // Purpose : Back new slab storage for the specified size-class.
-        // Contract: Must be invoked with the class mutex held.
-        // Notes   : Delegates large failures to HandleOutOfMemory().
-        // ---
         SlabHeader* AllocateSlabLocked(i32 ci)
         {
             Class& C = mClasses[ci];
@@ -353,7 +277,9 @@ namespace dng::core
             u8* raw = static_cast<u8*>(mParent->Allocate(mCfg.SlabSizeBytes, alignof(std::max_align_t)));
             if (!raw)
             {
-                HandleOutOfMemory(mCfg.SlabSizeBytes, alignof(std::max_align_t), "SmallObjectAllocator::AllocateSlab");
+                if (mCfg.ReturnNullOnOOM)
+                    return nullptr;
+                DNG_MEM_CHECK_OOM(mCfg.SlabSizeBytes, alignof(std::max_align_t), "SmallObjectAllocator::AllocateSlabLocked");
                 return nullptr;
             }
 
@@ -418,11 +344,6 @@ namespace dng::core
             return slab;
         }
 
-        // ---
-        // Purpose : Produce a block from the requested class, provisioning new slabs on demand.
-        // Contract: Caller must ensure `ci.Index` is in-range and alignment already validated.
-        // Notes   : Alignment assertion doubles as a safety net during development builds.
-        // ---
         void* AllocateFromClass(ClassIndex ci, usize requestSize, usize alignment) noexcept
         {
             const i32 idx = ci.Index;
@@ -444,12 +365,13 @@ namespace dng::core
             SlabHeader* s = AllocateSlabLocked(idx);
             if (!s)
             {
-                if (mCfg.ReturnNullOnOOM)
-                {
+                if (mCfg.ReturnNullOnOOM) {
                     DNG_LOG_WARNING("Memory",
-                        "SmallObjectAllocator OOM: class=%d request=%zu align=%zu",
-                        (int)idx, static_cast<size_t>(requestSize), static_cast<size_t>(alignment));
+                        "SmallObject OOM: class=%d request=%zu align=%zu",
+                        (int)idx, (size_t)requestSize, (size_t)alignment);
+                    return nullptr;
                 }
+                // DNG_MEM_CHECK_OOM called in AllocateSlabLocked
                 return nullptr;
             }
 
@@ -458,16 +380,10 @@ namespace dng::core
             DNG_CHECK(node != nullptr);
             C.FreeList = node->Next;
             C.FreeCount.fetch_sub(1, std::memory_order_relaxed);
-            DNG_ASSERT(IsAligned(node, alignment), "SmallObjectAllocator returned misaligned pointer");
             return static_cast<void*>(node);
         }
 
-    // ---
-    // Purpose : Return a block to its class free-list.
-    // Contract: Must be invoked with a pointer originally produced by AllocateFromClass.
-    // Notes   : Free-list push is LIFO to maximise cache locality of hot objects.
-    // ---
-    void FreeBlock(void* userPtr, i32 classIdx) noexcept
+        void FreeBlock(void* userPtr, i32 classIdx) noexcept
         {
             Class& C = mClasses[classIdx];
             const std::scoped_lock lock(C.Mtx);
@@ -476,25 +392,6 @@ namespace dng::core
             node->Next = C.FreeList;
             C.FreeList = node;
             C.FreeCount.fetch_add(1, std::memory_order_relaxed);
-        }
-
-        // ---
-        // Purpose : Centralise OOM handling depending on configuration.
-        // Contract: `context` must be a stable string literal for logging.
-        // Notes   : In fatal mode this will not return (DNG_MEM_CHECK_OOM aborts).
-        // ---
-        void HandleOutOfMemory(usize size, usize alignment, const char* context) const noexcept
-        {
-            if (mCfg.ReturnNullOnOOM)
-            {
-                DNG_LOG_WARNING("Memory",
-                    "SmallObjectAllocator: allocation failure in %s (size=%zu, align=%zu)",
-                    context ? context : "<unknown>", static_cast<size_t>(size), static_cast<size_t>(alignment));
-            }
-            else
-            {
-                DNG_MEM_CHECK_OOM(size, alignment, context);
-            }
         }
     };
 

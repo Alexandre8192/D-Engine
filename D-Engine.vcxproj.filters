@@ -31,6 +31,9 @@
     <Filter Include="Source\Core\Containers">
       <UniqueIdentifier>{5a2c35f2-669e-4f4a-8fbb-47ec6c7a4582}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Tests">
+      <UniqueIdentifier>{3671bbbe-cbe0-4ab4-84e1-08ff95bc3746}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Core\CoreMinimal.hpp">
@@ -45,13 +48,19 @@
     <ClInclude Include="Source\Core\Types.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Diagnostics\Bench.hpp">
+      <Filter>Source\Core\Diagnostics</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Diagnostics\Check.hpp">
+      <Filter>Source\Core\Diagnostics</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Memory\Alignment.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Memory\AllocatorAdapter.hpp">
+    <ClInclude Include="Source\Core\Memory\Allocator.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Memory\Allocator.hpp">
+    <ClInclude Include="Source\Core\Memory\AllocatorAdapter.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\Memory\ArenaAllocator.hpp">
@@ -60,16 +69,31 @@
     <ClInclude Include="Source\Core\Memory\DefaultAllocator.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Memory\FrameAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Memory\GlobalNewDelete.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\GuardAllocator.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\Memory\MemoryConfig.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Memory\MemorySystem.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Memory\OOM.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Memory\PageAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Memory\PoolAllocator.hpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Memory\SmallObjectAllocator.hpp">
       <Filter>Source\Core\Memory</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\Memory\StackAllocator.hpp">
@@ -96,24 +120,6 @@
     <ClInclude Include="Source\Core\Containers\StdAliases.hpp">
       <Filter>Source\Core\Containers</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Memory\FrameAllocator.hpp">
-      <Filter>Source\Core\Memory</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Core\Diagnostics\Check.hpp">
-      <Filter>Source\Core\Diagnostics</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Core\Memory\SmallObjectAllocator.hpp">
-      <Filter>Source\Core\Memory</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Core\Memory\MemorySystem.hpp">
-      <Filter>Source\Core\Memory</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Core\Memory\GuardAllocator.hpp">
-      <Filter>Source\Core\Memory</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Core\Memory\PageAllocator.hpp">
-      <Filter>Source\Core\Memory</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp">
@@ -124,6 +130,15 @@
     </ClCompile>
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp">
       <Filter>Source\Core\Memory</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Test_BenchDriver.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Test_GlobalNewDelete_BuildOnly.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Test_StdAliases_BuildOnly.cpp">
+      <Filter>Source\Tests</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -1,5 +1,20 @@
 #pragma once
+// ============================================================================
+// D-Engine - Core/Memory/ArenaAllocator.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Provide a deterministic bump allocator with marker-based rewind so
+//           hot paths can reserve transient memory without per-block frees.
+// Contract: All requests normalise `alignment` through `NormalizeAlignment` and
+//           require callers to release memory via `Reset()` or `Rewind(marker)`;
+//           `Deallocate()` is intentionally a no-op and exists only to satisfy
+//           `IAllocator`. The allocator is not thread-safe.
+// Notes   : Designed for frame or scope-local allocations. Markers capture the
+//           current offset so rewinding is O(1). Peak usage is tracked for
+//           diagnostics. Backing storage can be owned (parent allocator) or
+//           provided externally.
+// ============================================================================
 
+#include "Core/Types.hpp"
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/Alignment.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
@@ -16,6 +31,9 @@
 #ifndef DNG_LOG_WARNING
 #define DNG_LOG_WARNING(category, msg, ...) ((void)0)
 #endif
+#ifndef DNG_LOG_INFO
+#define DNG_LOG_INFO(category, msg, ...) ((void)0)
+#endif
 #ifndef DNG_LOG_FATAL
 #define DNG_LOG_FATAL(category, msg, ...) ((void)0)
 #endif
@@ -27,9 +45,12 @@
 
 namespace dng::core {
 
-    /**
-     * @brief Opaque marker type for arena position tracking.
-     */
+    // --- ArenaMarker --------------------------------------------------------
+    // Purpose : Compact handle storing the arena offset captured before an
+    //           allocation so callers can rewind.
+    // Contract: Only markers obtained from this allocator are meaningful. Thread
+    //           affinity follows the owning allocator (single-threaded expectation).
+    // Notes   : An invalid marker carries SIZE_MAX and is ignored by Rewind().
     class ArenaMarker {
     private:
         usize m_offset;
@@ -37,13 +58,19 @@ namespace dng::core {
         explicit ArenaMarker(usize offset) noexcept : m_offset(offset) {}
     public:
         ArenaMarker() noexcept : m_offset(SIZE_MAX) {}
-        bool IsValid() const noexcept { return m_offset != SIZE_MAX; }
-        usize GetOffset() const noexcept { return m_offset; }
+        [[nodiscard]] bool IsValid() const noexcept { return m_offset != SIZE_MAX; }
+        [[nodiscard]] usize GetOffset() const noexcept { return m_offset; }
     };
 
-    /**
-     * @brief Linear allocator with bump-pointer allocation and reset/rewind.
-     */
+    // --- ArenaAllocator -----------------------------------------------------
+    // Purpose : Lightweight bump allocator with optional ownership of the
+    //           backing buffer.
+    // Contract: `Allocate` honours `NormalizeAlignment` and returns nullptr on
+    //           exhaustion (OOM policy invoked). Memory must be released via
+    //           `Reset()` or `Rewind(marker)`; `Deallocate()` is a documented
+    //           no-op.
+    // Notes   : Not thread-safe. Tracking fields (`m_peakUsed`) are updated
+    //           opportunistically for diagnostics.
     class ArenaAllocator : public IAllocator {
     private:
         uint8_t* m_base;
@@ -113,8 +140,15 @@ public:
         }
 
         ~ArenaAllocator() noexcept override {
+            // Purpose: emit a lifecycle trace before releasing owned storage so
+            // teardown sequences (e.g. MemorySystem shutdown) can pinpoint the
+            // allocator responsible for a crash or guard-trigger.
             if (m_ownsMemory && m_parentAllocator && m_base) {
+                DNG_LOG_INFO("Memory.Arena", "~ArenaAllocator releasing {} bytes (base={}, ownsMemory=1)",
+                    static_cast<unsigned long long>(m_capacity),
+                    static_cast<const void*>(m_base));
                 m_parentAllocator->Deallocate(m_base, m_capacity, alignof(std::max_align_t));
+                DNG_LOG_INFO("Memory.Arena", "~ArenaAllocator release complete for base={}", static_cast<const void*>(m_base));
             }
         }
 
@@ -174,7 +208,7 @@ public:
         }
 
         // Utility (not part of IAllocator); keep without 'override'
-        bool Owns(void* ptr) const noexcept {
+        [[nodiscard]] bool Owns(void* ptr) const noexcept {
             if (!ptr || !m_base || !m_end) return false;
             const uint8_t* bytePtr = static_cast<const uint8_t*>(ptr);
             return bytePtr >= m_base && bytePtr < m_end;
@@ -184,20 +218,20 @@ public:
         // Arena-specific API
         // =============================
 
-        usize GetUsed() const noexcept {
+        [[nodiscard]] usize GetUsed() const noexcept {
             if (!m_base || !m_current) return 0;
             return static_cast<usize>(m_current - m_base);
         }
 
-        usize GetCapacity() const noexcept { return m_capacity; }
-        usize GetPeak() const noexcept { return m_peakUsed; }
+        [[nodiscard]] usize GetCapacity() const noexcept { return m_capacity; }
+        [[nodiscard]] usize GetPeak() const noexcept { return m_peakUsed; }
 
-        usize GetFree() const noexcept {
+        [[nodiscard]] usize GetFree() const noexcept {
             if (!m_current || !m_end) return 0;
             return static_cast<usize>(m_end - m_current);
         }
 
-        bool IsValid() const noexcept {
+        [[nodiscard]] bool IsValid() const noexcept {
             return m_base && m_current && m_end;
         }
 
@@ -208,7 +242,7 @@ public:
             }
         }
 
-        ArenaMarker GetMarker() const noexcept {
+        [[nodiscard]] ArenaMarker GetMarker() const noexcept {
             if (!IsValid()) return ArenaMarker();
             return ArenaMarker(static_cast<usize>(m_current - m_base));
         }

@@ -1,6 +1,6 @@
 #pragma once
 //
-// D-Engine - Core/Diagnostics/Check.hpp
+// D-Engine — Core/Diagnostics/Check.hpp
 // Centralized lightweight diagnostics macros (no heavy deps).
 //
 // Provided:
