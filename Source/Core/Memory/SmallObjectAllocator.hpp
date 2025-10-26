@@ -32,7 +32,7 @@ namespace dng::core
     {
         usize SlabSizeBytes = 64 * 1024; // 64 KB per slab by default
         usize MaxClassSize = 1024;      // > MaxClassSize => route to Parent
-        bool  ReturnNullOnOOM = false;     // if false => OnOutOfMemory()
+    bool  ReturnNullOnOOM = false;     // if false => HandleOutOfMemory()
     };
 
     /**
@@ -76,6 +76,13 @@ namespace dng::core
             {
                 return mParent->Allocate(size, alignment);
             }
+
+            const usize supportedAlignment = NormalizeAlignment(NaturalAlignFor(kClassSizes[(usize)ci.Index]));
+            if (alignment > supportedAlignment)
+            {
+                // Current slab layout cannot guarantee this alignment; delegate upstream.
+                return mParent->Allocate(size, alignment);
+            }
             return AllocateFromClass(ci, size, alignment);
         }
 
@@ -107,8 +114,19 @@ namespace dng::core
             FreeBlock(ptr, classIdx);
         }
 
-        void* Reallocate(void* ptr, usize oldSize, usize alignment, usize newSize) noexcept override
+        void* Reallocate(void* ptr,
+            usize oldSize,
+            usize newSize,
+            usize alignment,
+            bool* wasInPlace = nullptr) noexcept override
         {
+            alignment = NormalizeAlignment(alignment);
+
+            if (wasInPlace)
+            {
+                *wasInPlace = false;
+            }
+
             // MVP: naive reallocate (allocate new -> memcpy -> free old)
             if (!ptr)
                 return Allocate(newSize, alignment);
@@ -275,7 +293,7 @@ namespace dng::core
             {
                 if (mCfg.ReturnNullOnOOM)
                     return nullptr;
-                OnOutOfMemory(mCfg.SlabSizeBytes, alignof(std::max_align_t));
+                HandleOutOfMemory(mCfg.SlabSizeBytes, alignof(std::max_align_t), "SmallObjectAllocator::AllocateSlab");
                 return nullptr;
             }
 
@@ -367,7 +385,7 @@ namespace dng::core
                         (int)idx, (size_t)requestSize, (size_t)alignment);
                     return nullptr;
                 }
-                // OnOutOfMemory called in AllocateSlabLocked
+                // HandleOutOfMemory invoked inside AllocateSlabLocked
                 return nullptr;
             }
 
@@ -388,6 +406,20 @@ namespace dng::core
             node->Next = C.FreeList;
             C.FreeList = node;
             C.FreeCount.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        void HandleOutOfMemory(usize size, usize alignment, const char* context) const noexcept
+        {
+            if (mCfg.ReturnNullOnOOM)
+            {
+                DNG_LOG_WARNING("Memory",
+                    "SmallObjectAllocator: allocation failure in %s (size=%zu, align=%zu)",
+                    context ? context : "<unknown>", static_cast<size_t>(size), static_cast<size_t>(alignment));
+            }
+            else
+            {
+                DNG_MEM_CHECK_OOM(size, alignment, context);
+            }
         }
     };
 
