@@ -1,12 +1,31 @@
 #pragma once
+// ============================================================================
+// D-Engine - Core/Memory/TrackingAllocator.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Wrap an `IAllocator` to expose leak diagnostics, per-tag snapshots,
+//           and monotonic allocation counters used by diagnostics/benchmarks.
+// Contract: Requires a non-null base allocator. All Allocate/Deallocate pairs
+//           must respect the engine contract of matching `(size, alignment)`
+//           after normalization. Thread-safety matches the wrapped allocator
+//           except for optional leak maps guarded by an internal mutex.
+// Notes   : Feature set is driven by compile-time toggles:
+//           - `DNG_MEM_TRACKING` enables per-allocation maps and leak reports.
+//           - `DNG_MEM_STATS_ONLY` keeps lightweight counters without maps.
+//           - Monotonic counters stay active in every configuration.
+// ============================================================================
 
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
-#include <unordered_map>
+#include "Core/Memory/Alignment.hpp"
+#include "Core/Types.hpp"
+
+#include <array>
 #include <atomic>
 #include <mutex>
-#include <cstring>  // for memset
+#include <unordered_map>
+#include <cstring>   // std::memset
 #include <cstddef>   // std::max_align_t
+#include <cstdint>   // std::uint64_t
 
 #ifndef DNG_MEM_TRACKING_ENABLED
 #if defined(DNG_MEM_TRACKING)
@@ -142,6 +161,42 @@ namespace dng::core {
         }
     };
 
+    // ---
+    // Purpose : Lightweight snapshot view consumed by leak diagnostics helpers.
+    // Contract: Encapsulates the CURRENT allocation footprint (bytes and active
+    //           allocation count) per AllocTag at capture time.
+    // Notes   : Populated by TrackingAllocator::CaptureView using relaxed atomic
+    //           loads so that snapshotting remains a low-overhead operation even
+    //           when the allocator is under contention.
+    // ---
+    struct TrackingSnapshotView
+    {
+        struct Tag
+        {
+            std::size_t bytes{ 0 };
+            std::size_t allocs{ 0 };
+        };
+
+        std::array<Tag, static_cast<std::size_t>(AllocTag::Count)> byTag{};
+        std::size_t totalBytes{ 0 };
+        std::size_t totalAllocs{ 0 };
+    };
+
+    // ---
+    // Purpose : Immutable snapshot of ever-increasing counters since process start.
+    // Contract: All fields are totals (monotonic). Use (after - before) to compute
+    //           a delta over any time window. Thread-safe to read.
+    // Notes   : Independent from "live" stats used for leak detection.
+    // ---
+    struct TrackingMonotonicCounters
+    {
+        std::uint64_t TotalAllocCalls     { 0 };
+        std::uint64_t TotalFreeCalls      { 0 };
+        std::uint64_t TotalBytesAllocated { 0 };
+        std::uint64_t TotalBytesFreed     { 0 };
+    };
+
+
 #if DNG_MEM_TRACKING
 
     /**
@@ -217,6 +272,17 @@ namespace dng::core {
         mutable std::mutex m_mutex;                     ///< Thread safety for allocation map
 #endif
 
+    // --- Monotonic churn counters (ever growing) -------------------------------
+    // Purpose : Cumulative totals for performance diagnostics.
+    // Contract: 64-bit atomics; relaxed ordering is sufficient for totals.
+    // Notes   : Counters stay valid even if leak tracking is disabled.
+    //           BytesFreed may be 0 if size is unknown on Deallocate (non-tracking).
+    std::atomic<std::uint64_t> m_totalAllocCalls     { 0 };
+    std::atomic<std::uint64_t> m_totalFreeCalls      { 0 };
+    std::atomic<std::uint64_t> m_totalBytesAllocated { 0 };
+    std::atomic<std::uint64_t> m_totalBytesFreed     { 0 };
+
+
     public:
         /**
          * @brief Constructor wrapping a base allocator
@@ -277,7 +343,13 @@ namespace dng::core {
 #else
             DNG_UNUSED(size);
 #endif
+            // Monotonic counters (free path)
+            m_totalFreeCalls.fetch_add(1, std::memory_order_relaxed);
+            if (forwardSize > 0) {
+                m_totalBytesFreed.fetch_add(static_cast<std::uint64_t>(forwardSize), std::memory_order_relaxed);
+            }
 
+            // Always forward the normalized (size, alignment) pair that matches the original allocation.
             m_baseAllocator->Deallocate(ptr, forwardSize, forwardAlignment);
         }
 
@@ -298,6 +370,9 @@ namespace dng::core {
             // Forward allocation to base allocator
             void* ptr = m_baseAllocator->Allocate(size, alignment);
             if (!ptr) return nullptr;
+            // Monotonic counters (allocation path)
+            m_totalAllocCalls.fetch_add(1, std::memory_order_relaxed);
+            m_totalBytesAllocated.fetch_add(static_cast<std::uint64_t>(size), std::memory_order_relaxed);
 
 #if DNG_MEM_TRACKING
             // Full tracking mode: record allocation details
@@ -332,7 +407,7 @@ namespace dng::core {
          * @param tag Allocation tag to query
          * @return Reference to statistics for the tag
          */
-        const AllocatorStats& GetStats(AllocTag tag) const noexcept {
+        [[nodiscard]] const AllocatorStats& GetStats(AllocTag tag) const noexcept {
             usize tagIndex = static_cast<usize>(tag);
             DNG_CHECK(tagIndex < static_cast<usize>(AllocTag::Count));
             return m_stats[tagIndex];
@@ -356,8 +431,52 @@ namespace dng::core {
          *
          * @return Pointer to the wrapped allocator
          */
-        IAllocator* GetBaseAllocator() const noexcept {
+        [[nodiscard]] IAllocator* GetBaseAllocator() const noexcept {
             return m_baseAllocator;
+        }
+
+        // ---
+        // Purpose : Capture an instantaneous per-tag aggregate suitable for
+        //           leak snapshot comparisons.
+        // Contract: Thread-safe; may be called concurrently with Allocate /
+        //           Deallocate. Returns zeros when tracking/statistics support
+        //           is compiled out.
+        // Notes   : Relies solely on atomic counters (no heavy lock) to keep
+        //           the capture path inexpensive even under contention.
+        // ---
+        [[nodiscard]] TrackingSnapshotView CaptureView() const noexcept
+        {
+            TrackingSnapshotView view{};
+
+#if DNG_MEM_TRACKING_ENABLED
+            for (std::size_t i = 0; i < view.byTag.size(); ++i)
+            {
+                const auto& stats = m_stats[i];
+                const std::size_t bytes = stats.current_bytes.load(std::memory_order_relaxed);
+                const std::size_t allocs = stats.current_allocations.load(std::memory_order_relaxed);
+                view.byTag[i].bytes = bytes;
+                view.byTag[i].allocs = allocs;
+                view.totalBytes += bytes;
+                view.totalAllocs += allocs;
+            }
+#endif
+
+            return view;
+        }
+
+        // ---
+        // Purpose : Return a point-in-time copy of cumulative counters.
+        // Contract: Thread-safe; lock-free. Callable anytime.
+        // Notes   : Used by Bench.hpp to compute bytes/op and allocs/op from deltas.
+        // ---
+        [[nodiscard]] TrackingMonotonicCounters CaptureMonotonic() const noexcept
+        {
+            TrackingMonotonicCounters s;
+            s.TotalAllocCalls     = m_totalAllocCalls.load(std::memory_order_relaxed);
+            s.TotalFreeCalls      = m_totalFreeCalls.load(std::memory_order_relaxed);
+            s.TotalBytesAllocated = m_totalBytesAllocated.load(std::memory_order_relaxed);
+            s.TotalBytesFreed     = m_totalBytesFreed.load(std::memory_order_relaxed);
+            return s;
         }
 
         // Forward declarations for methods implemented in task 7.2

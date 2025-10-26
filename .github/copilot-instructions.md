@@ -1,0 +1,13 @@
+## D-Engine AI Contributor Guide
+- **Project Shape:** Header-first C++23/26 engine in `Source/Core/**`; `.cpp` only for mandatory TUs like `Core/Memory/GlobalNewDelete.cpp`. Include headers with engine-absolute paths (`"Core/Memory/Allocator.hpp"`).
+- **Authoring Style:** Document each public type/function with Purpose / Contract / Notes and explicit thread-safety; always explain *why*, not just *how*.
+- **Language Defaults:** Use `[[nodiscard]]`, `constexpr`, `noexcept`; prefer `dng::` namespace and `DNG_` macros; never add new STL or external libs without approval.
+- **Alignment Helpers:** Always call `NormalizeAlignment`, `AlignUp`, `IsPowerOfTwo` from `Core/Memory/Alignment.hpp`—never rewrite math.
+- **Assertions & Diagnostics:** Protect risky logic with `DNG_CHECK` / `DNG_ASSERT` (`Core/Diagnostics/Check.hpp`, `Core/Logger.hpp`); guard expensive logs behind `Logger::IsEnabled()`.
+- **Memory System:** `Core/Memory/Allocator.hpp` defines the allocator contract; all frees must match size/alignment. `TrackingAllocator` exposes monotonic counters via `CaptureMonotonic()` for real churn measurement.
+- **Allocator Patterns:** Use `AllocatorRef::New*` helpers, respect marker-only frees in `StackAllocator`, follow toggles in `MemoryConfig.hpp` (`DNG_MEM_TRACKING`, `DNG_MEM_FATAL_ON_OOM`, etc.).
+- **Core Aggregation:** `Core/CoreMinimal.hpp` is the safe umbrella header; ensure each header compiles standalone before inclusion there.
+- **Bench Harness:** `Core/Diagnostics/Bench.hpp` provides `DNG_BENCH(name, iterations, lambda)`; reports `<tracking-off>` if no counters. Extend benchmarks in `tests/Test_BenchDriver.cpp`; add warm-up + auto-scaling for stability.
+- **Build Workflow:** Primary target MSVC 2022 via `msbuild "$PWD\D-Engine.sln" /p:Configuration=Debug /p:Platform=x64`; must compile cleanly in Release and under Clang/GCC.
+- **Testing Expectations:** No runtime test framework; prefer constexpr or compile-only smoke tests under `tests/`; document each validation case.
+- **Performance Mindset:** Favor contiguous data, zero abstraction overhead, and deterministic memory; justify every CPU / RAM cost and avoid hidden runtimes.

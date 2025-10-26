@@ -1,13 +1,18 @@
 #pragma once
-
-// D-Engine SmallObject / Slab Allocator (MVP v1)
-// - Fixed size classes (16..1024)
-// - Per-size-class slab lists (default 64 KB slabs)
-// - Singly-linked free-list per class (O(1) alloc/free)
-// - Thread-safety: one std::mutex per class (simple v1)
-// - Parent-backed: uses a parent IAllocator* to allocate slabs
-// - Reallocate: naive copy + free (old block not reused)
-// - Debug/Diagnostics: DumpStats()
+// ============================================================================
+// D-Engine - Core/Memory/SmallObjectAllocator.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Provide a slab-backed allocator tuned for <= 1 KiB objects so hot
+//           paths can avoid the general heap while still honouring the engine
+//           allocator contract.
+// Contract: All requests normalise alignment via `NormalizeAlignment`. Blocks
+//           must be freed with the same `(size, alignment)`; larger requests or
+//           unusual alignments fall back to the parent allocator. Per-class
+//           mutexes deliver coarse thread-safety.
+// Notes   : Slabs are sourced from a parent allocator. Diagnostics expose peak
+//           usage via `DumpStats`. `Reallocate` is copy-based and never grows in
+//           place.
+// ============================================================================
 
 #include "Core/Types.hpp"
 #include "Core/Memory/Allocator.hpp"
@@ -20,7 +25,6 @@
 #include <mutex>
 #include <new>        // std::nothrow
 #include <cstring>    // std::memcpy
-#include <cstdint>
 
 namespace dng::core
 {
