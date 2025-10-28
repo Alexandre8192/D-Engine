@@ -56,7 +56,8 @@ namespace
 
     inline void PrintNote(const char* message) noexcept
     {
-        if (!message) return;
+        if (!message)
+            return;
     #ifdef __cpp_lib_print
         std::print("[Note] {}\n", message);
     #else
