@@ -110,15 +110,15 @@ namespace core
             }
 
             constexpr size_type kElementSize = static_cast<size_type>(sizeof(value_type));
-            const std::size_t alignment = NormalizeAlignment(static_cast<std::size_t>(alignof(value_type)));
             if (count > (std::numeric_limits<size_type>::max)() / kElementSize)
             {
                 HandleAllocationFailure((std::numeric_limits<std::size_t>::max)(),
-                    alignment,
+                    alignof(value_type),
                     "AllocatorAdapter::allocate overflow");
             }
 
             const size_type totalBytes = count * kElementSize;
+            const std::size_t alignment = NormalizeAlignment(static_cast<std::size_t>(alignof(value_type)));
 
             AllocatorRef alloc = ResolveAllocator();
             if (!alloc.IsValid())
