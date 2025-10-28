@@ -122,8 +122,8 @@ struct [[nodiscard]] Status {
 
 ## 5) Assertions, Logging, Diagnostics
 
-* Programmer errors → `DNG_ASSERT(cond)`.
-* Recoverable runtime conditions → `DNG_CHECK(cond)` and return a `Status`.
+* Programmer errors -> `DNG_ASSERT(cond)`.
+* Recoverable runtime conditions -> `DNG_CHECK(cond)` and return a `Status`.
 * Heavy logging under `Logger::IsEnabled("Category")` guards.
 
 ---
