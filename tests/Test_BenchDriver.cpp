@@ -95,7 +95,8 @@ namespace
     template<class Alloc>
     inline void DeallocateCompat(Alloc* alloc, void* ptr, std::size_t size, std::size_t alignment) noexcept
     {
-        if (!alloc || !ptr) return;
+        if (!alloc || !ptr)
+            return;
 
         if constexpr (requires(Alloc* a) { a->DeallocateBytes(ptr, size, alignment); })
         {
