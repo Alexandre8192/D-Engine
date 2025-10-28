@@ -216,7 +216,7 @@ int main()
             arena.Rewind(marker);
         });
 
-    PrintBenchLine(result);
+        PrintBenchLine(result);
     }
     else
     {
