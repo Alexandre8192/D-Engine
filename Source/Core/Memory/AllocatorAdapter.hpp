@@ -239,6 +239,18 @@ namespace core
             return mAllocator;
         }
 
+        // ---
+        // Purpose : Trigger OOM policy diagnostics and terminate execution upon
+        //           allocation failure.
+        // Contract: Never returns; noexcept; static function. Must be called with
+        //           the failed allocation size, alignment, and context string.
+        //           Terminates the process unconditionally after logging.
+        // Notes   : Uses std::terminate() rather than throw to maintain noexcept
+        //           guarantee and avoid exception overhead. The DNG_MEM_CHECK_OOM
+        //           macro logs failure details before termination, enabling
+        //           post-mortem debugging. This matches D-Engine's zero-exception
+        //           policy in Core modules.
+        // ---
         [[noreturn]] static void HandleAllocationFailure(std::size_t size,
             std::size_t alignment,
             const char* context) noexcept
