@@ -146,7 +146,7 @@ Nothing is compiled or linked if you don’t select it.
 ## Roadmap (high level)
 
 * ✅ Memory: allocators, alignment, diagnostics, tracking, bench harness.
-* 🚧 Contracts: `Physics`, `Renderer`, `Audio` squeletons with examples and smoke tests.
+* 🚧 Contracts: `Physics`, `Renderer`, `Audio` skeletons with examples and smoke tests.
 * ⏭ Physics backends:
 
   * `NullPhysics` (reference & docs)
