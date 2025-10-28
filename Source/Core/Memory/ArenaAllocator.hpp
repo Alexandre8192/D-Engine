@@ -23,6 +23,7 @@
 #include <algorithm> // std::min
 #include <cstdint>   // std::uintptr_t
 #include <climits>   // SIZE_MAX
+#include <utility>   // std::exchange
 
 // Temporary logging macros until Logger.hpp is implemented
 #ifndef DNG_LOG_ERROR
@@ -70,7 +71,8 @@ namespace dng::core {
     //           `Reset()` or `Rewind(marker)`; `Deallocate()` is a documented
     //           no-op.
     // Notes   : Not thread-safe. Tracking fields (`m_peakUsed`) are updated
-    //           opportunistically for diagnostics.
+    //           opportunistically for diagnostics. Use ScopedMarker to wrap
+    //           transient regions so unwinding paths automatically rewind.
     class ArenaAllocator : public IAllocator {
     private:
         uint8_t* m_base;
@@ -90,6 +92,62 @@ namespace dng::core {
         }
 
 public:
+        // --- ScopedMarker -------------------------------------------------
+        // Purpose : RAII helper capturing the current marker and rewinding on
+        //           scope exit (including unwinding paths).
+        // Contract: ArenaAllocator must outlive the ScopedMarker; moves transfer
+        //           ownership and leave the source inactive. Copying is disabled.
+        // Notes   : Thread-safety matches ArenaAllocator (single-owner expected).
+        class ScopedMarker {
+        public:
+            explicit ScopedMarker(ArenaAllocator& arena) noexcept
+                : m_arena(&arena)
+                , m_marker(arena.GetMarker())
+            {
+            }
+
+            ScopedMarker(const ScopedMarker&) = delete;
+            ScopedMarker& operator=(const ScopedMarker&) = delete;
+
+            ScopedMarker(ScopedMarker&& other) noexcept
+                : m_arena(std::exchange(other.m_arena, nullptr))
+                , m_marker(other.m_marker)
+            {
+            }
+
+            ScopedMarker& operator=(ScopedMarker&& other) noexcept
+            {
+                if (this != &other)
+                {
+                    Release();
+                    m_arena = std::exchange(other.m_arena, nullptr);
+                    m_marker = other.m_marker;
+                }
+                return *this;
+            }
+
+            ~ScopedMarker() noexcept
+            {
+                Release();
+            }
+
+            void Release() noexcept
+            {
+                if (m_arena && m_marker.IsValid())
+                {
+                    m_arena->Rewind(m_marker);
+                }
+                m_arena = nullptr;
+            }
+
+            [[nodiscard]] bool IsActive() const noexcept { return m_arena != nullptr; }
+            [[nodiscard]] ArenaMarker GetMarker() const noexcept { return m_marker; }
+
+        private:
+            ArenaAllocator* m_arena;
+            ArenaMarker     m_marker;
+        };
+
         // Owns its backing store (allocated via parentAllocator)
         ArenaAllocator(IAllocator* parentAllocator, usize capacity) noexcept
             : m_base(nullptr)

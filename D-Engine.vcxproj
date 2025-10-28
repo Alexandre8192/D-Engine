@@ -52,7 +52,6 @@
     <ClCompile Include="Source\Core\Memory\Allocator.cpp" />
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp" />
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
-    <ClCompile Include="tests\Test_BenchDriver.cpp" />
     <ClCompile Include="tests\Test_GlobalNewDelete_BuildOnly.cpp" />
     <ClCompile Include="tests\Test_StdAliases_BuildOnly.cpp" />
   </ItemGroup>
@@ -78,13 +77,13 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>

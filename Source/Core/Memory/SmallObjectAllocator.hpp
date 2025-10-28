@@ -21,11 +21,15 @@
 #include "Core/Memory/OOM.hpp"
 #include "Core/Logger.hpp"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cstring>    // std::memcpy
+#include <functional>
 #include <mutex>
 #include <new>        // std::nothrow
-#include <cstring>    // std::memcpy
+#include <thread>
 
 namespace dng::core
 {
@@ -52,7 +56,9 @@ namespace dng::core
      * then user payload is aligned as requested (>= natural alignment).
      *
      * Threading:
-     *   - Mutex per size-class (coarse but simple). Phase 2 can add per-thread caches.
+     *   - Per-thread magazines (thread_local) service the hot path without locks.
+     *   - Slow path hashes threads into sharded free-lists protected by shard-local mutexes,
+     *     reducing cross-thread contention while slabs themselves stay class-serialised.
      */
     // ---
     // Purpose : Provide a fast-path allocator for < 1 KiB payloads backed by slabs.
@@ -78,7 +84,17 @@ namespace dng::core
             DNG_CHECK(mCfg.SlabSizeBytes >= 4096); // sanity guard against degenerate slabs
         }
 
-        ~SmallObjectAllocator() override = default;
+        ~SmallObjectAllocator() override
+        {
+            ThreadCache& cache = sThreadCache;
+            if (cache.Owner == this)
+            {
+                FlushThreadCache(cache);
+                cache.Owner = nullptr;
+                cache.Reset();
+            }
+            mAlive.store(false, std::memory_order_release);
+        }
 
         // ---
         // Purpose : Allocate a small object while honouring the alignment contract.
@@ -219,6 +235,7 @@ namespace dng::core
                 const usize blkSize = EffectiveUserBlockSize(i);
                 const usize slabCount = c.SlabCount.load(std::memory_order_relaxed);
                 const usize freeCount = c.FreeCount.load(std::memory_order_relaxed);
+                const usize cachedCount = c.CachedCount.load(std::memory_order_relaxed);
 
                 // Approx blocks = slabCount * blocksPerSlab(i)
                 const usize bps = BlocksPerSlab(i);
@@ -226,12 +243,13 @@ namespace dng::core
 
                 totalSlabs += slabCount;
                 totalBlocks += blocks;
-                totalFree += freeCount;
+                totalFree += (freeCount + cachedCount);
                 totalMem += slabCount * mCfg.SlabSizeBytes;
 
                 DNG_LOG_INFO(category,
-                    "[SmallObject] class=%d size=%zu bytes, slabs=%zu, blocks=%zu, free=%zu",
-                    (int)i, (size_t)blkSize, (size_t)slabCount, (size_t)blocks, (size_t)freeCount);
+                    "[SmallObject] class=%d size=%zu bytes, slabs=%zu, blocks=%zu, free=%zu (tls=%zu)",
+                    (int)i, (size_t)blkSize, (size_t)slabCount, (size_t)blocks,
+                    (size_t)freeCount, (size_t)cachedCount);
             }
 
             DNG_LOG_INFO(category,
@@ -240,13 +258,114 @@ namespace dng::core
         }
 
     private:
-        // ---- Fixed size-class table (bytes) ----
+        friend struct ThreadCache;
+
+        // ---- Fixed size-class table (bytes) --------------------------------
         static constexpr std::array<usize, 7> kClassSizes = {
             16, 32, 64, 128, 256, 512, 1024
         };
-        static constexpr i32 kNumClasses = (i32)kClassSizes.size();
+        static constexpr i32   kNumClasses        = static_cast<i32>(kClassSizes.size());
+        static constexpr usize kMagazineCapacity  = static_cast<usize>(DNG_SOA_TLS_MAG_CAPACITY);
+        static constexpr usize kDefaultBatch      = static_cast<usize>(DNG_SOA_TLS_BATCH_COUNT);
+        static constexpr usize kShardCount        = static_cast<usize>(DNG_SOA_SHARD_COUNT);
+
+        static_assert(kMagazineCapacity >= 1,   "SmallObjectAllocator TLS magazine capacity must be >= 1");
+        static_assert(kDefaultBatch   >= 1,     "SmallObjectAllocator TLS batch count must be >= 1");
+        static_assert(kDefaultBatch   <= kMagazineCapacity, "TLS batch count cannot exceed magazine capacity");
+        static_assert(kShardCount     >= 1,     "SmallObjectAllocator requires at least one shard");
+        static_assert((kShardCount & (kShardCount - 1)) == 0, "Shard count must be a power of two");
+
+        template<usize Count>
+        struct ShardBitHelper
+        {
+            static constexpr unsigned value = 1 + ShardBitHelper<Count / 2>::value;
+        };
+
+        template<>
+        struct ShardBitHelper<1>
+        {
+            static constexpr unsigned value = 0;
+        };
+
+        static constexpr unsigned kShardBits = ShardBitHelper<kShardCount>::value;
+        static constexpr std::uint64_t kShardHashMultiplier = 11400714819323198485ull; // Knuth golden ratio
+        static constexpr std::int64_t  kFastRefillThresholdNs = 200'000;   // 0.2 ms
+        static constexpr std::int64_t  kIdleDecayThresholdNs  = 5'000'000; // 5 ms
+
+        using Clock = std::chrono::steady_clock;
 
         struct ClassIndex { i32 Index = -1; };
+
+        struct FreeNode;
+
+        struct Shard
+        {
+            FreeNode* FreeList = nullptr;
+            std::mutex Mutex;
+        };
+
+        struct Magazine
+        {
+            FreeNode* Head = nullptr;
+            usize      Count = 0;
+            usize      Batch = kDefaultBatch;
+            Clock::time_point LastRefillTime{};
+            bool       HasRefilled = false;
+
+            void Reset() noexcept
+            {
+                Head = nullptr;
+                Count = 0;
+                Batch = kDefaultBatch;
+                LastRefillTime = {};
+                HasRefilled = false;
+            }
+        };
+
+        struct ThreadCache
+        {
+            SmallObjectAllocator* Owner = nullptr;
+            Magazine Magazines[kNumClasses]{};
+
+            ~ThreadCache() noexcept
+            {
+                if (Owner && Owner->IsAlive())
+                {
+                    Owner->FlushThreadCache(*this);
+                }
+                Owner = nullptr;
+            }
+
+            void Reset() noexcept
+            {
+                for (Magazine& mag : Magazines)
+                {
+                    mag.Reset();
+                }
+            }
+        };
+
+        static thread_local ThreadCache sThreadCache;
+
+        [[nodiscard]] static std::uint64_t ThreadFingerprint() noexcept
+        {
+            thread_local const std::uint64_t value = []() noexcept {
+                std::hash<std::thread::id> hasher;
+                return static_cast<std::uint64_t>(hasher(std::this_thread::get_id()));
+            }();
+            return value;
+        }
+
+        [[nodiscard]] static usize SelectShard() noexcept
+        {
+            if constexpr (kShardCount == 1)
+            {
+                return 0;
+            }
+            const std::uint64_t hash = ThreadFingerprint() * kShardHashMultiplier;
+            const unsigned shift = 64u - kShardBits;
+            return static_cast<usize>(hash >> shift);
+        }
 
         static constexpr i32 ClassForSize(usize s) noexcept
         {
@@ -290,22 +409,19 @@ namespace dng::core
 
         struct Class
         {
-            // Head of slab list
             SlabHeader* Slabs = nullptr;
-            // Head of free-list for this class
-            FreeNode* FreeList = nullptr;
+            mutable std::mutex SlabMutex;
+            std::array<Shard, kShardCount> Shards{};
 
-            // Stats (approx)
             std::atomic<usize> SlabCount{ 0 };
             std::atomic<usize> FreeCount{ 0 };
-
-            // Mutex per class for v1
-            mutable std::mutex Mtx;
+            std::atomic<usize> CachedCount{ 0 };
         };
 
         IAllocator* mParent;
         SmallObjectConfig mCfg;
         Class          mClasses[kNumClasses]{};
+        std::atomic<bool> mAlive{ true };
 
         // --- Helpers ---
 
@@ -344,109 +460,245 @@ namespace dng::core
             return (mCfg.SlabSizeBytes - headerArea) / bsz;
         }
 
-        // Allocate a new slab for class 'ci', push all blocks into the free-list.
         // ---
-        // Purpose : Back new slab storage for the specified size-class.
-        // Contract: Must be invoked with the class mutex held.
-        // Notes   : Delegates large failures to HandleOutOfMemory().
+        // Purpose : Back new slab storage for the specified size-class and seed a shard.
+        // Contract: Caller must hold the shard mutex; this function serialises slab creation via SlabMutex.
+        // Notes   : On failure we honour ReturnNullOnOOM via HandleOutOfMemory().
         // ---
-        SlabHeader* AllocateSlabLocked(i32 ci)
+        bool AllocateSlabLocked(i32 ci, Class& klass, Shard& targetShard) noexcept
         {
-            Class& C = mClasses[ci];
-            // Allocate raw slab buffer from parent
+            std::scoped_lock slabGuard(klass.SlabMutex);
+
             u8* raw = static_cast<u8*>(mParent->Allocate(mCfg.SlabSizeBytes, alignof(std::max_align_t)));
             if (!raw)
             {
                 HandleOutOfMemory(mCfg.SlabSizeBytes, alignof(std::max_align_t), "SmallObjectAllocator::AllocateSlab");
-                return nullptr;
+                return false;
             }
 
-            // Place slab header at start, aligned
             const usize hdrAlignedSize = AlignUp<usize>(sizeof(SlabHeader), 16);
             auto* slab = reinterpret_cast<SlabHeader*>(raw);
-            slab->Next = C.Slabs;
+            slab->Next = klass.Slabs;
             slab->ClassIndex = ci;
             slab->Begin = raw + hdrAlignedSize;
             slab->End = raw + mCfg.SlabSizeBytes;
+            klass.Slabs = slab;
 
-            // Initialize blocks for free-list
             const usize blkSize = EffectiveUserBlockSize(ci);
             const usize count = (slab->End - slab->Begin) / blkSize;
 
             u8* cursor = slab->Begin;
-            FreeNode* prev = nullptr;
+            FreeNode* headNew = nullptr;
             for (usize i = 0; i < count; ++i)
             {
-                // Block layout:
-                // [ .. padding to natural .. | BlockHeader | user ... up to blkSize ]
-                // We place BlockHeader at the *beginning* of this block region.
-                // User pointer is (bh + 1), which is aligned thanks to EffectiveUserBlockSize().
                 auto* bh = reinterpret_cast<BlockHeader*>(cursor);
                 bh->OwnerSlab = slab;
 
-                // Free node is stored where user would be (bh + 1)
                 auto* fn = reinterpret_cast<FreeNode*>(bh + 1);
-                fn->Next = prev;
-                prev = fn;
+                fn->Next = headNew;
+                headNew = fn;
 
                 cursor += blkSize;
             }
 
-            // Link slab and free-list
-            C.Slabs = slab;
-            // Push all new blocks in front of the free-list
-            if (prev)
+            if (headNew)
             {
-                // Find last in 'prev' chain (we built LIFO so 'prev' is head already)
-                // Append existing free-list behind it
-                FreeNode* headNew = prev;
-                // Count how many were created:
-                usize created = count;
-
-                // Concat: new list headNew + old FreeList
-                // We don't need to walk; headNew is already the first
-                // Link last -> old FreeList (we built LIFO, so the last created is actually at the end;
-                // but since we reversed as we created, 'prev' is head; safe to just set its Next to old head? No.)
-                // Simpler: prepend the entire newly-built chain to old list by moving head pointer:
-                FreeNode* oldHead = C.FreeList;
-                // Find tail to concat (one pass)
                 FreeNode* tail = headNew;
-                while (tail->Next) tail = tail->Next;
-                tail->Next = oldHead;
-
-                C.FreeList = headNew;
-                C.FreeCount.fetch_add(created, std::memory_order_relaxed);
+                while (tail->Next)
+                {
+                    tail = tail->Next;
+                }
+                tail->Next = targetShard.FreeList;
+                targetShard.FreeList = headNew;
+                klass.FreeCount.fetch_add(count, std::memory_order_relaxed);
             }
 
-            C.SlabCount.fetch_add(1, std::memory_order_relaxed);
-            return slab;
+            klass.SlabCount.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+
+        [[nodiscard]] Magazine* GetThreadMagazines() noexcept
+        {
+            ThreadCache& cache = sThreadCache;
+            if (cache.Owner == this)
+            {
+                return cache.Magazines;
+            }
+
+            if (cache.Owner && cache.Owner->IsAlive())
+            {
+                cache.Owner->FlushThreadCache(cache);
+                cache.Owner = nullptr;
+            }
+
+            cache.Reset();
+            cache.Owner = this;
+            return cache.Magazines;
+        }
+
+        [[nodiscard]] bool RefillMagazine(i32 classIdx, Magazine& mag) noexcept
+        {
+            Class& C = mClasses[classIdx];
+
+            const auto now = Clock::now();
+            if (mag.HasRefilled)
+            {
+                const auto delta = now - mag.LastRefillTime;
+                const auto deltaNs = std::chrono::duration_cast<std::chrono::nanoseconds>(delta).count();
+                if (deltaNs <= kFastRefillThresholdNs && mag.Batch < kMagazineCapacity)
+                {
+                    mag.Batch = std::min(kMagazineCapacity, mag.Batch * 2);
+                }
+                else if (deltaNs >= kIdleDecayThresholdNs && mag.Batch > kDefaultBatch)
+                {
+                    mag.Batch = std::max(kDefaultBatch, mag.Batch / 2);
+                }
+            }
+            else
+            {
+                mag.Batch = kDefaultBatch;
+            }
+            mag.LastRefillTime = now;
+            mag.HasRefilled = true;
+
+            const usize desiredCount = std::min(kMagazineCapacity, mag.Count + mag.Batch);
+
+            const usize shardIndex = SelectShard();
+            Shard& shard = C.Shards[shardIndex];
+            std::unique_lock<std::mutex> shardLock(shard.Mutex);
+
+            usize pulled = 0;
+            while (mag.Count < desiredCount)
+            {
+                if (!shard.FreeList)
+                {
+                    if (!AllocateSlabLocked(classIdx, C, shard))
+                    {
+                        break;
+                    }
+                    continue;
+                }
+
+                FreeNode* node = shard.FreeList;
+                shard.FreeList = node->Next;
+                C.FreeCount.fetch_sub(1, std::memory_order_relaxed);
+
+                node->Next = mag.Head;
+                mag.Head = node;
+                ++mag.Count;
+                ++pulled;
+            }
+
+            if (pulled > 0)
+            {
+                C.CachedCount.fetch_add(pulled, std::memory_order_relaxed);
+            }
+
+            return mag.Count != 0;
+        }
+
+        void DrainMagazineToClass(i32 classIdx, Magazine& mag, usize releaseCount) noexcept
+        {
+            if (releaseCount == 0)
+            {
+                return;
+            }
+
+            if (mag.Count == 0 || !mag.Head)
+            {
+                mag.Reset();
+                return;
+            }
+
+            const usize toRelease = std::min<usize>(mag.Count, releaseCount);
+            if (toRelease == 0)
+            {
+                return;
+            }
+
+            Class& C = mClasses[classIdx];
+            const usize shardIndex = SelectShard();
+            Shard& shard = C.Shards[shardIndex];
+            std::unique_lock<std::mutex> shardLock(shard.Mutex);
+
+            FreeNode* batchHead = mag.Head;
+            FreeNode* batchTail = batchHead;
+            for (usize i = 1; i < toRelease; ++i)
+            {
+                DNG_CHECK(batchTail->Next != nullptr);
+                batchTail = batchTail->Next;
+            }
+
+            FreeNode* remainingHead = batchTail->Next;
+            batchTail->Next = shard.FreeList;
+            shard.FreeList = batchHead;
+
+            shardLock.unlock();
+
+            C.FreeCount.fetch_add(toRelease, std::memory_order_relaxed);
+            const usize prevCache = C.CachedCount.fetch_sub(toRelease, std::memory_order_relaxed);
+            DNG_CHECK(prevCache >= toRelease);
+
+            mag.Head = remainingHead;
+            mag.Count -= toRelease;
+
+            if (mag.Count == 0 || !mag.Head)
+            {
+                mag.Reset();
+            }
+            else if (mag.Batch > kDefaultBatch)
+            {
+                mag.Batch = std::max(kDefaultBatch, mag.Batch / 2);
+            }
+        }
+
+        void FlushThreadCache(ThreadCache& cache) noexcept
+        {
+            if (cache.Owner != this)
+            {
+                return;
+            }
+            for (i32 i = 0; i < kNumClasses; ++i)
+            {
+                Magazine& mag = cache.Magazines[i];
+                if (mag.Count > 0)
+                {
+                    DrainMagazineToClass(i, mag, mag.Count);
+                }
+            }
+            cache.Reset();
+            cache.Owner = nullptr;
+        }
+
+        [[nodiscard]] bool IsAlive() const noexcept
+        {
+            return mAlive.load(std::memory_order_acquire);
         }
 
         // ---
-        // Purpose : Produce a block from the requested class, provisioning new slabs on demand.
-        // Contract: Caller must ensure `ci.Index` is in-range and alignment already validated.
-        // Notes   : Alignment assertion doubles as a safety net during development builds.
+        // Purpose : Produce a block from the requested class via TLS magazines.
+        // Contract: Caller ensures ci.Index is valid and alignment normalized.
+        // Notes   : Slow path refills from the global free-list under mutex.
         // ---
         void* AllocateFromClass(ClassIndex ci, usize requestSize, usize alignment) noexcept
         {
             const i32 idx = ci.Index;
+            Magazine* magazines = GetThreadMagazines();
+            Magazine& mag = magazines[idx];
             Class& C = mClasses[idx];
-            const std::scoped_lock lock(C.Mtx);
 
-            // Fast path: pop from free-list
-            if (C.FreeList)
+            if (mag.Head)
             {
-                FreeNode* node = C.FreeList;
-                C.FreeList = node->Next;
-                C.FreeCount.fetch_sub(1, std::memory_order_relaxed);
-
-                // Return user pointer (node is at user area)
+                FreeNode* node = mag.Head;
+                mag.Head = node->Next;
+                --mag.Count;
+                const usize prevCache = C.CachedCount.fetch_sub(1, std::memory_order_relaxed);
+                DNG_CHECK(prevCache > 0);
+                DNG_ASSERT(IsAligned(node, alignment), "SmallObjectAllocator returned misaligned pointer");
                 return static_cast<void*>(node);
             }
 
-            // Need a new slab
-            SlabHeader* s = AllocateSlabLocked(idx);
-            if (!s)
+            if (!RefillMagazine(idx, mag))
             {
                 if (mCfg.ReturnNullOnOOM)
                 {
@@ -457,29 +709,37 @@ namespace dng::core
                 return nullptr;
             }
 
-            // After creating a slab, free-list is non-empty; pop one
-            FreeNode* node = C.FreeList;
+            FreeNode* node = mag.Head;
             DNG_CHECK(node != nullptr);
-            C.FreeList = node->Next;
-            C.FreeCount.fetch_sub(1, std::memory_order_relaxed);
+            mag.Head = node->Next;
+            --mag.Count;
+            const usize prevCache = C.CachedCount.fetch_sub(1, std::memory_order_relaxed);
+            DNG_CHECK(prevCache > 0);
             DNG_ASSERT(IsAligned(node, alignment), "SmallObjectAllocator returned misaligned pointer");
             return static_cast<void*>(node);
         }
 
-    // ---
-    // Purpose : Return a block to its class free-list.
-    // Contract: Must be invoked with a pointer originally produced by AllocateFromClass.
-    // Notes   : Free-list push is LIFO to maximise cache locality of hot objects.
-    // ---
-    void FreeBlock(void* userPtr, i32 classIdx) noexcept
+        // ---
+        // Purpose : Return a block to the owning class, favouring TLS magazines.
+        // Contract: Pointer must originate from AllocateFromClass for classIdx.
+        // Notes   : Magazines drain to the shared free-list when full to limit drift.
+        // ---
+        void FreeBlock(void* userPtr, i32 classIdx) noexcept
         {
-            Class& C = mClasses[classIdx];
-            const std::scoped_lock lock(C.Mtx);
-
             auto* node = reinterpret_cast<FreeNode*>(userPtr);
-            node->Next = C.FreeList;
-            C.FreeList = node;
-            C.FreeCount.fetch_add(1, std::memory_order_relaxed);
+            Magazine* magazines = GetThreadMagazines();
+            Magazine& mag = magazines[classIdx];
+
+            if (mag.Count >= kMagazineCapacity)
+            {
+                const usize release = std::min(mag.Count, std::max(mag.Batch, kDefaultBatch));
+                DrainMagazineToClass(classIdx, mag, release);
+            }
+
+            node->Next = mag.Head;
+            mag.Head = node;
+            ++mag.Count;
+            mClasses[classIdx].CachedCount.fetch_add(1, std::memory_order_relaxed);
         }
 
         // ---
@@ -501,5 +761,7 @@ namespace dng::core
             }
         }
     };
+
+    inline thread_local SmallObjectAllocator::ThreadCache SmallObjectAllocator::sThreadCache{};
 
 } // namespace dng::core

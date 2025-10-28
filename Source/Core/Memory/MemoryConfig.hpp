@@ -144,6 +144,21 @@
 #   define DNG_MAX_REASONABLE_ALIGNMENT (1u << 20)
 #endif
 
+// -----------------------------------------------------------------------------
+// SmallObjectAllocator tunables: TLS magazine sizing + batch transfers.
+// -----------------------------------------------------------------------------
+#ifndef DNG_SOA_TLS_MAG_CAPACITY
+#   define DNG_SOA_TLS_MAG_CAPACITY 64u
+#endif
+
+#ifndef DNG_SOA_TLS_BATCH_COUNT
+#   define DNG_SOA_TLS_BATCH_COUNT 8u
+#endif
+
+#ifndef DNG_SOA_SHARD_COUNT
+#   define DNG_SOA_SHARD_COUNT 8u
+#endif
+
 // ============================================================================
 // Compile-time "capabilities" view (constexpr booleans)
 // These are the **ground truth** used throughout the engine.
