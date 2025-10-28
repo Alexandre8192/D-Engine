@@ -20,7 +20,6 @@
 //   - The helper emits no logs; `ToString` offers quick, dependency-free text.
 // ============================================================================
 
-#include <atomic>      // std::atomic_signal_fence
 #include <chrono>      // std::chrono::steady_clock
 #include <cmath>       // std::ceil
 #include <cstdint>     // std::uint64_t
@@ -74,21 +73,6 @@ struct BenchResult
 };
 
 namespace detail {
-
-// --- Dead-code elimination barrier ----------------------------------------
-// Purpose : Prevent benchmarks from having their observable work removed by
-//           the optimiser when we only inspect results for timing.
-// Contract: Accepts any trivially copyable or pointer-like value; cost is a
-//           volatile read plus a compiler fence to defeat common DCE paths.
-// Notes   : Inline asm-free so it works across MSVC/Clang/GCC.
-// ----------------------------------------------------------------------------
-template<class T>
-inline void Blackhole(const T& value) noexcept
-{
-    const volatile char* opaque = reinterpret_cast<const volatile char*>(&value);
-    (void)*opaque;
-    std::atomic_signal_fence(std::memory_order_seq_cst);
-}
 
 // --- Policy knobs -----------------------------------------------------------
 // Purpose : Keep internal tunables local to implementation.
@@ -343,7 +327,7 @@ template <class F>
     text += " : ";
     detail::AppendFormatted(text, result.NsPerOp, " ns/op");
 
-    text += " (iters=";
+    text += " (N=";
     text += std::to_string(static_cast<unsigned long long>(result.Iterations));
     text += ")";
 
@@ -360,47 +344,6 @@ template <class F>
         text += "<tracking-off>";
 
     return text;
-}
-
-// ---
-// Purpose : Emit a CSV-friendly representation of a benchmark result without I/O.
-// Contract: Returns "name,iterations,nsPerOp,bytesPerOp,allocsPerOp" with
-//           placeholders of "<tracking-off>" when counters are unavailable.
-// Notes   : Intended for tooling that wants easy clipboard export.
-// ---
-[[nodiscard]] inline std::string ToCSV(const BenchResult& result)
-{
-    std::string csv;
-    csv.reserve(160);
-
-    csv += (result.Name ? result.Name : "<unnamed-bench>");
-    csv += ',';
-    detail::AppendFormatted(csv, result.NsPerOp, nullptr);
-    csv += ',';
-
-    if (result.BytesPerOp >= 0.0)
-    {
-        detail::AppendFormatted(csv, result.BytesPerOp, nullptr);
-    }
-    else
-    {
-        csv += "<tracking-off>";
-    }
-
-    csv += ',';
-    if (result.AllocsPerOp >= 0.0)
-    {
-        detail::AppendFormatted(csv, result.AllocsPerOp, nullptr);
-    }
-    else
-    {
-        csv += "<tracking-off>";
-    }
-
-    csv += ',';
-    csv += std::to_string(static_cast<unsigned long long>(result.Iterations));
-    csv += '\n';
-    return csv;
 }
 
 } // namespace bench

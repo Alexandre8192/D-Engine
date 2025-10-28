@@ -28,6 +28,7 @@
 #include "Core/Memory/ArenaAllocator.hpp"
 #include "Core/Memory/ThreadSafety.hpp"
 
+#include <memory> // Needed for std::destroy_at (see usage on lines 152, 159, 166, etc.)
 #include <new> // placement new / destroy_at
 
 namespace dng { namespace core {
