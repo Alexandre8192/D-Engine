@@ -250,7 +250,7 @@ int main()
             DeallocateCompat(defaultAlloc, ptr, 64u, alignof(std::max_align_t));
         });
 
-    PrintBenchLine(result);
+        PrintBenchLine(result);
     }
     else
     {
