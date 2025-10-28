@@ -28,6 +28,7 @@
 #include "Core/Memory/ArenaAllocator.hpp"
 #include "Core/Memory/ThreadSafety.hpp"
 
+#include <memory>
 #include <new> // placement new / destroy_at
 
 namespace dng { namespace core {

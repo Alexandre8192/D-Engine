@@ -19,6 +19,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <new>
 #include <type_traits>
@@ -41,9 +42,10 @@ namespace core
     // Purpose : STL allocator bridge that routes allocations through
     //           dng::core::AllocatorRef, defaulting to the engine default
     //           allocator when no explicit reference is supplied.
-    // Contract: Follows the C++23 Allocator named requirements. allocate()
-    //           throws std::bad_alloc (or triggers FatalOnOOM) on failure, and
-    //           deallocate() is noexcept. Propagation traits favour move/swap.
+    // Contract: Follows the C++23 Allocator named requirements. Allocation
+    //           failures honour the engine OOM policy and terminate when the
+    //           policy is fatal. deallocate() is noexcept. Propagation traits
+    //           favour move/swap.
     // Notes   : Containers copy-constructed from adapters inherit the same
     //           allocator reference. ResolveAllocator() performs lazy binding
     //           to avoid touching MemorySystem when the user passes an explicit
@@ -108,28 +110,27 @@ namespace core
             }
 
             constexpr size_type kElementSize = static_cast<size_type>(sizeof(value_type));
+            const std::size_t alignment = NormalizeAlignment(static_cast<std::size_t>(alignof(value_type)));
             if (count > (std::numeric_limits<size_type>::max)() / kElementSize)
             {
-                DNG_MEM_CHECK_OOM(count * kElementSize, alignof(value_type), "AllocatorAdapter::allocate overflow");
-                throw std::bad_alloc();
+                HandleAllocationFailure((std::numeric_limits<std::size_t>::max)(),
+                    alignment,
+                    "AllocatorAdapter::allocate overflow");
             }
 
             const size_type totalBytes = count * kElementSize;
-            const std::size_t alignment = ::dng::core::NormalizeAlignment(static_cast<std::size_t>(alignof(value_type)));
 
             AllocatorRef alloc = ResolveAllocator();
             if (!alloc.IsValid())
             {
                 DNG_CHECK(false && "AllocatorAdapter requires MemorySystem::Init() before use");
-                DNG_MEM_CHECK_OOM(totalBytes, alignment, "AllocatorAdapter::allocate (unbound)");
-                throw std::bad_alloc();
+                HandleAllocationFailure(totalBytes, alignment, "AllocatorAdapter::allocate (unbound)");
             }
 
             void* memory = alloc.AllocateBytes(static_cast<std::size_t>(totalBytes), static_cast<std::size_t>(alignment));
             if (!memory)
             {
-                DNG_MEM_CHECK_OOM(totalBytes, alignment, "AllocatorAdapter::allocate");
-                throw std::bad_alloc();
+                HandleAllocationFailure(totalBytes, alignment, "AllocatorAdapter::allocate");
             }
 
             return static_cast<value_type*>(memory);
@@ -154,7 +155,7 @@ namespace core
                 return;
             }
 
-            const std::size_t alignment = ::dng::core::NormalizeAlignment(static_cast<std::size_t>(alignof(value_type)));
+            const std::size_t alignment = NormalizeAlignment(static_cast<std::size_t>(alignof(value_type)));
             const std::size_t totalBytes = count * static_cast<size_type>(sizeof(value_type));
 
             AllocatorRef alloc = ResolveAllocator();
@@ -236,6 +237,14 @@ namespace core
                 mAllocator = ::dng::memory::MemorySystem::GetDefaultAllocator();
             }
             return mAllocator;
+        }
+
+        [[noreturn]] static void HandleAllocationFailure(std::size_t size,
+            std::size_t alignment,
+            const char* context) noexcept
+        {
+            DNG_MEM_CHECK_OOM(size, alignment, context);
+            std::terminate();
         }
 
         mutable AllocatorRef mAllocator{};

@@ -12,6 +12,7 @@ static_assert(DNG_GLOBAL_NEW_FALLBACK_MALLOC == 0 || DNG_GLOBAL_NEW_FALLBACK_MAL
 
 #include <atomic>
 #include <cstdlib>
+#include <exception>
 #include <mutex>
 #include <new>
 #include <cstdint>
@@ -271,12 +272,25 @@ namespace
         return true;
     }
 
+    [[nodiscard]] void* HandleAllocationFailure(std::size_t size,
+        std::size_t alignment,
+        bool nothrow,
+        const char* context) noexcept
+    {
+        DNG_MEM_CHECK_OOM(size, alignment, context);
+        if (!nothrow)
+        {
+            std::terminate();
+        }
+        return nullptr;
+    }
+
     // ---
     // Purpose : Common allocation path shared by all global operator new
     //           overloads.
     // Contract: Returns nullptr when nothrow==true and allocation fails. When
-    //           nothrow==false the function obeys the engine OOM policy and may
-    //           throw std::bad_alloc or abort.
+    //           nothrow==false the engine OOM policy will terminate execution;
+    //           control never returns to the caller.
     // Notes   : `context` is used for diagnostics only.
     // ---
     [[nodiscard]] void* AllocateGlobal(std::size_t size,
@@ -299,16 +313,12 @@ namespace
             void* ptr = AllocateFallback(normalizedSize, normalizedAlignment, storage);
             if (!ptr)
             {
-                DNG_MEM_CHECK_OOM(normalizedSize, normalizedAlignment, context);
-                if (nothrow) { return nullptr; }
-                throw std::bad_alloc();
+                return HandleAllocationFailure(normalizedSize, normalizedAlignment, nothrow, context);
             }
             if (!RegisterAllocation(ptr, AllocatorRef{}, normalizedSize, normalizedAlignment, true, storage))
             {
                 FreeFallback(ptr, storage);
-                DNG_MEM_CHECK_OOM(sizeof(AllocationRecord), alignof(AllocationRecord), "GlobalNew metadata (reentry)");
-                if (nothrow) { return nullptr; }
-                throw std::bad_alloc();
+                return HandleAllocationFailure(sizeof(AllocationRecord), alignof(AllocationRecord), nothrow, "GlobalNew metadata (reentry)");
             }
             return ptr;
         }
@@ -321,34 +331,19 @@ namespace
             void* ptr = AllocateFallback(normalizedSize, normalizedAlignment, storage);
             if (!ptr)
             {
-                DNG_MEM_CHECK_OOM(normalizedSize, normalizedAlignment, context);
-                if (nothrow)
-                {
-                    return nullptr;
-                }
-                throw std::bad_alloc();
+                return HandleAllocationFailure(normalizedSize, normalizedAlignment, nothrow, context);
             }
 
             if (!RegisterAllocation(ptr, AllocatorRef{}, normalizedSize, normalizedAlignment, true, storage))
             {
                 FreeFallback(ptr, storage);
-                DNG_MEM_CHECK_OOM(sizeof(AllocationRecord), alignof(AllocationRecord), "GlobalNew metadata");
-                if (nothrow)
-                {
-                    return nullptr;
-                }
-                throw std::bad_alloc();
+                return HandleAllocationFailure(sizeof(AllocationRecord), alignof(AllocationRecord), nothrow, "GlobalNew metadata");
             }
 
             return ptr;
     #else
             DNG_CHECK(false && "Global operator new invoked before MemorySystem::Init() while fallback disabled.");
-            DNG_MEM_CHECK_OOM(normalizedSize, normalizedAlignment, context);
-            if (nothrow)
-            {
-                return nullptr;
-            }
-            throw std::bad_alloc();
+            return HandleAllocationFailure(normalizedSize, normalizedAlignment, nothrow, context);
     #endif
         }
 
@@ -364,23 +359,13 @@ namespace
         void* ptr = allocator.AllocateBytes(normalizedSize, normalizedAlignment);
         if (!ptr)
         {
-            DNG_MEM_CHECK_OOM(normalizedSize, normalizedAlignment, context);
-            if (nothrow)
-            {
-                return nullptr;
-            }
-            throw std::bad_alloc();
+            return HandleAllocationFailure(normalizedSize, normalizedAlignment, nothrow, context);
         }
 
         if (!RegisterAllocation(ptr, allocator, normalizedSize, normalizedAlignment, false, nullptr))
         {
             allocator.DeallocateBytes(ptr, normalizedSize, normalizedAlignment);
-            DNG_MEM_CHECK_OOM(sizeof(AllocationRecord), alignof(AllocationRecord), "GlobalNew metadata");
-            if (nothrow)
-            {
-                return nullptr;
-            }
-            throw std::bad_alloc();
+            return HandleAllocationFailure(sizeof(AllocationRecord), alignof(AllocationRecord), nothrow, "GlobalNew metadata");
         }
 
         return ptr;
