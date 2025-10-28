@@ -272,6 +272,18 @@ namespace
         return true;
     }
 
+    // ---
+    // Purpose : Centralize out-of-memory (OOM) handling for global operator new
+    //           overloads.
+    // Contract: Returns nullptr when nothrow==true and allocation fails. When
+    //           nothrow==false, terminates the program via std::terminate();
+    //           noexcept (never throws).
+    // Notes   : std::terminate() is chosen over throw to avoid introducing
+    //           exception handling overhead in Core. This aligns with D-Engine's
+    //           no-exceptions policy while still honoring the standard library
+    //           contract that operator new must terminate on failure when not
+    //           nothrow.
+    // ---
     [[nodiscard]] void* HandleAllocationFailure(std::size_t size,
         std::size_t alignment,
         bool nothrow,
