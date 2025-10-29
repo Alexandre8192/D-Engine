@@ -57,18 +57,11 @@
 #undef DNG__TRACKING_FLAG
 #undef DNG__STATS_FLAG
 #endif
-
-
-
-
 namespace dng::core {
 
-    /**
-     * @brief Allocation categorization tags for tracking and profiling
-     *
-     * These tags allow developers to categorize allocations for better
-     * memory usage analysis and leak detection.
-     */
+    // Purpose : Enumerate allocation categories used for tagging, reporting, and leak analysis.
+    // Contract: Values are stable for serialization; `Count` must remain last to size tag arrays safely.
+    // Notes   : Extend with new tags as subsystems require; keep ordering deterministic for reports.
     enum class AllocTag : uint32 {
         General = 0,        ///< General purpose allocations
         Temporary,          ///< Short-lived temporary allocations
@@ -85,12 +78,9 @@ namespace dng::core {
         Count               ///< Total number of tags (keep last)
     };
 
-    /**
-     * @brief Allocation information for tracking and debugging
-     *
-     * Contains metadata about an allocation including categorization
-     * and optional callsite information for leak detection.
-     */
+    // Purpose : Carry allocation metadata (tag, name, optional callsite) alongside tracked blocks.
+    // Contract: Trivially copyable; safe to pass by value; callsite fields populated only when enabled via macros.
+    // Notes   : Defaults to `General` tag and "Unknown" name to keep instrumentation forward compatible.
     struct AllocInfo {
         AllocTag tag = AllocTag::General;           ///< Allocation category
         const char* name = "Unknown";               ///< Optional allocation name/description
@@ -100,35 +90,40 @@ namespace dng::core {
         uint32 line = 0;                          ///< Source line (__LINE__)
 #endif
 
-        /// Default constructor
+        // Purpose : Create metadata with default tag/name when explicit parameters unavailable.
+        // Contract: Leaves callsite fields untouched; constexpr-friendly for static usage.
+        // Notes   : Allows aggregate initialization in constexpr contexts.
         constexpr AllocInfo() noexcept = default;
 
-        /// Constructor with tag and name
+        // Purpose : Populate tag and human-readable name for diagnostics.
+        // Contract: `n` must outlive tracked allocation; defaults to "Unknown" for optional usage.
+        // Notes   : Callsite fields remain unset unless separate constructor used.
         constexpr AllocInfo(AllocTag t, const char* n = "Unknown") noexcept
             : tag(t), name(n) {
         }
 
 #if DNG_MEM_CAPTURE_CALLSITE
-        /// Constructor with callsite information
+        // Purpose : Capture tag, name, and source location for richer leak diagnostics.
+        // Contract: `n` and `f` must remain valid strings; `l` carries one-based line number from __LINE__.
+        // Notes   : Enabled only when callsite capture toggle is active.
         constexpr AllocInfo(AllocTag t, const char* n, const char* f, uint32 l) noexcept
             : tag(t), name(n), file(f), line(l) {
         }
 #endif
     };
 
-    /**
-     * @brief Per-tag allocation statistics
-     *
-     * Tracks current usage, peak usage, and allocation counts
-     * for each allocation tag category.
-     */
+    // Purpose : Maintain live and historical statistics per allocation tag for diagnostics.
+    // Contract: Thread-safe via atomic counters; callers read via relaxed loads unless stricter ordering required.
+    // Notes   : Peak tracking is opportunistic (may under-report slightly under contention but never over-report).
     struct AllocatorStats {
         std::atomic<usize> current_bytes{ 0 };       ///< Current allocated bytes
         std::atomic<usize> peak_bytes{ 0 };          ///< Peak allocated bytes
         std::atomic<usize> total_allocations{ 0 };   ///< Total allocation count
         std::atomic<usize> current_allocations{ 0 }; ///< Current active allocations
 
-        /// Reset all statistics to zero
+        // Purpose : Clear all counters to zero, typically at frame/phase boundaries.
+        // Contract: Atomic stores with relaxed ordering; safe under concurrent reads.
+        // Notes   : Does not require external locks; use when you intentionally forget historical data.
         void Reset() noexcept {
             current_bytes.store(0);
             peak_bytes.store(0);
@@ -136,7 +131,9 @@ namespace dng::core {
             current_allocations.store(0);
         }
 
-        /// Update statistics for a new allocation
+        // Purpose : Accumulate allocation counters and update peak usage opportunistically.
+        // Contract: Accepts the allocation `size` in bytes; relaxed atomics suffices for diagnostics.
+        // Notes   : Peak update may retry under contention using compare_exchange_weak.
         void RecordAllocation(usize size) noexcept {
             current_bytes.fetch_add(size);
             total_allocations.fetch_add(1);
@@ -150,23 +147,23 @@ namespace dng::core {
             }
         }
 
-        /// Update statistics for a deallocation
+        // Purpose : Decrement live allocation counters when memory is freed.
+        // Contract: `size` must equal the normalized allocation size tracked earlier when stats are enabled.
+        // Notes   : Does not adjust `peak_bytes` because peak is monotonically non-decreasing.
         void RecordDeallocation(usize size) noexcept {
             current_bytes.fetch_sub(size);
             current_allocations.fetch_sub(1);
         }
     };
 
-    // ---
     // Purpose : Lightweight snapshot view consumed by leak diagnostics helpers.
-    // Contract: Encapsulates the CURRENT allocation footprint (bytes and active
-    //           allocation count) per AllocTag at capture time.
-    // Notes   : Populated by TrackingAllocator::CaptureView using relaxed atomic
-    //           loads so that snapshotting remains a low-overhead operation even
-    //           when the allocator is under contention.
-    // ---
+    // Contract: Encapsulates the current allocation footprint (bytes and live allocations) per tag at capture time.
+    // Notes   : Populated via relaxed atomic loads to keep the operation inexpensive under contention.
     struct TrackingSnapshotView
     {
+        // Purpose : Aggregate allocation footprint for a single tag.
+        // Contract: Plain data structure; members expressed in bytes and allocation counts.
+        // Notes   : Default initialization yields a zeroed footprint.
         struct Tag
         {
             std::size_t bytes{ 0 };
@@ -178,12 +175,9 @@ namespace dng::core {
         std::size_t totalAllocs{ 0 };
     };
 
-    // ---
     // Purpose : Immutable snapshot of ever-increasing counters since process start.
-    // Contract: All fields are totals (monotonic). Use (after - before) to compute
-    //           a delta over any time window. Thread-safe to read.
-    // Notes   : Independent from "live" stats used for leak detection.
-    // ---
+    // Contract: Values are monotonic totals; take differences between snapshots to derive windowed metrics.
+    // Notes   : Independent from live stats, enabling cumulative diagnostics even when tracking is disabled.
     struct TrackingMonotonicCounters
     {
         std::uint64_t TotalAllocCalls     { 0 };
@@ -195,19 +189,23 @@ namespace dng::core {
 
 #if DNG_MEM_TRACKING
 
-    /**
-     * @brief Full allocation tracking record
-     *
-     * Used in full tracking mode to store detailed information
-     * about each individual allocation for leak detection.
-     */
+    // Purpose : Persist detailed metadata for each live allocation when full tracking is enabled.
+    // Contract: Stored only while `DNG_MEM_TRACKING` is active; size/alignment pairs remain normalized.
+    // Notes   : Timestamp field currently unused but reserved for future temporal analysis.
     struct AllocationRecord {
         usize size;                    ///< Allocation size in bytes
         usize alignment;               ///< Allocation alignment
         AllocInfo info;                ///< Allocation metadata
         uint64 timestamp;              ///< Allocation timestamp (optional)
 
+        // Purpose : Provide aggregate initialization for tracking maps.
+        // Contract: Leaves fields zero-initialized; timestamp remains unspecified until set explicitly.
+        // Notes   : Required for associative container value emplacement.
         AllocationRecord() = default;
+
+        // Purpose : Capture allocation tuple details for leak diagnostics bookkeeping.
+        // Contract: Parameters must already be normalized; `info` copied by value to retain metadata.
+        // Notes   : Initializes timestamp to zero until a clock policy is adopted.
         AllocationRecord(usize s, usize a, const AllocInfo& i) noexcept
             : size(s), alignment(a), info(i), timestamp(0) {
         }
@@ -215,46 +213,9 @@ namespace dng::core {
 
 #endif // DNG_MEM_TRACKING
 
-    /**
-     * @brief Diagnostic wrapper allocator with tracking and leak detection
-     *
-     * TrackingAllocator wraps any IAllocator implementation to provide
-     * allocation tracking, statistics, and leak detection capabilities.
-     *
-     * The allocator supports two tracking modes controlled by compile-time macros:
-     *
-     * 1. Full Tracking (DNG_MEM_TRACKING=1):
-     *    - Maintains hash table of all allocations
-     *    - Provides detailed leak reports with callsite information
-     *    - Tracks per-tag statistics and peak usage
-     *    - Significant memory and performance overhead
-     *
-     * 2. Statistics Only (DNG_MEM_STATS_ONLY=1):
-     *    - Maintains global counters only
-     *    - No per-allocation tracking or leak detection
-     *    - Minimal overhead suitable for production profiling
-     *
-     * 3. Disabled (both macros = 0):
-     *    - Compiles to minimal overhead wrapper
-     *    - No tracking or statistics
-     *    - Suitable for release builds
-     *
-     * Usage Examples:
-     * @code
-     * // Wrap any allocator with tracking
-     * DefaultAllocator baseAllocator;
-     * TrackingAllocator tracker(&baseAllocator);
-     * AllocatorRef allocRef(&tracker);
-     *
-     * // Allocate with tag information
-     * AllocInfo info(AllocTag::Rendering, "Vertex Buffer");
-     * void* buffer = tracker.AllocateTagged(1024, 16, info);
-     * tracker.Deallocate(buffer, 1024, 16);
-     *
-     * // Generate statistics report
-     * tracker.ReportStatistics();
-     * @endcode
-     */
+    // Purpose : Wrap a base allocator to expose diagnostics, leak tracking, and monotonic allocation counters.
+    // Contract: Requires a non-null `IAllocator`; (size, alignment) tuples must match the wrapped allocator's contract.
+    // Notes   : Feature set depends on compile-time toggles (`DNG_MEM_TRACKING`, `DNG_MEM_STATS_ONLY`, `DNG_MEM_REPORT_ON_EXIT`).
     class TrackingAllocator : public IAllocator {
     private:
         IAllocator* m_baseAllocator;                    ///< Underlying allocator
@@ -268,7 +229,6 @@ namespace dng::core {
         mutable std::mutex m_mutex;                     ///< Thread safety for allocation map
 #endif
 
-    // --- Monotonic churn counters (ever growing) -------------------------------
     // Purpose : Cumulative totals for performance diagnostics.
     // Contract: 64-bit atomics; relaxed ordering is sufficient for totals.
     // Notes   : Counters stay valid even if leak tracking is disabled.
@@ -280,22 +240,17 @@ namespace dng::core {
 
 
     public:
-        /**
-         * @brief Constructor wrapping a base allocator
-         *
-         * @param baseAllocator Underlying allocator to wrap (must not be null)
-         */
+        // Purpose : Bind the tracking layer to an existing allocator implementation.
+        // Contract: `baseAllocator` must be non-null and remain valid for the wrapper lifetime.
+        // Notes   : Performs a defensive null check via `DNG_CHECK`.
         explicit TrackingAllocator(IAllocator* baseAllocator) noexcept
             : m_baseAllocator(baseAllocator) {
             DNG_CHECK(baseAllocator != nullptr);
         }
 
-        /**
-         * @brief Destructor with optional leak reporting
-         *
-         * If DNG_MEM_REPORT_ON_EXIT is enabled and DNG_MEM_TRACKING is enabled,
-         * automatically reports any memory leaks on destruction.
-         */
+        // Purpose : Optionally trigger leak reports on teardown based on compile-time policy flags.
+        // Contract: No throwing; only active when both tracking and report-on-exit toggles are enabled.
+        // Notes   : Keeps destructor lightweight when diagnostics are disabled.
         ~TrackingAllocator() noexcept override {
 #if DNG_MEM_TRACKING && DNG_MEM_REPORT_ON_EXIT
             ReportLeaks();
@@ -303,11 +258,17 @@ namespace dng::core {
         }
 
         // IAllocator interface implementation
+        // Purpose : Fallback entry point for callers without explicit tag metadata.
+        // Contract: Normalizes alignment, funnels into `AllocateTagged` with default info.
+        // Notes   : Keeps legacy callers functional while still counting monotonic stats.
         [[nodiscard]] void* Allocate(usize size, usize alignment = alignof(std::max_align_t)) noexcept override {
             AllocInfo defaultInfo(AllocTag::General, "Untagged");
             return AllocateTagged(size, alignment, defaultInfo);
         }
 
+        // Purpose : Return memory to the wrapped allocator while updating diagnostics as available.
+        // Contract: Accepts optional size/alignment hints; must match the original tuple when provided.
+        // Notes   : Queries allocation map when full tracking is enabled to recover canonical tuple.
         void Deallocate(void* ptr, usize size = 0, usize alignment = alignof(std::max_align_t)) noexcept override {
             if (!ptr) return;
 
@@ -350,14 +311,9 @@ namespace dng::core {
         }
 
 
-        /**
-         * @brief Allocate memory with tag information
-         *
-         * @param size Size in bytes to allocate
-         * @param alignment Alignment requirement
-         * @param info Allocation metadata for tracking
-         * @return Allocated memory pointer or nullptr on failure
-         */
+        // Purpose : Allocate memory while recording diagnostics metadata for the request.
+        // Contract: Size must be non-zero; alignment normalized before delegating; invokes OOM policy on failure.
+        // Notes   : Records into per-tag stats and optional allocation maps depending on build flags.
         [[nodiscard]] void* AllocateTagged(usize size, usize alignment, const AllocInfo& info) noexcept {
             if (size == 0) return nullptr;
 
@@ -400,24 +356,18 @@ namespace dng::core {
         }
 
 #if DNG_MEM_TRACKING_ENABLED
-        /**
-         * @brief Get statistics for a specific allocation tag
-         *
-         * @param tag Allocation tag to query
-         * @return Reference to statistics for the tag
-         */
+        // Purpose : Expose per-tag live statistics collected for diagnostics.
+        // Contract: `tag` must be within range; requires tracking or stats-only modes to be enabled.
+        // Notes   : Returns a reference so callers can read atomic counters directly.
         [[nodiscard]] const AllocatorStats& GetStats(AllocTag tag) const noexcept {
             usize tagIndex = static_cast<usize>(tag);
             DNG_CHECK(tagIndex < static_cast<usize>(AllocTag::Count));
             return m_stats[tagIndex];
         }
 
-        /**
-         * @brief Reset all statistics to zero
-         *
-         * Clears all accumulated statistics but does not affect
-         * active allocation tracking.
-         */
+        // Purpose : Clear accumulated statistics without touching active allocation records.
+        // Contract: Safe to invoke while allocations are ongoing; per-tag counters reset to zero.
+        // Notes   : Available only when per-tag statistics are compiled in.
         void ResetStats() noexcept {
             for (auto& stats : m_stats) {
                 stats.Reset();
@@ -425,24 +375,16 @@ namespace dng::core {
         }
 #endif // DNG_MEM_TRACKING_ENABLED
 
-        /**
-         * @brief Get the underlying base allocator
-         *
-         * @return Pointer to the wrapped allocator
-         */
+        // Purpose : Provide access to the wrapped allocator for advanced scenarios.
+        // Contract: Pointer remains owned elsewhere; caller must not delete.
+        // Notes   : Useful when callers need to forward requests without diagnostics.
         [[nodiscard]] IAllocator* GetBaseAllocator() const noexcept {
             return m_baseAllocator;
         }
 
-        // ---
-        // Purpose : Capture an instantaneous per-tag aggregate suitable for
-        //           leak snapshot comparisons.
-        // Contract: Thread-safe; may be called concurrently with Allocate /
-        //           Deallocate. Returns zeros when tracking/statistics support
-        //           is compiled out.
-        // Notes   : Relies solely on atomic counters (no heavy lock) to keep
-        //           the capture path inexpensive even under contention.
-        // ---
+        // Purpose : Capture an instantaneous per-tag aggregate suitable for leak snapshot comparisons.
+        // Contract: Thread-safe; callable concurrently with Allocate/Deallocate; yields zeros when stats disabled.
+        // Notes   : Relies solely on relaxed atomic loads to avoid locking overhead.
         [[nodiscard]] TrackingSnapshotView CaptureView() const noexcept
         {
             TrackingSnapshotView view{};
@@ -463,11 +405,9 @@ namespace dng::core {
             return view;
         }
 
-        // ---
         // Purpose : Return a point-in-time copy of cumulative counters.
-        // Contract: Thread-safe; lock-free. Callable anytime.
-        // Notes   : Used by Bench.hpp to compute bytes/op and allocs/op from deltas.
-        // ---
+        // Contract: Lock-free; safe to invoke concurrently with allocations.
+        // Notes   : Benchmarks consume the returned struct to compute deltas across iterations.
         [[nodiscard]] TrackingMonotonicCounters CaptureMonotonic() const noexcept
         {
             TrackingMonotonicCounters s;
@@ -479,33 +419,43 @@ namespace dng::core {
         }
 
         // Forward declarations for methods implemented in task 7.2
+        // Purpose : Emit aggregate statistics to the engine logger or diagnostics sinks.
+        // Contract: No allocations; respects logger enablement checks before formatting output.
+        // Notes   : Implemented in TrackingAllocator.cpp to keep header self-contained.
         void ReportStatistics() const noexcept;
 
 #if DNG_MEM_TRACKING
+        // Purpose : Produce a leak report enumerating unfreed allocations when tracking is active.
+        // Contract: Requires `DNG_MEM_TRACKING`; acquires mutex while enumerating.
+        // Notes   : Implemented out-of-line to keep compilation costs low.
         void ReportLeaks() const noexcept;
+
+        // Purpose : Return the number of currently tracked active allocations.
+        // Contract: Available only in full tracking mode; acquires the allocation map mutex.
+        // Notes   : Primarily used by tests to assert leak-free behaviour.
         usize GetActiveAllocationCount() const noexcept;
 #endif
     };
 
-    /**
-     * @brief RAII helper for automatic leak reporting
-     *
-     * This helper automatically calls ReportLeaks() on the wrapped
-     * TrackingAllocator when it goes out of scope, ensuring leak
-     * reports are generated even if manual reporting is forgotten.
-     *
-     * Only active when DNG_MEM_REPORT_ON_EXIT is enabled.
-     */
 #if DNG_MEM_TRACKING && DNG_MEM_REPORT_ON_EXIT
+    // Purpose : Ensure ReportLeaks() is invoked on scope exit when diagnostics policy requires it.
+    // Contract: Holds a non-owning pointer; leak report triggered only when pointer is non-null.
+    // Notes   : Intended for stack-based helpers guarding allocator lifetimes.
     class ReportOnExit {
     private:
         TrackingAllocator* m_allocator;
 
     public:
+        // Purpose : Bind to a TrackingAllocator for scoped leak emission.
+        // Contract: `allocator` may be null; ownership remains external.
+        // Notes   : constexpr not needed because helper used at runtime.
         explicit ReportOnExit(TrackingAllocator* allocator) noexcept
             : m_allocator(allocator) {
         }
 
+        // Purpose : Invoke ReportLeaks on scope exit when a valid allocator is tracked.
+        // Contract: Must remain noexcept; safe to call when allocator is null.
+        // Notes   : Only meaningful when full tracking is compiled in.
         ~ReportOnExit() noexcept {
             if (m_allocator) {
                 m_allocator->ReportLeaks();
@@ -525,11 +475,9 @@ namespace dng::core {
     // =============================
 
 #if DNG_MEM_CAPTURE_CALLSITE
-    /**
-     * @brief Create AllocInfo with automatic callsite capture
-     *
-     * Usage: DNG_ALLOC_INFO(AllocTag::Rendering, "Vertex Buffer")
-     */
+    // Purpose : Create AllocInfo with automatic callsite capture when enabled.
+    // Contract: Expands to `AllocInfo` with tag, name, and optional file/line metadata.
+    // Notes   : Keeps call sites compact while preserving deterministic diagnostics information.
 #define DNG_ALLOC_INFO(tag, name) \
         dng::core::AllocInfo(tag, name, __FILE__, __LINE__)
 #else
@@ -537,11 +485,9 @@ namespace dng::core {
         dng::core::AllocInfo(tag, name)
 #endif
 
-    /**
-     * @brief Tagged allocation with automatic callsite capture
-     *
-     * Usage: DNG_ALLOC_TAGGED(allocator, size, alignment, AllocTag::Rendering, "Vertex Buffer")
-     */
+    // Purpose : Allocate through a TrackingAllocator while automatically constructing metadata.
+    // Contract: `allocator` must be a pointer/reference to TrackingAllocator; forwards arguments verbatim.
+    // Notes   : Avoids repetitive boilerplate at call sites where tagging is required.
 #define DNG_ALLOC_TAGGED(allocator, size, alignment, tag, name) \
         (allocator)->AllocateTagged(size, alignment, DNG_ALLOC_INFO(tag, name))
 
