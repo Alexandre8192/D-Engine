@@ -259,16 +259,25 @@ namespace memory
 
     } // namespace detail
 
-    // -------------------------------------------------------------------------
-    // MemorySystem
-    // -------------------------------------------------------------------------
-    // Purpose : Front-door static interface for memory subsystem lifecycle.
-    // Contract: Clients must call Init() prior to using shared allocators.
-    //           Shutdown() is idempotent and safe to call even if Init() failed.
-    // Notes   : Implementation delegates to detail::MemoryGlobals.
-    // -------------------------------------------------------------------------
+    // =====================================================================
+    // Purpose : Expose a contracts-first façade over the engine-wide memory
+    //           subsystem, wiring global allocators and per-thread contexts.
+    // Contract: Callers must execute `Init()` before consuming any global
+    //           allocator accessors. `Shutdown()` may be invoked multiple
+    //           times but only tears down once. Public methods are thread-safe
+    //           via the internal mutex; thread attach/detach helpers must be
+    //           paired by the owning thread. No hidden allocations occur in
+    //           this header; arena provisioning failures route through the
+    //           central `DNG_MEM_CHECK_OOM` policy.
+    // Notes   : Implementation delegates storage to detail::MemoryGlobals so
+    //           the header remains free of static data. Compile-time toggles
+    //           (tracking, guards, thread safety) gate optional subsystems.
+    // =====================================================================
     struct MemorySystem
     {
+        // Purpose : Bootstrap global allocators and attach the calling thread's small-object context.
+        // Contract: Thread-safe; a second invocation while already initialized is ignored. Must precede allocator accessors.
+        // Notes   : Copies the supplied config into global state and emits OOM diagnostics if arena provisioning fails.
         static void Init(const MemoryConfig& config = {})
         {
             auto& globals = detail::Globals();
@@ -342,6 +351,9 @@ namespace memory
             detail::AttachThreadStateUnlocked(globals);
         }
 
+        // Purpose : Tear down all global allocators and detach thread-local state.
+        // Contract: Thread-safe; safe to call even if initialization never succeeded. Idempotent across repeated calls.
+        // Notes   : Warns when threads remain attached and always resets runtime MemoryConfig to defaults.
         static void Shutdown() noexcept
         {
             auto& globals = detail::Globals();
@@ -370,6 +382,9 @@ namespace memory
             ::dng::core::MemoryConfig::GetGlobal() = MemoryConfig{};
         }
 
+        // Purpose : Bind the calling thread to MemorySystem-managed thread-local allocators.
+        // Contract: Thread-safe; must only be invoked after successful `Init()`. Safe to call redundantly per thread.
+        // Notes   : Emits a warning when called before initialization to highlight misuse.
         static void OnThreadAttach() noexcept
         {
             auto& globals = detail::Globals();
@@ -388,6 +403,9 @@ namespace memory
             detail::AttachThreadStateUnlocked(globals);
         }
 
+        // Purpose : Release thread-local allocator bindings for the calling thread.
+        // Contract: Thread-safe; no effect when MemorySystem is not initialized or the thread was never attached.
+        // Notes   : Balanced with `OnThreadAttach`; reduces leak reporting noise in thread-safe builds.
         static void OnThreadDetach() noexcept
         {
             auto& globals = detail::Globals();
@@ -401,38 +419,54 @@ namespace memory
             detail::DetachThreadStateUnlocked(globals);
         }
 
+        // Purpose : Report whether MemorySystem successfully completed initialization.
+        // Contract: Lock-free; returns a snapshot suitable for guards but not a substitute for the mutex when mutating state.
+        // Notes   : Used by helper scopes and guard macros to detect setup status.
         [[nodiscard]] static bool IsInitialized() noexcept
         {
             return detail::Globals().initialized;
         }
 
+        // Purpose : Provide a façade over the default allocator wired during `Init()`.
+        // Contract: Call only after initialization; returned reference is non-owning and may be invalid if MemorySystem is down.
+        // Notes   : No hidden allocations; simply wraps the internal pointer.
         [[nodiscard]] static AllocatorRef GetDefaultAllocator() noexcept
         {
             return detail::MakeAllocatorRef(detail::Globals().defaultAllocator);
         }
 
+        // Purpose : Expose the tracking allocator (if enabled) to subsystems needing diagnostics.
+        // Contract: Requires prior `Init()`; returns an empty reference when tracking is compiled out.
+        // Notes   : Permits callers to opt-in to leak tracking without owning the allocator instance.
         [[nodiscard]] static AllocatorRef GetTrackingAllocator() noexcept
         {
             return detail::MakeAllocatorRef(detail::Globals().trackingAllocator);
         }
 
+        // Purpose : Surface the small-object allocator configured for hot-path allocations.
+        // Contract: Requires MemorySystem initialization; reference becomes invalid after `Shutdown()`.
+        // Notes   : Thread-safe builds lazily attach per-thread state via `OnThreadAttach()`.
         [[nodiscard]] static AllocatorRef GetSmallObjectAllocator() noexcept
         {
             return detail::MakeAllocatorRef(detail::Globals().smallObjectAllocator);
         }
     };
 
-    // -------------------------------------------------------------------------
-    // MemorySystemScope
-    // -------------------------------------------------------------------------
-    // Purpose : RAII helper that guarantees Init()/Shutdown() pairing.
-    // Contract: Multiple scopes may coexist; only the outermost scope calls
-    //           Shutdown(). Construction accepts the same config as Init().
-    // Notes   : Useful for tests or CLI tools.
-    // -------------------------------------------------------------------------
+    // =====================================================================
+    // Purpose : RAII helper that guarantees balanced MemorySystem Init/Shutdown
+    //           during scoped usage (e.g., tests or command-line tools).
+    // Contract: Constructing a scope triggers `Init()`; destruction triggers
+    //           `Shutdown()` only if this scope performed the initialization.
+    //           Move semantics transfer ownership; copy is disabled.
+    // Notes   : Allows nested scopes so long as callers respect the outermost
+    //           owner model; avoids hidden global state changes in headers.
+    // =====================================================================
     class MemorySystemScope
     {
     public:
+        // Purpose : Enter a temporary MemorySystem context with the provided configuration.
+        // Contract: Thread-safe; reuses an existing initialization without reinitializing and records ownership for teardown.
+        // Notes   : Typically used in tests to force deterministic allocator setup per case.
         explicit MemorySystemScope(const MemoryConfig& cfg = {})
             : mOwns(false)
         {
@@ -444,12 +478,18 @@ namespace memory
         MemorySystemScope(const MemorySystemScope&) = delete;
         MemorySystemScope& operator=(const MemorySystemScope&) = delete;
 
+        // Purpose : Transfer scope ownership while preserving balanced shutdown semantics.
+        // Contract: Source scope relinquishes responsibility; destination inherits ownership flag.
+        // Notes   : Enables scope storage inside move-only containers.
         MemorySystemScope(MemorySystemScope&& other) noexcept
             : mOwns(other.mOwns)
         {
             other.mOwns = false;
         }
 
+        // Purpose : Move-assign scope ownership, shutting down if the current scope is responsible.
+        // Contract: Self-assignment safe; ensures prior ownership triggers Shutdown() before adopting the new flag.
+        // Notes   : Leaves the source scope inactive.
         MemorySystemScope& operator=(MemorySystemScope&& other) noexcept
         {
             if (this != &other)
@@ -464,6 +504,9 @@ namespace memory
             return *this;
         }
 
+        // Purpose : Ensure Shutdown() is invoked when this scope owns the global initialization.
+        // Contract: Noexcept; safe when MemorySystem was already torn down elsewhere.
+        // Notes   : Acts as the mirrored exit counterpart for the constructor behaviour.
         ~MemorySystemScope() noexcept
         {
             if (mOwns)
@@ -483,6 +526,9 @@ namespace memory
 // Macro helper for guarding memory-system usage.
 // -----------------------------------------------------------------------------
 #ifndef DNG_MEMORY_INIT_GUARD
+// Purpose : Short assertion helper ensuring MemorySystem is live before use.
+// Contract: Intended for debug-only call-site guards; expands to a DNG_ASSERT with a deterministic message.
+// Notes   : Keeps headers free from silent initialization while still flagging misuse in development builds.
 #define DNG_MEMORY_INIT_GUARD() \
     DNG_ASSERT(::dng::memory::MemorySystem::IsInitialized(), "MemorySystem must be initialized before use")
 #endif
