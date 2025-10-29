@@ -33,43 +33,29 @@
 
 namespace dng::core
 {
-    // ---
-    // Purpose : Configuration knobs that tailor SmallObjectAllocator behaviour.
-    // Contract: Values are read-only after construction; caller owns the struct.
-    // Notes   : ReturnNullOnOOM allows higher layers to decide whether an allocation
-    //           failure should bubble as nullptr (soft failure) or escalate via
-    //           the engine-wide OOM policy (see OOM.hpp).
-    // ---
-    struct SmallObjectConfig
-    {
-        usize SlabSizeBytes = 64 * 1024; // 64 KB per slab by default
-        usize MaxClassSize = 1024;      // > MaxClassSize => route to Parent
-        bool  ReturnNullOnOOM = false;  // if false => escalate to OOM policy
-    };
 
-    /**
-     * @brief SmallObjectAllocator maps small allocations to fixed-size buckets (slabs).
-     *
-     * Layout:
-     *   [ SlabHeader | blocks... ]
-     * Each block stores a tiny BlockHeader (pointer to owning slab) before user memory,
-     * then user payload is aligned as requested (>= natural alignment).
-     *
-     * Threading:
-     *   - Per-thread magazines (thread_local) service the hot path without locks.
-     *   - Slow path hashes threads into sharded free-lists protected by shard-local mutexes,
-     *     reducing cross-thread contention while slabs themselves stay class-serialised.
-     */
-    // ---
-    // Purpose : Provide a fast-path allocator for < 1 KiB payloads backed by slabs.
-    // Contract: Thread safety is per-class mutex (coarse) and depends on parent allocator
-    //           being thread-safe for slab procurement. Returned pointers obey
-    //           NormalizeAlignment within the guarantees documented in Notes.
-    // Notes   : Alignment requirements larger than the per-class natural alignment (16 bytes
-    //           today) are delegated to the parent allocator to keep slab layout compact.
-    //           Future revisions can specialise classes per alignment bucket if needed.
-    // ---
-    class SmallObjectAllocator final : public IAllocator
+// Purpose : Configuration knobs that tailor SmallObjectAllocator behaviour.
+// Contract: Values are read-only after construction; caller owns the struct.
+// Notes   : TLSBatchSize may be clamped by the allocator to [1, DNG_SOA_TLS_MAG_CAPACITY].
+struct SmallObjectConfig
+{
+    usize SlabSizeBytes = 64 * 1024; // 64 KB per slab by default
+    usize MaxClassSize = 1024;       // > MaxClassSize => route to Parent
+    bool  ReturnNullOnOOM = false;   // if false => escalate to OOM policy
+    // Allow callers to tune TLS refill batches without rebuilding; 0 defers to bench defaults.
+    usize TLSBatchSize   = static_cast<usize>(DNG_SOALLOC_BATCH); // default TLS refill batch (bench derived)
+};
+
+// ---
+// Purpose : Provide a fast-path allocator for < 1 KiB payloads backed by slabs.
+// Contract: Thread safety is per-class mutex (coarse) and depends on parent allocator
+//           being thread-safe for slab procurement. Returned pointers obey
+//           NormalizeAlignment within the guarantees documented in Notes.
+// Notes   : Alignment requirements larger than the per-class natural alignment (16 bytes
+//           today) are delegated to the parent allocator to keep slab layout compact.
+//           Future revisions can specialise classes per alignment bucket if needed.
+// ---
+class SmallObjectAllocator final : public IAllocator
     {
     public:
         // ---
@@ -82,6 +68,11 @@ namespace dng::core
         {
             DNG_CHECK(mParent != nullptr);
             DNG_CHECK(mCfg.SlabSizeBytes >= 4096); // sanity guard against degenerate slabs
+
+            const usize minBatch = 1;
+            const usize maxBatch = kMagazineCapacity;
+            const usize requested = (cfg.TLSBatchSize == 0) ? kDefaultBatch : cfg.TLSBatchSize;
+            mBaseBatch = std::clamp(requested, minBatch, maxBatch);
         }
 
         ~SmallObjectAllocator() override
@@ -91,7 +82,7 @@ namespace dng::core
             {
                 FlushThreadCache(cache);
                 cache.Owner = nullptr;
-                cache.Reset();
+                cache.Reset(mBaseBatch);
             }
             mAlive.store(false, std::memory_order_release);
         }
@@ -312,11 +303,11 @@ namespace dng::core
             Clock::time_point LastRefillTime{};
             bool       HasRefilled = false;
 
-            void Reset() noexcept
+            void Reset(usize baseBatch) noexcept
             {
                 Head = nullptr;
                 Count = 0;
-                Batch = kDefaultBatch;
+                Batch = baseBatch;
                 LastRefillTime = {};
                 HasRefilled = false;
             }
@@ -334,13 +325,14 @@ namespace dng::core
                     Owner->FlushThreadCache(*this);
                 }
                 Owner = nullptr;
+                Reset(SmallObjectAllocator::kDefaultBatch);
             }
 
-            void Reset() noexcept
+            void Reset(usize baseBatch) noexcept
             {
                 for (Magazine& mag : Magazines)
                 {
-                    mag.Reset();
+                    mag.Reset(baseBatch);
                 }
             }
         };
@@ -420,6 +412,7 @@ namespace dng::core
 
         IAllocator* mParent;
         SmallObjectConfig mCfg;
+    usize            mBaseBatch{ kDefaultBatch };
         Class          mClasses[kNumClasses]{};
         std::atomic<bool> mAlive{ true };
 
@@ -531,7 +524,7 @@ namespace dng::core
                 cache.Owner = nullptr;
             }
 
-            cache.Reset();
+            cache.Reset(mBaseBatch);
             cache.Owner = this;
             return cache.Magazines;
         }
@@ -549,14 +542,14 @@ namespace dng::core
                 {
                     mag.Batch = std::min(kMagazineCapacity, mag.Batch * 2);
                 }
-                else if (deltaNs >= kIdleDecayThresholdNs && mag.Batch > kDefaultBatch)
+                else if (deltaNs >= kIdleDecayThresholdNs && mag.Batch > mBaseBatch)
                 {
-                    mag.Batch = std::max(kDefaultBatch, mag.Batch / 2);
+                    mag.Batch = std::max(mBaseBatch, mag.Batch / 2);
                 }
             }
             else
             {
-                mag.Batch = kDefaultBatch;
+                mag.Batch = mBaseBatch;
             }
             mag.LastRefillTime = now;
             mag.HasRefilled = true;
@@ -606,7 +599,7 @@ namespace dng::core
 
             if (mag.Count == 0 || !mag.Head)
             {
-                mag.Reset();
+                mag.Reset(mBaseBatch);
                 return;
             }
 
@@ -644,11 +637,11 @@ namespace dng::core
 
             if (mag.Count == 0 || !mag.Head)
             {
-                mag.Reset();
+                mag.Reset(mBaseBatch);
             }
-            else if (mag.Batch > kDefaultBatch)
+            else if (mag.Batch > mBaseBatch)
             {
-                mag.Batch = std::max(kDefaultBatch, mag.Batch / 2);
+                mag.Batch = std::max(mBaseBatch, mag.Batch / 2);
             }
         }
 
@@ -666,7 +659,7 @@ namespace dng::core
                     DrainMagazineToClass(i, mag, mag.Count);
                 }
             }
-            cache.Reset();
+            cache.Reset(mBaseBatch);
             cache.Owner = nullptr;
         }
 
@@ -732,7 +725,7 @@ namespace dng::core
 
             if (mag.Count >= kMagazineCapacity)
             {
-                const usize release = std::min(mag.Count, std::max(mag.Batch, kDefaultBatch));
+                const usize release = std::min(mag.Count, std::max(mag.Batch, mBaseBatch));
                 DrainMagazineToClass(classIdx, mag, release);
             }
 

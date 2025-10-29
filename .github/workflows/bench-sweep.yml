@@ -35,6 +35,21 @@ jobs:
         run: |
           python -u tools/bench_sweep.py --warmup 1 --repeat 3 --emit-md sweep_report.md
 
+      - name: Pick defaults
+        run: |
+          python -u tools/bench_pick_defaults.py
+
+      - name: Print defaults report
+        if: always()
+        run: |
+          if (Test-Path defaults.md) {
+            Write-Host "===== Bench Defaults (Markdown) ====="
+            Get-Content -Raw defaults.md | Write-Host
+            $md = Get-Content -Raw defaults.md
+            $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
+            Write-Host "::notice title=Bench defaults::$escaped"
+          }
+
       - name: Print sweep report
         if: always()
         run: |
@@ -54,4 +69,6 @@ jobs:
           path: |
             artifacts/bench/sweeps/**/*.bench.json
             sweep_report.md
+            defaults.json
+            defaults.md
           if-no-files-found: warn

@@ -26,6 +26,7 @@
 #include <atomic>
 #include <mutex>
 #include <unordered_map>
+#include <memory>
 #include <cstring>   // std::memset
 #include <cstddef>   // std::max_align_t
 #include <cstdint>   // std::uint64_t
@@ -225,9 +226,57 @@ namespace dng::core {
 #endif
 
 #if DNG_MEM_TRACKING
-        std::unordered_map<void*, AllocationRecord> m_allocations;    ///< Active allocations map
-        mutable std::mutex m_mutex;                     ///< Thread safety for allocation map
+        struct AllocationShard
+        {
+            std::unordered_map<void*, AllocationRecord> allocations;
+            mutable std::mutex mutex;
+        };
+
+    std::unique_ptr<AllocationShard[]> m_shards;    ///< Optional sharded allocation maps
+    std::uint32_t m_shardCount{ 1 };                ///< Number of active shards (power-of-two)
+    std::uint32_t m_shardMask{ 0 };                 ///< Mask for fast shard selection
+    AllocationShard m_singleShard{};                ///< Storage when shardCount == 1
+
+        void InitializeShards(std::uint32_t shardCount) noexcept;
+        [[nodiscard]] AllocationShard& SelectShard(void* ptr) noexcept;
+        [[nodiscard]] const AllocationShard& SelectShard(const void* ptr) const noexcept;
+        [[nodiscard]] std::uint32_t ComputeShardIndex(const void* ptr) const noexcept;
+
+        template <typename Fn>
+        void VisitShards(Fn&& fn) noexcept
+        {
+            if (m_shardCount > 1u && m_shards)
+            {
+                for (std::uint32_t i = 0; i < m_shardCount; ++i)
+                {
+                    fn(m_shards[i]);
+                }
+            }
+            else
+            {
+                fn(m_singleShard);
+            }
+        }
+
+        template <typename Fn>
+        void VisitShardsConst(Fn&& fn) const noexcept
+        {
+            if (m_shardCount > 1u && m_shards)
+            {
+                for (std::uint32_t i = 0; i < m_shardCount; ++i)
+                {
+                    const AllocationShard& shard = m_shards[i];
+                    fn(shard);
+                }
+            }
+            else
+            {
+                fn(m_singleShard);
+            }
+        }
 #endif
+
+    std::uint32_t m_samplingRate{ 1 };              ///< Track-every-N allocations (>=1)
 
     // Purpose : Cumulative totals for performance diagnostics.
     // Contract: 64-bit atomics; relaxed ordering is sufficient for totals.
@@ -243,9 +292,18 @@ namespace dng::core {
         // Purpose : Bind the tracking layer to an existing allocator implementation.
         // Contract: `baseAllocator` must be non-null and remain valid for the wrapper lifetime.
         // Notes   : Performs a defensive null check via `DNG_CHECK`.
-        explicit TrackingAllocator(IAllocator* baseAllocator) noexcept
-            : m_baseAllocator(baseAllocator) {
+        explicit TrackingAllocator(IAllocator* baseAllocator,
+            std::uint32_t samplingRate = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SAMPLING_RATE),
+            std::uint32_t shardCount   = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS)) noexcept
+            : m_baseAllocator(baseAllocator)
+            , m_samplingRate(samplingRate == 0u ? 1u : samplingRate)
+        {
             DNG_CHECK(baseAllocator != nullptr);
+#if DNG_MEM_TRACKING
+            InitializeShards(shardCount);
+#else
+            (void)shardCount;
+#endif
         }
 
         // Purpose : Optionally trigger leak reports on teardown based on compile-time policy flags.
@@ -279,9 +337,10 @@ namespace dng::core {
 #if DNG_MEM_TRACKING
             // Full tracking mode: look up allocation record
             {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                auto it = m_allocations.find(ptr);
-                if (it != m_allocations.end()) {
+                AllocationShard& shard = SelectShard(ptr);
+                std::lock_guard<std::mutex> lock(shard.mutex);
+                auto it = shard.allocations.find(ptr);
+                if (it != shard.allocations.end()) {
                     const AllocationRecord& record = it->second;
                     usize tagIndex = static_cast<usize>(record.info.tag);
                     if (tagIndex < static_cast<usize>(AllocTag::Count)) {
@@ -289,7 +348,7 @@ namespace dng::core {
                     }
                     forwardSize = record.size;
                     forwardAlignment = record.alignment;
-                    m_allocations.erase(it);
+                    shard.allocations.erase(it);
                 }
             }
 #elif DNG_MEM_STATS_ONLY
@@ -332,9 +391,10 @@ namespace dng::core {
 #if DNG_MEM_TRACKING
             // Full tracking mode: record allocation details
             {
-                std::lock_guard<std::mutex> lock(m_mutex);
+                AllocationShard& shard = SelectShard(ptr);
+                std::lock_guard<std::mutex> lock(shard.mutex);
                 AllocationRecord record(size, alignment, info);
-                m_allocations[ptr] = record;
+                shard.allocations[ptr] = record;
             }
 
             // Update statistics
@@ -436,6 +496,61 @@ namespace dng::core {
         usize GetActiveAllocationCount() const noexcept;
 #endif
     };
+
+#if DNG_MEM_TRACKING
+    inline void TrackingAllocator::InitializeShards(std::uint32_t shardCount) noexcept
+    {
+        if (shardCount == 0u || !::dng::core::IsPowerOfTwo(shardCount))
+        {
+            m_shardCount = 1u;
+            m_shardMask = 0u;
+            m_shards.reset();
+            return;
+        }
+
+        m_shardCount = shardCount;
+        m_shardMask = shardCount - 1u;
+        if (m_shardCount > 1u)
+        {
+            m_shards = std::make_unique<AllocationShard[]>(m_shardCount);
+        }
+        else
+        {
+            m_shards.reset();
+            m_shardMask = 0u;
+        }
+    }
+
+    inline TrackingAllocator::AllocationShard& TrackingAllocator::SelectShard(void* ptr) noexcept
+    {
+        if (m_shardCount > 1u && m_shards)
+        {
+            const std::uint32_t index = ComputeShardIndex(ptr);
+            return m_shards[index];
+        }
+        return m_singleShard;
+    }
+
+    inline const TrackingAllocator::AllocationShard& TrackingAllocator::SelectShard(const void* ptr) const noexcept
+    {
+        if (m_shardCount > 1u && m_shards)
+        {
+            const std::uint32_t index = ComputeShardIndex(ptr);
+            return m_shards[index];
+        }
+        return m_singleShard;
+    }
+
+    inline std::uint32_t TrackingAllocator::ComputeShardIndex(const void* ptr) const noexcept
+    {
+        if (m_shardMask == 0u)
+        {
+            return 0u;
+        }
+        const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(ptr));
+        return static_cast<std::uint32_t>((address >> 4u) & m_shardMask);
+    }
+#endif
 
 #if DNG_MEM_TRACKING && DNG_MEM_REPORT_ON_EXIT
     // Purpose : Ensure ReportLeaks() is invoked on scope exit when diagnostics policy requires it.

@@ -84,6 +84,7 @@ out/
 # CI bench reports (not versioned)
 bench_report.md
 **/*.bench.md
+sweep_report.md
 
 # Optional editor caches
 .vscode/
