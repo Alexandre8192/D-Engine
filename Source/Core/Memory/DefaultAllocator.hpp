@@ -27,19 +27,11 @@
 
 namespace dng { namespace core {
 
-    // ------------------------------------------------------------------------
-    // DefaultAllocator
-    // ------------------------------------------------------------------------
-    // Purpose : Translate the engine allocator contract onto ::operator new so
-    //           every platform gains a consistent, alignment-aware fallback.
-    // Contract: Thread-safe because it stores no mutable state. Allocate()
-    //           normalizes alignment, records the original raw pointer in a
-    //           small header, and Deallocate() must receive the same
-    //           (size, alignment) tuple used at allocation time. Reallocate()
-    //           falls back to IAllocator::Reallocate (allocate/copy/free).
-    // Notes   : Header metadata carries a magic to detect corruption and can
-    //           optionally store size/alignment when paranoia tracking is on.
-    // ------------------------------------------------------------------------
+    // ---
+    // Purpose : Translate the engine allocator contract onto ::operator new for a deterministic fallback.
+    // Contract: Stateless and thread-safe; honours NormalizeAlignment on entry and mandates matching (size, alignment) on free.
+    // Notes   : Metadata header stores the raw pointer plus optional debugging fields when paranoia tracking is enabled.
+    // ---
     class DefaultAllocator final : public IAllocator {
     private:
         static constexpr u32 HEADER_MAGIC = 0xD15A110Cu; // "D-alloc" fun magic (hex)
@@ -63,9 +55,24 @@ namespace dng { namespace core {
         }
 
     public:
+        // ---
+        // Purpose : Construct a stateless allocator ready to forward to ::operator new/delete.
+        // Contract: No side effects; allocator remains valid for the program lifetime.
+        // Notes   : constexpr defaulted to allow static storage or global instances.
+        // ---
         DefaultAllocator() = default;
+        // ---
+        // Purpose : Allow derived destruction through the interface without touching global state.
+        // Contract: Must remain noexcept; performs no additional cleanup beyond default behaviour.
+        // Notes   : Defaulted because allocator maintains no resources.
+        // ---
         ~DefaultAllocator() override = default;
 
+        // ---
+        // Purpose : Reserve a block that satisfies the allocator contract using ::operator new.
+        // Contract: `size` > 0; `alignment` normalized internally; returns nullptr only when global OOM policy permits.
+        // Notes   : Prepends a header capturing the raw pointer (and optional diagnostics) before the returned payload.
+        // ---
         [[nodiscard]] void* Allocate(usize size,
             usize alignment = alignof(std::max_align_t)) noexcept override
         {
@@ -114,6 +121,11 @@ namespace dng { namespace core {
             return userPtr;
         }
 
+        // ---
+        // Purpose : Release a previously allocated block back to ::operator delete.
+        // Contract: Accepts null pointer; `(size, alignment)` must match the normalized tuple used at allocation time.
+        // Notes   : Validates header guards in paranoia builds before forwarding to ::operator delete.
+        // ---
         void Deallocate(void* ptr,
             usize size = 0,
             usize alignment = DEFAULT_ALIGNMENT) noexcept override
@@ -145,6 +157,11 @@ namespace dng { namespace core {
             }
         }
 
+        // ---
+        // Purpose : Delegate resize requests to the default IAllocator implementation.
+        // Contract: Preserves allocator contract; marks `wasInPlace` false since allocate/copy/free is used.
+        // Notes   : Provided for completeness; heavy lifting occurs in Allocator.cpp.
+        // ---
         [[nodiscard]] void* Reallocate(void* ptr, usize oldSize, usize newSize,
             usize alignment = DEFAULT_ALIGNMENT,
             bool* wasInPlace = nullptr) noexcept override
