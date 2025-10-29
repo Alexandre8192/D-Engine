@@ -14,9 +14,11 @@
 //           - Monotonic counters stay active in every configuration.
 // ============================================================================
 
+#include "Core/Diagnostics/Check.hpp"
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/Alignment.hpp"
+#include "Core/Platform/PlatformMacros.hpp"
 #include "Core/Types.hpp"
 
 #include <array>
@@ -58,13 +60,6 @@
 
 
 
-// Fallbacks for minimal, side-effect-free build (only if engine macros are not available)
-#ifndef DNG_CHECK
-#define DNG_CHECK(expr) do { (void)sizeof((expr)); } while(0)
-#endif
-#ifndef DNG_UNUSED
-#define DNG_UNUSED(x) (void)(x)
-#endif
 namespace dng::core {
 
     /**

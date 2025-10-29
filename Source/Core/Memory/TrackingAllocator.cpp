@@ -29,10 +29,10 @@
 //
 // ============================================================================
 
-#include "TrackingAllocator.hpp"
+#include "Core/Memory/TrackingAllocator.hpp"
 
 // Ensure memory config/log categories if they exist
-#include "MemoryConfig.hpp"     // DNG_MEM_TRACKING, DNG_MEM_LOG_VERBOSITY, etc. (if available)
+#include "Core/Memory/MemoryConfig.hpp"     // DNG_MEM_TRACKING, DNG_MEM_LOG_VERBOSITY, etc. (if available)
 
 #if __has_include("Logger.hpp")
 #include "Logger.hpp"
