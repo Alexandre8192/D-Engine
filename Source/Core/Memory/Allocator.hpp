@@ -21,6 +21,7 @@
 #include <limits>       // std::numeric_limits
 
 #include "Core/Diagnostics/Check.hpp"
+#include "Core/Memory/OOM.hpp"
 #include "Core/Types.hpp"            // usize, etc.
 #include "Core/Memory/Alignment.hpp" // NormalizeAlignment(...)
 
@@ -143,7 +144,12 @@ namespace dng::core
                 return nullptr;
 
             alignment = NormalizeAlignment(alignment);
-            return m_Alloc->Allocate(size, alignment);
+            void* memory = m_Alloc->Allocate(size, alignment);
+            if (!memory)
+            {
+                DNG_MEM_CHECK_OOM(size, alignment, "AllocatorRef::AllocateBytes");
+            }
+            return memory;
         }
 
         // Free a block previously obtained through this allocator with the SAME
@@ -172,7 +178,12 @@ namespace dng::core
                 return nullptr;
 
             alignment = NormalizeAlignment(alignment);
-            return m_Alloc->Reallocate(ptr, oldSize, newSize, alignment, wasInPlace);
+            void* memory = m_Alloc->Reallocate(ptr, oldSize, newSize, alignment, wasInPlace);
+            if (!memory && newSize > 0)
+            {
+                DNG_MEM_CHECK_OOM(newSize, alignment, "AllocatorRef::ReallocateBytes");
+            }
+            return memory;
         }
 
         // ---- Typed helpers ---------------------------------------------------
@@ -184,7 +195,10 @@ namespace dng::core
         {
             void* mem = AllocateBytes(sizeof(T), alignof(T));
             if (!mem)
+            {
+                DNG_MEM_CHECK_OOM(sizeof(T), alignof(T), "AllocatorRef::New");
                 return nullptr;
+            }
 
             // C++20: unconditionally use std::construct_at
             return std::construct_at(reinterpret_cast<T*>(mem), std::forward<Args>(args)...);
@@ -226,7 +240,10 @@ namespace dng::core
             const usize total = kElemSize * count;
             void* mem = AllocateBytes(total, alignof(T));
             if (!mem)
+            {
+                DNG_MEM_CHECK_OOM(total, alignof(T), "AllocatorRef::NewArray");
                 return nullptr;
+            }
 
             T* first = reinterpret_cast<T*>(mem);
 

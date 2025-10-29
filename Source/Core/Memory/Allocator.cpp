@@ -53,9 +53,7 @@
 
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/OOM.hpp"      // DNG_MEM_CHECK_OOM(...) + OOM policy
-#if __has_include("Core/Logger.hpp")
 #include "Core/Logger.hpp"   // DNG_LOG_INFO/WARNING/ERROR/FATAL
-#endif
 
 #include <cstring>                  // std::memcpy
 #include <algorithm>                // std::min
@@ -71,17 +69,21 @@ namespace dng::core
         usize alignment,
         bool* wasInPlace) noexcept
     {
-        // Log entry with raw request (before normalization).
-        DNG_LOG_INFO("Memory",
-            "Reallocate(entry): ptr={}, oldSize={}, newSize={}, alignment(raw)={}, wasInPlace*={}",
-            ptr, (size_t)oldSize, (size_t)newSize, (size_t)alignment, (void*)wasInPlace);
+        const bool logMemory = Logger::IsEnabled("Memory");
+        if (logMemory)
+        {
+            // Log entry with raw request (before normalization).
+            DNG_LOG_INFO("Memory",
+                "Reallocate(entry): ptr={}, oldSize={}, newSize={}, alignment(raw)={}, wasInPlace*={}",
+                ptr, (size_t)oldSize, (size_t)newSize, (size_t)alignment, (void*)wasInPlace);
+        }
 
         // Normalize alignment up-front. Guarantees:
         //  - alignment is a power of two
         //  - alignment >= alignof(std::max_align_t)
         //  - alignment >= 1
         const usize normalizedAlignment = NormalizeAlignment(alignment);
-        if (normalizedAlignment != alignment)
+        if (normalizedAlignment != alignment && logMemory)
         {
             DNG_LOG_INFO("Memory",
                 "Reallocate: alignment normalized {} -> {}",
@@ -98,9 +100,12 @@ namespace dng::core
         // Misuse guard: if `ptr` is non-null, `oldSize` must be the original size.
         if (ptr && oldSize == 0)
         {
-            DNG_LOG_ERROR("Memory",
-                "Reallocate MISUSE: ptr is non-null but oldSize==0. Refusing to proceed. "
-                "Caller must pass the original allocation size.");
+            if (logMemory)
+            {
+                DNG_LOG_ERROR("Memory",
+                    "Reallocate MISUSE: ptr is non-null but oldSize==0. Refusing to proceed. "
+                    "Caller must pass the original allocation size.");
+            }
             DNG_ASSERT(false && "Reallocate misuse: oldSize must be provided when ptr != nullptr");
             // Do not touch `ptr`. Keep the original block valid.
             return nullptr;
@@ -111,16 +116,22 @@ namespace dng::core
         {
             if (ptr)
             {
-                DNG_LOG_INFO("Memory",
-                    "Reallocate: newSize==0 => Deallocate(ptr={}, oldSize={}, alignment={})",
-                    ptr, (size_t)oldSize, (size_t)alignment);
+                if (logMemory)
+                {
+                    DNG_LOG_INFO("Memory",
+                        "Reallocate: newSize==0 => Deallocate(ptr={}, oldSize={}, alignment={})",
+                        ptr, (size_t)oldSize, (size_t)alignment);
+                }
                 // Deallocate using the exact original (size, alignment) contract.
                 Deallocate(ptr, oldSize, alignment);
             }
             else
             {
-                DNG_LOG_INFO("Memory",
-                    "Reallocate: newSize==0 and ptr==nullptr => no-op (returns nullptr)");
+                if (logMemory)
+                {
+                    DNG_LOG_INFO("Memory",
+                        "Reallocate: newSize==0 and ptr==nullptr => no-op (returns nullptr)");
+                }
             }
             return nullptr;
         }
@@ -128,16 +139,22 @@ namespace dng::core
         // If `ptr` is null, this is equivalent to a fresh allocation.
         if (!ptr)
         {
-            DNG_LOG_INFO("Memory",
-                "Reallocate: ptr==nullptr => Allocate(newSize={}, alignment={})",
-                (size_t)newSize, (size_t)alignment);
+            if (logMemory)
+            {
+                DNG_LOG_INFO("Memory",
+                    "Reallocate: ptr==nullptr => Allocate(newSize={}, alignment={})",
+                    (size_t)newSize, (size_t)alignment);
+            }
 
             void* fresh = Allocate(newSize, alignment);
             if (!fresh)
             {
-                DNG_LOG_ERROR("Memory",
-                    "Reallocate: initial Allocate FAILED (newSize={}, alignment={})",
-                    (size_t)newSize, (size_t)alignment);
+                if (logMemory)
+                {
+                    DNG_LOG_ERROR("Memory",
+                        "Reallocate: initial Allocate FAILED (newSize={}, alignment={})",
+                        (size_t)newSize, (size_t)alignment);
+                }
 
                 // Centralized OOM policy: may abort if fatal.
                 DNG_MEM_CHECK_OOM(newSize, alignment, "IAllocator::Reallocate(null->alloc)");
@@ -149,8 +166,11 @@ namespace dng::core
 #endif
             }
 
-            DNG_LOG_INFO("Memory",
-                "Reallocate: fresh allocation success -> ptr={}", fresh);
+            if (logMemory)
+            {
+                DNG_LOG_INFO("Memory",
+                    "Reallocate: fresh allocation success -> ptr={}", fresh);
+            }
             return fresh;
         }
 
@@ -158,17 +178,23 @@ namespace dng::core
         // We DO NOT treat (oldSize == newSize) as a no-op, because the caller
         // may be requesting a different alignment. We honor that by allocating
         // a new block with the desired alignment and copying over the payload.
-        DNG_LOG_INFO("Memory",
-            "Reallocate: performing allocate/copy/free path (ptr={}, oldSize={}, newSize={}, alignment={})",
-            ptr, (size_t)oldSize, (size_t)newSize, (size_t)alignment);
+        if (logMemory)
+        {
+            DNG_LOG_INFO("Memory",
+                "Reallocate: performing allocate/copy/free path (ptr={}, oldSize={}, newSize={}, alignment={})",
+                ptr, (size_t)oldSize, (size_t)newSize, (size_t)alignment);
+        }
 
         // 1) Allocate a new block with the requested size and alignment.
         void* newPtr = Allocate(newSize, alignment);
         if (!newPtr)
         {
-            DNG_LOG_ERROR("Memory",
-                "Reallocate: Allocate FAILED (newSize={}, alignment={})",
-                (size_t)newSize, (size_t)alignment);
+            if (logMemory)
+            {
+                DNG_LOG_ERROR("Memory",
+                    "Reallocate: Allocate FAILED (newSize={}, alignment={})",
+                    (size_t)newSize, (size_t)alignment);
+            }
 
             // Centralized OOM policy:
             // - Fatal mode: DNG_MEM_CHECK_OOM(...) must not return.
@@ -176,8 +202,11 @@ namespace dng::core
             DNG_MEM_CHECK_OOM(newSize, alignment, "IAllocator::Reallocate(alloc)");
 
 #if !DNG_MEM_FATAL_ON_OOM
-            DNG_LOG_WARNING("Memory",
-                "Reallocate: returning nullptr after OOM; original ptr={} remains valid", ptr);
+            if (logMemory)
+            {
+                DNG_LOG_WARNING("Memory",
+                    "Reallocate: returning nullptr after OOM; original ptr={} remains valid", ptr);
+            }
             return nullptr; // propagate failure
 #else
             return nullptr; // defensive (fatal path should not return)
@@ -188,9 +217,12 @@ namespace dng::core
         // the old block is still owned, copying + Deallocate would double-free.
         if (newPtr == ptr)
         {
-            DNG_LOG_WARNING("Memory",
-                "Reallocate: allocator returned SAME address for new block (ptr={}). "
-                "Marking as in-place and skipping copy/deallocate.", ptr);
+            if (logMemory)
+            {
+                DNG_LOG_WARNING("Memory",
+                    "Reallocate: allocator returned SAME address for new block (ptr={}). "
+                    "Marking as in-place and skipping copy/deallocate.", ptr);
+            }
             if (wasInPlace) *wasInPlace = true;
             return ptr;
         }
@@ -202,35 +234,50 @@ namespace dng::core
             const usize copySize = std::min(oldSize, newSize);
             if (copySize > 0)
             {
-                DNG_LOG_INFO("Memory",
-                    "Reallocate: copying payload copySize={} from {} to {}",
-                    (size_t)copySize, ptr, newPtr);
+                if (logMemory)
+                {
+                    DNG_LOG_INFO("Memory",
+                        "Reallocate: copying payload copySize={} from {} to {}",
+                        (size_t)copySize, ptr, newPtr);
+                }
                 std::memcpy(newPtr, ptr, copySize);
             }
             else
             {
-                DNG_LOG_INFO("Memory",
-                    "Reallocate: no bytes copied (copySize==0). oldSize={}, newSize={}",
-                    (size_t)oldSize, (size_t)newSize);
+                if (logMemory)
+                {
+                    DNG_LOG_INFO("Memory",
+                        "Reallocate: no bytes copied (copySize==0). oldSize={}, newSize={}",
+                        (size_t)oldSize, (size_t)newSize);
+                }
             }
         }
         else
         {
-            DNG_LOG_WARNING("Memory",
-                "Reallocate: oldSize reported as 0 with non-null ptr (ptr={}). "
-                "No copy performed.", ptr);
+            if (logMemory)
+            {
+                DNG_LOG_WARNING("Memory",
+                    "Reallocate: oldSize reported as 0 with non-null ptr (ptr={}). "
+                    "No copy performed.", ptr);
+            }
         }
 
         // 3) Free the old block with the original (size, alignment).
-        DNG_LOG_INFO("Memory",
-            "Reallocate: deallocating old block ptr={} (oldSize={}, alignment={})",
-            ptr, (size_t)oldSize, (size_t)alignment);
+        if (logMemory)
+        {
+            DNG_LOG_INFO("Memory",
+                "Reallocate: deallocating old block ptr={} (oldSize={}, alignment={})",
+                ptr, (size_t)oldSize, (size_t)alignment);
+        }
         Deallocate(ptr, oldSize, alignment);
 
         // 4) Return the new block. wasInPlace remains false by default.
-        DNG_LOG_INFO("Memory",
-            "Reallocate(exit): success newPtr={}, wasInPlace={}",
-            newPtr, wasInPlace ? (*wasInPlace ? "true" : "false") : "null");
+        if (logMemory)
+        {
+            DNG_LOG_INFO("Memory",
+                "Reallocate(exit): success newPtr={}, wasInPlace={}",
+                newPtr, wasInPlace ? (*wasInPlace ? "true" : "false") : "null");
+        }
         return newPtr;
     }
 
