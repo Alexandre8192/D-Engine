@@ -25,6 +25,7 @@ Notes :
 #include "Core/Containers/StdAliases.hpp"  // dng::vector alias (AllocatorAdapter)
 #include "Core/Memory/MemorySystem.hpp"    // MemorySystem lifecycle façade
 #include "Core/Memory/ArenaAllocator.hpp"  // dng::core::ArenaAllocator contract
+#include "Core/Memory/SmallObjectAllocator.hpp" // dng::core::SmallObjectAllocator (for batch sweep)
 
 #include <cstddef>      // std::max_align_t, std::size_t
 #include <cstdint>      // std::uint32_t, std::uint64_t
@@ -82,6 +83,51 @@ namespace
     #else
         std::cout << ::dng::bench::ToString(result) << '\n';
     #endif
+    }
+
+    // Build environment-driven suffixes for metric names to support param sweeps.
+    // Example: [sampling=8, shards=8] or [batch=128]
+    inline std::string TrackingSuffixFromEnv() noexcept
+    {
+    #if defined(_MSC_VER)
+    #   pragma warning(push)
+    #   pragma warning(disable:4996)
+    #endif
+        const char* s = std::getenv("DNG_MEM_TRACKING_SAMPLING_RATE");
+        const char* h = std::getenv("DNG_MEM_TRACKING_SHARDS");
+    #if defined(_MSC_VER)
+    #   pragma warning(pop)
+    #endif
+        std::string tag;
+        if ((s && *s) || (h && *h))
+        {
+            tag += " [";
+            bool first = true;
+            if (s && *s) { tag += "sampling="; tag += s; first = false; }
+            if (h && *h) { if (!first) tag += ", "; tag += "shards="; tag += h; }
+            tag += "]";
+        }
+        return tag;
+    }
+
+    inline std::string SoaBatchSuffixFromEnv() noexcept
+    {
+    #if defined(_MSC_VER)
+    #   pragma warning(push)
+    #   pragma warning(disable:4996)
+    #endif
+        const char* b = std::getenv("DNG_SOALLOC_BATCH");
+    #if defined(_MSC_VER)
+    #   pragma warning(pop)
+    #endif
+        std::string tag;
+        if (b && *b)
+        {
+            tag += " [batch=";
+            tag += b;
+            tag += "]";
+        }
+        return tag;
     }
 
     // --- Allocation adapters -------------------------------------------------
@@ -230,10 +276,11 @@ int main(int argc, char** argv)
 
     // ---- Scenario 1: dng::vector push/pop without reserve -------------------
     {
+        const std::string metricName = std::string{"Vector PushPop (no reserve)"};
         auto runOnce = [&]() noexcept -> bench::BenchResult {
             vector<int> values;
             std::uint32_t counter = 0;
-            return DNG_BENCH("Vector PushPop (no reserve)", kIterations, [&]() noexcept {
+            return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
                 values.push_back(static_cast<int>(counter++));
                 values.pop_back();
             });
@@ -269,11 +316,12 @@ int main(int argc, char** argv)
 
     // ---- Scenario 2: dng::vector push/pop with reserve ----------------------
     {
+        const std::string metricName = std::string{"Vector PushPop (reserved)"};
         auto runOnce = [&]() noexcept -> bench::BenchResult {
             vector<int> values;
             values.reserve(static_cast<std::size_t>(kIterations) + 1);
             std::uint32_t counter = 0;
-            return DNG_BENCH("Vector PushPop (reserved)", kIterations, [&]() noexcept {
+            return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
                 values.push_back(static_cast<int>(counter++));
                 values.pop_back();
             });
@@ -309,9 +357,10 @@ int main(int argc, char** argv)
     // ---- Scenario 3: Arena allocate/rewind (64 bytes) -----------------------
     if (defaultAlloc)
     {
+        const std::string metricName = std::string{"Arena Allocate/Rewind (64B)"};
         auto runOnce = [&]() noexcept -> bench::BenchResult {
             ::dng::core::ArenaAllocator arena{ defaultAlloc, 8u * 1024u * 1024u };
-            return DNG_BENCH("Arena Allocate/Rewind (64B)", kIterations, [&]() noexcept {
+            return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
                 const auto marker = arena.GetMarker();
                 void* ptr = arena.Allocate(64u, alignof(std::max_align_t));
                 DNG_CHECK(ptr != nullptr);
@@ -353,9 +402,10 @@ int main(int argc, char** argv)
     // ---- Scenario 3b: Arena bulk allocate + rewind -------------------------
     if (defaultAlloc)
     {
+        const std::string metricName = std::string{"Arena Bulk Allocate/Rewind (8x64B)"};
         auto runOnce = [&]() noexcept -> bench::BenchResult {
             ::dng::core::ArenaAllocator arena{ defaultAlloc, 8u * 1024u * 1024u };
-            return DNG_BENCH("Arena Bulk Allocate/Rewind (8x64B)", kIterations, [&]() noexcept {
+            return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
                 const auto marker = arena.GetMarker();
                 for (int i = 0; i < 8; ++i)
                 {
@@ -396,8 +446,9 @@ int main(int argc, char** argv)
     // ---- Scenario 4: DefaultAllocator direct alloc/free (64 bytes) ----------
     if (defaultAlloc)
     {
+        const std::string metricName = std::string{"DefaultAllocator Alloc/Free 64B"};
         auto runOnce = [&]() noexcept -> bench::BenchResult {
-            return DNG_BENCH("DefaultAllocator Alloc/Free 64B", kIterations, [&]() noexcept {
+            return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
                 void* ptr = AllocateCompat(defaultAlloc, 64u, alignof(std::max_align_t));
                 DNG_CHECK(ptr != nullptr);
                 DeallocateCompat(defaultAlloc, ptr, 64u, alignof(std::max_align_t));
@@ -438,8 +489,9 @@ int main(int argc, char** argv)
     // ---- Scenario 5: TrackingAllocator direct alloc/free (64 bytes) ---------
     if (tracking)
     {
+        const std::string metricName = std::string{"TrackingAllocator Alloc/Free 64B"} + TrackingSuffixFromEnv();
         auto runOnce = [&]() noexcept -> bench::BenchResult {
-            return DNG_BENCH("TrackingAllocator Alloc/Free 64B", kIterations, [&]() noexcept {
+            return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
                 void* ptr = AllocateCompat(tracking, 64u, alignof(std::max_align_t));
                 DNG_CHECK(ptr != nullptr);
                 DeallocateCompat(tracking, ptr, 64u, alignof(std::max_align_t));
@@ -482,10 +534,11 @@ int main(int argc, char** argv)
     {
         // 6a) No reserve: growth-dependent → no analytical expected printed.
         {
+            const std::string metricName = std::string{"tracking_vector PushPop (no reserve)"} + TrackingSuffixFromEnv();
             auto runOnce = [&]() noexcept -> bench::BenchResult {
                 tracking_vector<int> trackedValues;
                 std::uint32_t counter = 0;
-                return DNG_BENCH("tracking_vector PushPop (no reserve)", kIterations, [&]() noexcept {
+                return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
                     trackedValues.push_back(static_cast<int>(counter++));
                     trackedValues.pop_back();
                 });
@@ -520,11 +573,12 @@ int main(int argc, char** argv)
 
         // 6b) Reserved: steady-state → 0 churn/op.
         {
+            const std::string metricName = std::string{"tracking_vector PushPop (reserved)"} + TrackingSuffixFromEnv();
             auto runOnce = [&]() noexcept -> bench::BenchResult {
                 tracking_vector<int> trackedValues;
                 trackedValues.reserve(static_cast<std::size_t>(kIterations) + 1);
                 std::uint32_t counter = 0;
-                return DNG_BENCH("tracking_vector PushPop (reserved)", kIterations, [&]() noexcept {
+                return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
                     trackedValues.push_back(static_cast<int>(counter++));
                     trackedValues.pop_back();
                 });
@@ -553,6 +607,46 @@ int main(int argc, char** argv)
                         PrintNote("[WARN] allocsPerOp mismatch across repeats for tracking_vector PushPop (reserved)");
                         agg.allocsWarned = true;
                     }
+                }
+            }
+        }
+    }
+
+    // ---- Scenario 7: SmallObjectAllocator 64B (env-tagged batch) ----------
+    if (defaultAlloc)
+    {
+        const std::string metricName = std::string{"SmallObject 64B"} + SoaBatchSuffixFromEnv();
+        auto runOnce = [&]() noexcept -> bench::BenchResult {
+            ::dng::core::SmallObjectAllocator soalloc{ defaultAlloc };
+            return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
+                void* ptr = AllocateCompat(&soalloc, 64u, alignof(std::max_align_t));
+                DNG_CHECK(ptr != nullptr);
+                DeallocateCompat(&soalloc, ptr, 64u, alignof(std::max_align_t));
+            });
+        };
+        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+        for (int i = 0; i < repeatCount; ++i)
+        {
+            auto r = runOnce();
+            PrintBenchLine(r);
+            auto& agg = find_or_add(r.Name);
+            agg.ns.push_back(r.NsPerOp);
+            if (r.BytesPerOp >= 0.0)
+            {
+                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] bytesPerOp mismatch across repeats for SmallObject 64B");
+                    agg.bytesWarned = true;
+                }
+            }
+            if (r.AllocsPerOp >= 0.0)
+            {
+                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] allocsPerOp mismatch across repeats for SmallObject 64B");
+                    agg.allocsWarned = true;
                 }
             }
         }

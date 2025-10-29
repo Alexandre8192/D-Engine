@@ -1,0 +1,57 @@
+name: Bench Sweep
+
+on:
+  workflow_dispatch:
+
+env:
+  CONFIGURATION: Release
+  PLATFORM: x64
+
+jobs:
+  bench-sweep-windows:
+    name: Bench Sweep (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Build (MSBuild)
+        run: |
+          msbuild D-Engine.sln -m -p:Configuration=${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }}
+
+      - name: Run sweep
+        run: |
+          python -u tools/bench_sweep.py --warmup 1 --repeat 3 --emit-md sweep_report.md
+
+      - name: Print sweep report
+        if: always()
+        run: |
+          if (Test-Path sweep_report.md) {
+            Write-Host "===== Bench Sweep Report (Markdown) ====="
+            Get-Content -Raw sweep_report.md | Write-Host
+            $md = Get-Content -Raw sweep_report.md
+            $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
+            Write-Host "::notice title=Bench sweep summary::$escaped"
+          }
+
+      - name: Upload sweep artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-sweep-artifacts
+          path: |
+            artifacts/bench/sweeps/**/*.bench.json
+            sweep_report.md
+          if-no-files-found: warn
