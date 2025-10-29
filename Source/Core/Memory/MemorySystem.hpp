@@ -29,12 +29,18 @@
 #include "Core/Memory/TrackingAllocator.hpp"
 #include "Core/Memory/GuardAllocator.hpp"
 #include "Core/Memory/SmallObjectAllocator.hpp"
+#include "Core/Memory/Alignment.hpp"
 #include "Core/Memory/ArenaAllocator.hpp"
 #include "Core/Memory/ThreadSafety.hpp"
 #include "Core/Memory/OOM.hpp"
 
 #include <memory> // Needed for std::destroy_at (see usage on lines 152, 159, 166, etc.)
 #include <new> // placement new / destroy_at
+#include <cstdlib>
+#include <limits>
+#include <cstdint>
+#include <cerrno>
+#include <cstddef>
 
 namespace dng { namespace core {
     class IAllocator;
@@ -122,6 +128,237 @@ namespace memory
         };
 
         inline thread_local ThreadLocalState gThreadLocalState{};
+
+        enum class OverrideSource : std::uint8_t
+        {
+            Macro,
+            Environment,
+            Api
+        };
+
+        [[nodiscard]] constexpr const char* ToString(OverrideSource source) noexcept
+        {
+            switch (source)
+            {
+            case OverrideSource::Macro:       return "macro";
+            case OverrideSource::Environment: return "env";
+            case OverrideSource::Api:         return "api";
+            default:                           return "unknown";
+            }
+        }
+
+        struct OverrideResult
+        {
+            std::uint32_t value{ 0 };
+            OverrideSource source{ OverrideSource::Macro };
+            bool envInvalid{ false };
+            bool apiInvalid{ false };
+            bool clamped{ false };
+            std::uint32_t envRaw{ 0 };
+            std::uint32_t apiRaw{ 0 };
+        };
+
+        [[nodiscard]] inline bool TryParseU32(const char* text,
+            std::uint32_t minValue,
+            std::uint32_t maxValue,
+            std::uint32_t& out) noexcept
+        {
+            if (!text || *text == '\0')
+            {
+                return false;
+            }
+
+            errno = 0;
+            char* end = nullptr;
+            const unsigned long parsed = std::strtoul(text, &end, 10);
+            if ((errno != 0) || (end == text) || (*end != '\0'))
+            {
+                return false;
+            }
+
+            if (parsed < minValue || parsed > maxValue)
+            {
+                return false;
+            }
+
+            out = static_cast<std::uint32_t>(parsed);
+            return true;
+        }
+
+        static constexpr const char* kEnvTrackingSampling = "DNG_MEM_TRACKING_SAMPLING_RATE";
+        static constexpr const char* kEnvTrackingShards   = "DNG_MEM_TRACKING_SHARDS";
+        static constexpr const char* kEnvSmallObjectBatch = "DNG_SOALLOC_BATCH";
+
+    // Purpose : Retrieve environment variable without surfacing MSVC C4996 deprecation as an error.
+    // Contract: Returns pointer owned by C runtime; do not free; thread-unsafe per C standard; name must be null-terminated.
+    // Notes   : Header-safe wrapper to keep this file warning-clean on MSVC without globally defining _CRT_SECURE_NO_WARNINGS.
+    [[nodiscard]] inline const char* GetEnvNoWarn(const char* name) noexcept
+    {
+#if defined(_MSC_VER)
+#  pragma warning(push)
+#  pragma warning(disable:4996)
+#endif
+        return std::getenv(name);
+#if defined(_MSC_VER)
+#  pragma warning(pop)
+#endif
+    }
+
+        [[nodiscard]] inline OverrideResult ResolveTrackingSampling(const MemoryConfig& cfg) noexcept
+        {
+            OverrideResult result{};
+            result.value = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SAMPLING_RATE);
+            result.source = OverrideSource::Macro;
+
+            const char* envText = GetEnvNoWarn(kEnvTrackingSampling);
+            if (envText && *envText)
+            {
+                std::uint32_t parsed = 0;
+                if (TryParseU32(envText, 1u, std::numeric_limits<std::uint32_t>::max(), parsed))
+                {
+                    result.value = parsed;
+                    result.source = OverrideSource::Environment;
+                    result.envRaw = parsed;
+                }
+                else
+                {
+                    result.envInvalid = true;
+                }
+            }
+
+            if (cfg.tracking_sampling_rate != 0u)
+            {
+                result.apiRaw = cfg.tracking_sampling_rate;
+                if (cfg.tracking_sampling_rate >= 1u)
+                {
+                    result.value = cfg.tracking_sampling_rate;
+                    result.source = OverrideSource::Api;
+                }
+                else
+                {
+                    result.apiInvalid = true;
+                }
+            }
+
+            return result;
+        }
+
+        [[nodiscard]] inline OverrideResult ResolveTrackingShards(const MemoryConfig& cfg) noexcept
+        {
+            OverrideResult result{};
+            result.value = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
+            result.source = OverrideSource::Macro;
+
+            const char* envText = GetEnvNoWarn(kEnvTrackingShards);
+            if (envText && *envText)
+            {
+                std::uint32_t parsed = 0;
+                if (TryParseU32(envText, 1u, std::numeric_limits<std::uint32_t>::max(), parsed))
+                {
+                    result.envRaw = parsed;
+                    if (::dng::core::IsPowerOfTwo(parsed))
+                    {
+                        result.value = parsed;
+                        result.source = OverrideSource::Environment;
+                    }
+                    else
+                    {
+                        result.envInvalid = true;
+                    }
+                }
+                else
+                {
+                    result.envInvalid = true;
+                }
+            }
+
+            if (cfg.tracking_shard_count != 0u)
+            {
+                result.apiRaw = cfg.tracking_shard_count;
+                if (::dng::core::IsPowerOfTwo(cfg.tracking_shard_count))
+                {
+                    result.value = cfg.tracking_shard_count;
+                    result.source = OverrideSource::Api;
+                }
+                else
+                {
+                    result.apiInvalid = true;
+                }
+            }
+
+            if (!::dng::core::IsPowerOfTwo(result.value))
+            {
+                result.clamped = true;
+                result.value = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
+                result.source = OverrideSource::Macro;
+            }
+
+            return result;
+        }
+
+        [[nodiscard]] inline OverrideResult ResolveSmallObjectBatch(const MemoryConfig& cfg) noexcept
+        {
+            OverrideResult result{};
+            result.value = static_cast<std::uint32_t>(DNG_SOALLOC_BATCH);
+            result.source = OverrideSource::Macro;
+
+            constexpr std::uint32_t kMaxBatch = static_cast<std::uint32_t>(DNG_SOA_TLS_MAG_CAPACITY);
+
+            const char* envText = GetEnvNoWarn(kEnvSmallObjectBatch);
+            if (envText && *envText)
+            {
+                std::uint32_t parsed = 0;
+                if (TryParseU32(envText, 1u, std::numeric_limits<std::uint32_t>::max(), parsed))
+                {
+                    result.envRaw = parsed;
+                    std::uint32_t sanitized = parsed;
+                    if (sanitized < 1u)
+                    {
+                        sanitized = 1u;
+                        result.clamped = true;
+                    }
+                    if (sanitized > kMaxBatch)
+                    {
+                        sanitized = kMaxBatch;
+                        result.clamped = true;
+                    }
+                    result.value = sanitized;
+                    result.source = OverrideSource::Environment;
+                }
+                else
+                {
+                    result.envInvalid = true;
+                }
+            }
+
+            if (cfg.small_object_batch != 0u)
+            {
+                result.apiRaw = cfg.small_object_batch;
+                if (cfg.small_object_batch >= 1u)
+                {
+                    std::uint32_t sanitized = cfg.small_object_batch;
+                    if (sanitized > kMaxBatch)
+                    {
+                        sanitized = kMaxBatch;
+                        result.clamped = true;
+                    }
+                    result.value = sanitized;
+                    result.source = OverrideSource::Api;
+                }
+                else
+                {
+                    result.apiInvalid = true;
+                }
+            }
+
+            if (result.value > kMaxBatch)
+            {
+                result.value = kMaxBatch;
+                result.clamped = true;
+            }
+
+            return result;
+        }
 
         [[nodiscard]] inline AllocatorRef MakeAllocatorRef(DefaultAllocator* alloc) noexcept
         {
@@ -294,11 +531,133 @@ namespace memory
                 return;
             }
 
-            ::dng::core::MemoryConfig::GetGlobal() = config;
-            globals.activeConfig = ::dng::core::MemoryConfig::GetGlobal();
+            auto& globalConfig = ::dng::core::MemoryConfig::GetGlobal();
+            globalConfig = config;
+            globals.activeConfig = globalConfig;
+
+            const auto sampling = detail::ResolveTrackingSampling(globals.activeConfig);
+            const auto shards   = detail::ResolveTrackingShards(globals.activeConfig);
+            const auto batch    = detail::ResolveSmallObjectBatch(globals.activeConfig);
+
+            const bool warnEnabled = ::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Warn, "Memory");
+            constexpr std::uint32_t kMaxSmallBatch = static_cast<std::uint32_t>(DNG_SOA_TLS_MAG_CAPACITY);
+
+            std::uint32_t effectiveSampling = sampling.value;
+            if (effectiveSampling == 0u)
+            {
+                effectiveSampling = 1u;
+            }
+            else if (effectiveSampling > 1u)
+            {
+                if (warnEnabled)
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "Tracking sampling rates >1 are not yet supported; falling back to 1 (requested {}).",
+                        static_cast<unsigned long long>(effectiveSampling));
+                }
+                effectiveSampling = 1u;
+            }
+
+            std::uint32_t effectiveShards = shards.value;
+            if (!::dng::core::IsPowerOfTwo(effectiveShards))
+            {
+                effectiveShards = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
+            }
+
+            const std::uint32_t effectiveBatch = batch.value;
+
+            globalConfig.tracking_sampling_rate = effectiveSampling;
+            globalConfig.tracking_shard_count   = effectiveShards;
+            globalConfig.small_object_batch     = effectiveBatch;
+            globals.activeConfig = globalConfig;
+
+            if (warnEnabled)
+            {
+                if (sampling.envInvalid)
+                {
+                    DNG_LOG_WARNING("Memory", "Ignoring DNG_MEM_TRACKING_SAMPLING_RATE environment override (must be >= 1).");
+                }
+                if (sampling.apiInvalid)
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "Ignoring MemoryConfig::tracking_sampling_rate override {} (must be >= 1).",
+                        static_cast<unsigned long long>(sampling.apiRaw));
+                }
+
+                if (shards.envInvalid)
+                {
+                    if (shards.envRaw != 0u)
+                    {
+                        DNG_LOG_WARNING("Memory",
+                            "Ignoring DNG_MEM_TRACKING_SHARDS environment override {} (must be power-of-two).",
+                            static_cast<unsigned long long>(shards.envRaw));
+                    }
+                    else
+                    {
+                        DNG_LOG_WARNING("Memory", "Ignoring DNG_MEM_TRACKING_SHARDS environment override (must be power-of-two).");
+                    }
+                }
+                if (shards.apiInvalid)
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "Ignoring MemoryConfig::tracking_shard_count override {} (must be power-of-two).",
+                        static_cast<unsigned long long>(shards.apiRaw));
+                }
+                if (shards.clamped && !shards.envInvalid && !shards.apiInvalid)
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "Tracking shard count fell back to compile-time default {} (invalid override).",
+                        static_cast<unsigned long long>(static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS)));
+                }
+
+                if (batch.envInvalid)
+                {
+                    DNG_LOG_WARNING("Memory", "Ignoring DNG_SOALLOC_BATCH environment override (must be >= 1).");
+                }
+                if (batch.apiInvalid)
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "Ignoring MemoryConfig::small_object_batch override {} (must be >= 1).",
+                        static_cast<unsigned long long>(batch.apiRaw));
+                }
+                if (batch.clamped)
+                {
+                    switch (batch.source)
+                    {
+                    case detail::OverrideSource::Environment:
+                        DNG_LOG_WARNING("Memory",
+                            "Clamped DNG_SOALLOC_BATCH override {} to {} (max capacity {}).",
+                            static_cast<unsigned long long>(batch.envRaw),
+                            static_cast<unsigned long long>(batch.value),
+                            static_cast<unsigned long long>(kMaxSmallBatch));
+                        break;
+                    case detail::OverrideSource::Api:
+                        DNG_LOG_WARNING("Memory",
+                            "Clamped MemoryConfig::small_object_batch override {} to {} (max capacity {}).",
+                            static_cast<unsigned long long>(batch.apiRaw),
+                            static_cast<unsigned long long>(batch.value),
+                            static_cast<unsigned long long>(kMaxSmallBatch));
+                        break;
+                    default:
+                        DNG_LOG_WARNING("Memory",
+                            "SmallObject batch default exceeded capacity; clamped to {}.",
+                            static_cast<unsigned long long>(batch.value));
+                        break;
+                    }
+                }
+            }
 
             globals.defaultAllocator = new (globals.defaultAllocatorStorage) detail::DefaultAllocator();
-            globals.trackingAllocator = new (globals.trackingAllocatorStorage) detail::TrackingAllocator(globals.defaultAllocator);
+
+            const std::uint32_t trackingSamplingRate = globals.activeConfig.tracking_sampling_rate != 0u
+                ? globals.activeConfig.tracking_sampling_rate
+                : static_cast<std::uint32_t>(DNG_MEM_TRACKING_SAMPLING_RATE);
+            const std::uint32_t trackingShardCount = (globals.activeConfig.tracking_shard_count != 0u && ::dng::core::IsPowerOfTwo(globals.activeConfig.tracking_shard_count))
+                ? globals.activeConfig.tracking_shard_count
+                : static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
+
+            globals.trackingAllocator = new (globals.trackingAllocatorStorage)
+                detail::TrackingAllocator(globals.defaultAllocator, trackingSamplingRate, trackingShardCount);
 #if DNG_MEM_GUARDS
             globals.guardAllocator = new (globals.guardAllocatorStorage) detail::GuardAllocator(globals.trackingAllocator);
             auto* effectiveParent = static_cast<::dng::core::IAllocator*>(globals.guardAllocator);
@@ -308,6 +667,7 @@ namespace memory
 
             ::dng::core::SmallObjectConfig smallCfg{};
             smallCfg.ReturnNullOnOOM = !globals.activeConfig.fatal_on_oom;
+            smallCfg.TLSBatchSize = static_cast<std::size_t>(globals.activeConfig.small_object_batch);
             globals.smallObjectAllocator = new (globals.smallObjectStorage) detail::SmallObjectAllocator(effectiveParent, smallCfg);
 
             globals.rendererArena = new (globals.rendererArenaStorage) detail::ArenaAllocator(effectiveParent, detail::kRendererArenaBytes);
@@ -335,6 +695,18 @@ namespace memory
                     "MemorySystem initialized (Tracking={}, ThreadSafe={})",
                     globals.activeConfig.enable_tracking ? "true" : "false",
                     globals.activeConfig.global_thread_safe ? "true" : "false");
+                DNG_LOG_INFO("Memory",
+                    "Tracking sampling rate={} (source={})",
+                    static_cast<unsigned long long>(globals.activeConfig.tracking_sampling_rate),
+                    detail::ToString(sampling.source));
+                DNG_LOG_INFO("Memory",
+                    "Tracking shard count={} (source={})",
+                    static_cast<unsigned long long>(globals.activeConfig.tracking_shard_count),
+                    detail::ToString(shards.source));
+                DNG_LOG_INFO("Memory",
+                    "SmallObject TLS batch={} (source={})",
+                    static_cast<unsigned long long>(globals.activeConfig.small_object_batch),
+                    detail::ToString(batch.source));
             }
             constexpr const char* kGuardState =
 #if DNG_MEM_GUARDS

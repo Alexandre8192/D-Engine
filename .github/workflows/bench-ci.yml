@@ -1,5 +1,85 @@
 name: Bench CI
 
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  bench:
+    name: Build and run benchmarks (2x) with variance check
+    runs-on: windows-latest
+    env:
+      # Enforce runtime defaults via environment (API→env→macros precedence respected)
+      DNG_MEM_TRACKING_SAMPLING_RATE: "1"
+      DNG_MEM_TRACKING_SHARDS: "8"
+      DNG_SOALLOC_BATCH: "64"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Release|x64)
+        run: msbuild D-Engine.sln -m -p:Configuration=Release -p:Platform=x64
+
+      - name: Run Bench (first)
+        run: .\x64\Release\D-Engine-BenchRunner.exe --warmup 1 --target-rsd 3 --max-repeat 7 --cpu-info
+
+      - name: Run Bench (second)
+        run: .\x64\Release\D-Engine-BenchRunner.exe --warmup 1 --target-rsd 3 --max-repeat 7 --cpu-info
+
+      - name: Summarize and compare results
+        shell: pwsh
+        run: |
+          $dir = "artifacts/bench/current-default"
+          if (-not (Test-Path $dir)) { throw "Bench output directory not found: $dir" }
+          $files = Get-ChildItem $dir -Filter *.bench.json | Sort-Object LastWriteTime | Select-Object -Last 2
+          if ($files.Count -lt 2) { throw "Expected at least two bench JSON files" }
+          $first = Get-Content $files[0].FullName | ConvertFrom-Json
+          $second = Get-Content $files[1].FullName | ConvertFrom-Json
+          # Map metrics by name
+          $m1 = @{}
+          foreach ($m in $first.metrics) { $m1[$m.name] = $m }
+          $threshold = 3.0
+          $lines = @()
+          $lines += "# Bench CI Report`n"
+          $lines += "Defaults: sampling=1, shards=8, batch=64 (source=env)"
+          $lines += "`n| metric | run1 (ns/op) | run2 (ns/op) | Δ% | bytes/op | allocs/op |"
+          $lines += "|---|---:|---:|---:|---:|---:|"
+          $failVar = $false
+          $failChurn = $false
+          foreach ($m in $second.metrics) {
+            if (-not $m1.ContainsKey($m.name)) { continue }
+            $a = [double]$m1[$m.name].value
+            $b = [double]$m.value
+            if ($a -eq 0) { $delta = 0 } else { $delta = [math]::Abs(($b - $a) / $a) * 100.0 }
+            $bytesOk = ($m1[$m.name].bytesPerOp -eq $m.bytesPerOp)
+            $allocsOk = ($m1[$m.name].allocsPerOp -eq $m.allocsPerOp)
+            if ($delta -gt $threshold) { $failVar = $true }
+            if (-not $bytesOk -or -not $allocsOk) { $failChurn = $true }
+            $lines += "| $($m.name) | $a | $b | {0:N3}% | $($m.bytesPerOp) | $($m.allocsPerOp) |" -f $delta
+          }
+          $notice = "NOTICE: Effective defaults applied at runtime (API → env → macros). Sampling>1 is currently clamped to 1."
+          $lines += "`n$notice`n"
+          $out = "artifacts/bench/bench_report.md"
+          $null = New-Item -ItemType Directory -Force -Path (Split-Path $out)
+          Set-Content -Path $out -Value ($lines -join "`n")
+          if ($failVar) { Write-Host "Variance check FAILED (> $threshold %)"; }
+          if ($failChurn) { Write-Host "Churn check FAILED (bytes/allocs changed)"; }
+          if ($failVar -or $failChurn) { Write-Error "Bench checks failed" }
+
+      - name: Upload bench artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: |
+            artifacts/bench/**
+            artifacts/bench/current-default/**
+name: Bench CI
+
 # Threshold environment variables (defaults):
 # - PERF_THRESHOLD_PCT: 10        # ns/op relative threshold (%)
 # - PERF_ABS_NS: 5                # ns/op absolute threshold (ns)
@@ -21,6 +101,9 @@ env:
   CONFIGURATION: Release
   PLATFORM: x64
   PERF_THRESHOLD_PCT: 10
+  DNG_MEM_TRACKING_SAMPLING_RATE: 1
+  DNG_MEM_TRACKING_SHARDS: 8
+  DNG_SOALLOC_BATCH: 64
 
 jobs:
   bench-windows:
@@ -46,6 +129,10 @@ jobs:
         run: |
           msbuild D-Engine.sln -m -p:Configuration=${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }}
 
+      - name: Emit bench defaults notice
+        run: |
+          echo "::notice title=Bench Config::sampling=${env:DNG_MEM_TRACKING_SAMPLING_RATE}, shards=${env:DNG_MEM_TRACKING_SHARDS}, batch=${env:DNG_SOALLOC_BATCH}"
+
       - name: Run BenchRunner
         env:
           # These are provided by GitHub; our runner reads GITHUB_SHA first.
@@ -55,7 +142,7 @@ jobs:
           $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
           if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
           Write-Host "Running with CPU affinity=1 and High priority (pre-applied): $exeRel"
-          cmd /c start /wait /affinity 1 /high "D-Engine-BenchRunner" $exeRel --warmup 1 --repeat 3
+          cmd /c start /wait /affinity 1 /high "D-Engine-BenchRunner" $exeRel --warmup 1 --target-rsd 3 --max-repeat 7
 
       - name: Upload bench artifacts
         if: always()
@@ -64,6 +151,7 @@ jobs:
           name: bench-${{ env.CONFIGURATION }}-${{ env.PLATFORM }}
           path: |
             artifacts/bench/**/*.bench.json
+            defaults.json
           if-no-files-found: error
 
       - name: Compare with baseline (Python)

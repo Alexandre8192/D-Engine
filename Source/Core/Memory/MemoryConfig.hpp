@@ -1,17 +1,22 @@
 // ============================================================================
-// MemoryConfig.hpp - D-Engine
-// Compile-time feature gates + lightweight runtime toggles (no heavy deps)
-// ============================================================================
-//
-// Philosophy:
-// - Compile-time macros decide what code is compiled in/out (true zero-cost).
-// - Runtime toggles only have effect if their feature is compiled in.
-// - When a feature is compiled out, toggles become explicit no-ops with logs.
-// - No heavy dependencies; safe to include from anywhere.
-//
+// D-Engine - Core/Memory/MemoryConfig.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Centralize compile-time memory feature gates and lightweight runtime
+//           knobs used by the memory subsystem across the engine.
+// Contract: Header-only, self-contained, and safe to include from any TU. No
+//           hidden dependencies or global state. Compile-time macros define the
+//           compiled feature set; runtime toggles only take effect when their
+//           feature is compiled in. When a feature is compiled out, setters are
+//           explicit no-ops that log a warning. Invariants validated via static_assert.
+// Notes   : Optimized for determinism and zero hidden costs. Runtime precedence
+//           for tunables is API → environment → macros; see MemorySystem.hpp for
+//           resolution and logging. Defaults reflect Release | x64 bench sweeps
+//           (2025-10-29) with stable ns/op and unchanged bytes/allocs.
 // ============================================================================
 
 #pragma once
+
+#include <cstdint>
 
 // -----------------------------------------------------------------------------
 // Minimal logging fallbacks (avoid dependency on Logger.hpp here)
@@ -107,6 +112,37 @@
 #   error "DNG_MEM_THREAD_POLICY must be 0 (none) or 1 (mutex)."
 #endif
 
+// -----------------------------------------------------------------------------
+// Bench-derived production defaults (Release | x64) — see defaults.json
+// Sweep reference: artifacts/bench/sweeps/ (2025-10-29) → docs/Memory.md
+// -----------------------------------------------------------------------------
+#ifndef DNG_MEM_TRACKING_SAMPLING_RATE
+// Purpose : Release sampling default chosen from sweep combo s1-h8-b64 (2025-10-29).
+// Contract: Only applies when the macro is left undefined; toolchains may override
+//           for debugging/instrumentation prior to including MemoryConfig.hpp.
+// Notes   : TrackingAllocator median=203.639 ns/op (Δ=-17.404%, -42.909 ns vs
+//           s1-h1-b32 baseline) with bytes/allocs stable at 64/1. See defaults.md.
+#   define DNG_MEM_TRACKING_SAMPLING_RATE 1
+#endif
+
+#ifndef DNG_MEM_TRACKING_SHARDS
+// Purpose : Release shard count default aligned with sweep best pick s1-h8-b64.
+// Contract: May be overridden before including this header; Release builds rely on
+//           this value to keep TrackingAllocator contention bounded without hidden costs.
+// Notes   : Secondary metrics stayed within -1.561% (tracking_vector PushPop) and
+//           -25.282% (Arena 64B) while bytes/allocs remained unchanged. See defaults.md.
+#   define DNG_MEM_TRACKING_SHARDS 8
+#endif
+
+#ifndef DNG_SOALLOC_BATCH
+// Purpose : Release batch size default for SmallObjectAllocator verified on 2025-10-29 sweeps.
+// Contract: Overridable by integrators; applies whenever SmallObjectAllocator is compiled in
+//           and no alternative batch is forced prior to including this header.
+// Notes   : SmallObject 64B median=26.466 ns/op (Δ=+0.096 ns, +0.364%) with identical
+//           bytes/allocs (0/0) against the s1-h1-b32 baseline. Cross-check docs/Memory.md.
+#   define DNG_SOALLOC_BATCH 64
+#endif
+
 // --- Sanity checks for core switches ---
 #if (DNG_MEM_TRACKING != 0) && (DNG_MEM_TRACKING != 1)
 #   error "DNG_MEM_TRACKING must be 0 or 1"
@@ -123,6 +159,12 @@
 #if (DNG_MEM_CAPTURE_CALLSITE != 0) && (DNG_MEM_CAPTURE_CALLSITE != 1)
 #   error "DNG_MEM_CAPTURE_CALLSITE must be 0 or 1"
 #endif
+
+static_assert((DNG_MEM_TRACKING_SAMPLING_RATE) >= 1, "Tracking sampling rate must be >= 1");
+static_assert((DNG_MEM_TRACKING_SHARDS) >= 1, "Tracking shard count must be >= 1");
+static_assert(((DNG_MEM_TRACKING_SHARDS) & ((DNG_MEM_TRACKING_SHARDS) - 1)) == 0,
+    "Tracking shard count must be a power of two");
+static_assert((DNG_SOALLOC_BATCH) >= 1, "SmallObject batch must be >= 1");
 
 // -----------------------------------------------------------------------------
 // New: paranoia/meta header toggle (Dev/Debug-friendly)
@@ -202,6 +244,27 @@ namespace dng::core
         // Thread safety: prefer per-allocator policy; this is a coarse global knob.
         bool global_thread_safe = CompiledThreadSafe();
         int  global_thread_policy = CompiledThreadPolicy(); // 0 = none, 1 = mutex
+
+        // Purpose : Optional runtime override for tracking sampling (0 preserves env/macro defaults).
+        // Contract: Value sanitized to >=1 during MemorySystem::Init; API overrides win over env, which win over macros.
+    // Notes   : Release builds typically leave this at 0 and rely on compile-time defaults to avoid redundant config.
+    //           Values greater than 1 currently fall back to 1 with a warning until sampling support lands.
+        std::uint32_t tracking_sampling_rate = 0;
+
+        // Purpose : Optional runtime override for tracking allocator shard count (0 preserves env/macro defaults).
+        // Contract: Sanitized to at least 1 and adjusted to the nearest power-of-two; precedence matches sampling.
+        // Notes   : Non-power-of-two values fall back to the compile-time default with a warning.
+        std::uint32_t tracking_shard_count = 0;
+
+        // Purpose : Optional runtime override for SmallObjectAllocator magazine refill batch (0 keeps env/macro default).
+        // Contract: Clamped to [1, DNG_SOA_TLS_MAG_CAPACITY]; precedence mirrors other knobs.
+        // Notes   : Helps tune hot-path refill behaviour without rebuilding.
+        std::uint32_t small_object_batch = 0;
+
+        // Purpose : Allow callers to suppress expensive stack collection even when full tracking is compiled in.
+        // Contract: When false, TrackingAllocator skips map bookkeeping and only maintains counters.
+        // Notes   : Defaults to true to preserve legacy behaviour; MemorySystem honours API override first.
+        bool collect_stacks = true;
 
         // ---------------------------------------------------------------------
         // Singleton access

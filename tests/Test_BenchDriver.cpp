@@ -36,10 +36,24 @@ Notes :
 #include <ctime>        // std::time_t, std::tm, std::gmtime
 #include <cstdio>       // std::FILE, std::fopen, std::fprintf, std::fclose
 #include <cstdlib>      // std::getenv, std::strtol
-#include <functional>   // std::function
-#include <algorithm>    // std::min_element, std::max_element, std::sort
-#include <numeric>      // std::accumulate
+#include <algorithm>    // std::sort
 #include <cmath>        // std::sqrt, std::abs
+#include <thread>       // std::thread::hardware_concurrency
+#include <cerrno>       // errno
+
+#if defined(_WIN32)
+#   ifndef NOMINMAX
+#       define NOMINMAX 1
+#   endif
+#   ifndef WIN32_LEAN_AND_MEAN
+#       define WIN32_LEAN_AND_MEAN 1
+#   endif
+#   include <windows.h>
+#else
+#   include <sched.h>
+#   include <sys/resource.h>
+#   include <unistd.h>
+#endif
 
 #ifdef __cpp_lib_print
     #include <print>
@@ -83,6 +97,197 @@ namespace
     #else
         std::cout << ::dng::bench::ToString(result) << '\n';
     #endif
+    }
+
+    struct Stats
+    {
+        double Min   = 0.0;
+        double Max   = 0.0;
+        double Median = 0.0;
+        double Mean   = 0.0;
+        double StdDev = 0.0;
+        double RsdPct = 0.0;
+    };
+
+    [[nodiscard]] inline Stats ComputeStats(const double* samples, std::size_t count) noexcept
+    {
+        Stats stats{};
+        if (!samples || count == 0u)
+            return stats;
+
+        double minValue = samples[0];
+        double maxValue = samples[0];
+        double sum = 0.0;
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            const double sample = samples[i];
+            if (sample < minValue) minValue = sample;
+            if (sample > maxValue) maxValue = sample;
+            sum += sample;
+        }
+
+        stats.Min = minValue;
+        stats.Max = maxValue;
+        stats.Mean = sum / static_cast<double>(count);
+
+        std::vector<double> sorted(samples, samples + count);
+        std::sort(sorted.begin(), sorted.end());
+        const std::size_t mid = sorted.size() / 2;
+        if ((sorted.size() % 2u) == 1u)
+        {
+            stats.Median = sorted[mid];
+        }
+        else
+        {
+            stats.Median = (sorted[mid - 1] + sorted[mid]) * 0.5;
+        }
+
+        double variance = 0.0;
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            const double sample = samples[i];
+            const double delta = sample - stats.Mean;
+            variance += delta * delta;
+        }
+        variance /= static_cast<double>(count);
+        stats.StdDev = std::sqrt(variance);
+        stats.RsdPct = (stats.Mean != 0.0) ? ((stats.StdDev / stats.Mean) * 100.0) : 0.0;
+        return stats;
+    }
+
+    inline void StabilizeCpu() noexcept
+    {
+#if defined(_WIN32)
+        // Elevate process and thread priority, and pin to the first available logical CPU.
+        const HANDLE process = ::GetCurrentProcess();
+        const HANDLE thread  = ::GetCurrentThread();
+
+        // Set high priority class for the process.
+        (void)::SetPriorityClass(process, HIGH_PRIORITY_CLASS);
+        (void)::SetThreadPriority(thread, THREAD_PRIORITY_HIGHEST);
+
+        // Pin to the lowest-index logical CPU in the system mask to reduce scheduling variance.
+        DWORD_PTR processMask = 0;
+        DWORD_PTR systemMask  = 0;
+        if (::GetProcessAffinityMask(process, &processMask, &systemMask) != 0)
+        {
+            if (systemMask == 0)
+            {
+                systemMask = 1; // Fallback to CPU0 if unexpected.
+            }
+            // Find first set bit in systemMask
+            DWORD_PTR single = 0;
+            for (DWORD i = 0; i < sizeof(DWORD_PTR) * 8; ++i)
+            {
+                const DWORD_PTR bit = (static_cast<DWORD_PTR>(1) << i);
+                if (systemMask & bit) { single = bit; break; }
+            }
+            if (single == 0) single = 1; // fallback to CPU0
+            (void)::SetProcessAffinityMask(process, single);
+        }
+#else
+        // Best-effort: try to elevate priority and pin to CPU0 if possible.
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        CPU_SET(0, &set);
+        (void)::sched_setaffinity(0, sizeof(set), &set);
+        (void)::setpriority(PRIO_PROCESS, 0, -5);
+#endif
+    }
+
+    inline void PrintCpuDiagnostics() noexcept
+    {
+        const unsigned rawLogical = std::thread::hardware_concurrency();
+        const unsigned logical = (rawLogical == 0u) ? 1u : rawLogical;
+        char buffer[256]{};
+
+#if defined(_WIN32)
+        const HANDLE process = ::GetCurrentProcess();
+        DWORD_PTR processMask = 0;
+        DWORD_PTR systemMask = 0;
+        const BOOL affinityOk = ::GetProcessAffinityMask(process, &processMask, &systemMask);
+        const DWORD priorityClass = ::GetPriorityClass(process);
+
+        const char* priorityLabel = "UNKNOWN";
+        switch (priorityClass)
+        {
+            case IDLE_PRIORITY_CLASS:        priorityLabel = "IDLE"; break;
+            case BELOW_NORMAL_PRIORITY_CLASS: priorityLabel = "BELOW_NORMAL"; break;
+            case NORMAL_PRIORITY_CLASS:      priorityLabel = "NORMAL"; break;
+            case ABOVE_NORMAL_PRIORITY_CLASS: priorityLabel = "ABOVE_NORMAL"; break;
+            case HIGH_PRIORITY_CLASS:        priorityLabel = "HIGH"; break;
+            case REALTIME_PRIORITY_CLASS:    priorityLabel = "REALTIME"; break;
+            default: break;
+        }
+
+        if (affinityOk != 0)
+        {
+            std::snprintf(buffer, sizeof(buffer),
+                "[CPU] logical=%u affinity=0x%llX priority=%s",
+                logical,
+                static_cast<unsigned long long>(processMask),
+                priorityLabel);
+        }
+        else
+        {
+            const DWORD err = ::GetLastError();
+            std::snprintf(buffer, sizeof(buffer),
+                "[CPU] logical=%u affinity=<error %lu> priority=%s",
+                logical,
+                static_cast<unsigned long>(err),
+                priorityLabel);
+        }
+#else
+        cpu_set_t cpuSet;
+        CPU_ZERO(&cpuSet);
+        const int affinityResult = ::sched_getaffinity(0, sizeof(cpuSet), &cpuSet);
+        const int affinityErr = (affinityResult == 0) ? 0 : errno;
+
+        unsigned long long mask = 0ull;
+        if (affinityResult == 0)
+        {
+            const int maxBits = static_cast<int>(sizeof(mask) * 8);
+            const int cpuLimit = std::min(maxBits, CPU_SETSIZE);
+            for (int cpu = 0; cpu < cpuLimit; ++cpu)
+            {
+                if (CPU_ISSET(cpu, &cpuSet))
+                    mask |= (1ull << cpu);
+            }
+        }
+
+        errno = 0;
+        const int niceValue = ::getpriority(PRIO_PROCESS, 0);
+        const int niceErr = errno;
+
+        if (affinityResult == 0)
+        {
+            if (niceErr == 0)
+            {
+                std::snprintf(buffer, sizeof(buffer),
+                    "[CPU] logical=%u affinity=0x%llX nice=%d",
+                    logical,
+                    mask,
+                    niceValue);
+            }
+            else
+            {
+                std::snprintf(buffer, sizeof(buffer),
+                    "[CPU] logical=%u affinity=0x%llX nice=<error %d>",
+                    logical,
+                    mask,
+                    niceErr);
+            }
+        }
+        else
+        {
+            std::snprintf(buffer, sizeof(buffer),
+                "[CPU] logical=%u affinity=<error %d>",
+                logical,
+                affinityErr);
+        }
+#endif
+
+        PrintLine(std::string_view{buffer});
     }
 
     // Build environment-driven suffixes for metric names to support param sweeps.
@@ -216,6 +421,69 @@ int main(int argc, char** argv)
               << " " << __DATE__ << " " << __TIME__ << '\n';
 #endif
 
+    int warmupCount = 0;
+    int repeatMin = 3;
+    int repeatMax = repeatMin;
+    bool repeatMaxExplicit = false;
+    double targetRsd = 0.0;
+    bool cpuInfoEnabled = true;
+
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i] ? argv[i] : "";
+        if (arg == "--warmup" && (i + 1) < argc)
+        {
+            warmupCount = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+            if (warmupCount < 0) warmupCount = 0;
+        }
+        else if (arg == "--repeat" && (i + 1) < argc)
+        {
+            repeatMin = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+            if (repeatMin < 1) repeatMin = 1;
+            if (!repeatMaxExplicit)
+                repeatMax = repeatMin;
+        }
+        else if (arg == "--target-rsd" && (i + 1) < argc)
+        {
+            targetRsd = std::strtod(argv[++i], nullptr);
+            if (targetRsd < 0.0)
+                targetRsd = 0.0;
+        }
+        else if (arg == "--max-repeat" && (i + 1) < argc)
+        {
+            repeatMax = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+            if (repeatMax < 1) repeatMax = 1;
+            repeatMaxExplicit = true;
+        }
+        else if (arg == "--cpu-info")
+        {
+            cpuInfoEnabled = true;
+            if ((i + 1) < argc && argv[i + 1] && argv[i + 1][0] != '-')
+            {
+                const std::string value = argv[++i];
+                if (value == "0" || value == "false" || value == "off")
+                    cpuInfoEnabled = false;
+            }
+        }
+        else if (arg == "--no-cpu-info")
+        {
+            cpuInfoEnabled = false;
+        }
+    }
+
+    if (targetRsd > 0.0 && repeatMin < 3)
+        repeatMin = 3;
+    if (repeatMin < 1)
+        repeatMin = 1;
+    if (repeatMax < repeatMin)
+        repeatMax = repeatMin;
+
+    if (cpuInfoEnabled)
+    {
+        StabilizeCpu();
+        PrintCpuDiagnostics();
+    }
+
     memory::MemorySystem::Init();
 
     const auto defaultRef  = memory::MemorySystem::GetDefaultAllocator();
@@ -232,24 +500,6 @@ int main(int argc, char** argv)
     // You can bump iterations to target ~200ms per scenario in Release builds.
     constexpr std::uint64_t kIterations = 1'000'000; // Initial hint; Run() rescales toward ~250 ms.
 
-    // CLI flags for stable runs
-    int warmupCount = 0;
-    int repeatCount = 1;
-    for (int i = 1; i < argc; ++i)
-    {
-        const std::string arg = argv[i] ? argv[i] : "";
-        if (arg == "--warmup" && (i + 1) < argc)
-        {
-            warmupCount = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
-            if (warmupCount < 0) warmupCount = 0;
-        }
-        else if (arg == "--repeat" && (i + 1) < argc)
-        {
-            repeatCount = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
-            if (repeatCount < 1) repeatCount = 1;
-        }
-    }
-
     struct Agg
     {
         std::vector<double> ns;
@@ -259,9 +509,7 @@ int main(int argc, char** argv)
         bool allocsWarned = false;
     };
 
-    std::vector<std::string> order; // preserve insertion order
-    // name -> aggregate
-    std::vector<std::pair<std::string, Agg>> aggregates; // use vector for deterministic order
+    std::vector<std::pair<std::string, Agg>> aggregates; // name -> aggregate; deterministic insertion order
 
     auto find_or_add = [&](const char* name) -> Agg& {
         for (auto& p : aggregates)
@@ -269,10 +517,129 @@ int main(int argc, char** argv)
             if (p.first == name)
                 return p.second;
         }
-        order.emplace_back(name ? name : std::string{"<unnamed>"});
-        aggregates.emplace_back(order.back(), Agg{});
+        aggregates.emplace_back(name ? std::string{name} : std::string{"<unnamed>"}, Agg{});
         return aggregates.back().second;
     };
+
+    const int minRepeatCount = repeatMin;
+    const int maxRepeatCount = repeatMax;
+    const double targetRsdPct = targetRsd;
+    const bool targetRsdActive = targetRsdPct > 0.0;
+
+    auto executeScenario = [&](const std::string& metricName, auto&& runOnce) noexcept
+    {
+        for (int i = 0; i < warmupCount; ++i)
+        {
+            (void)runOnce();
+        }
+
+        auto& agg = find_or_add(metricName.c_str());
+        agg.ns.clear();
+        agg.ns.reserve(static_cast<std::size_t>(maxRepeatCount));
+        agg.bytesPerOp = -1.0;
+        agg.allocsPerOp = -1.0;
+        agg.bytesWarned = false;
+        agg.allocsWarned = false;
+
+        int repeats = 0;
+        bool hitMax = false;
+
+        while (true)
+        {
+            auto result = runOnce();
+            PrintBenchLine(result);
+            ++repeats;
+
+            agg.ns.push_back(result.NsPerOp);
+
+            if (result.BytesPerOp >= 0.0)
+            {
+                if (agg.bytesPerOp < 0.0)
+                {
+                    agg.bytesPerOp = result.BytesPerOp;
+                }
+                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - result.BytesPerOp) > 1e-9)
+                {
+                    char warn[256]{};
+                    std::snprintf(warn, sizeof(warn),
+                        "[WARN] bytesPerOp mismatch across repeats for %s",
+                        metricName.c_str());
+                    PrintNote(warn);
+                    agg.bytesWarned = true;
+                }
+            }
+
+            if (result.AllocsPerOp >= 0.0)
+            {
+                if (agg.allocsPerOp < 0.0)
+                {
+                    agg.allocsPerOp = result.AllocsPerOp;
+                }
+                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - result.AllocsPerOp) > 1e-9)
+                {
+                    char warn[256]{};
+                    std::snprintf(warn, sizeof(warn),
+                        "[WARN] allocsPerOp mismatch across repeats for %s",
+                        metricName.c_str());
+                    PrintNote(warn);
+                    agg.allocsWarned = true;
+                }
+            }
+
+            const Stats stats = ComputeStats(agg.ns.data(), agg.ns.size());
+            const bool reachedMin = repeats >= minRepeatCount;
+            const bool reachedMax = repeats >= maxRepeatCount;
+            const bool meetsRsd = targetRsdActive && repeats >= 3 && stats.RsdPct <= targetRsdPct;
+
+            if (reachedMax)
+            {
+                hitMax = true;
+                break;
+            }
+
+            if (targetRsdActive)
+            {
+                if (reachedMin && meetsRsd)
+                    break;
+            }
+            else if (reachedMin)
+            {
+                break;
+            }
+        }
+
+        const Stats finalStats = ComputeStats(agg.ns.data(), agg.ns.size());
+        char summary[256]{};
+        std::snprintf(summary, sizeof(summary),
+            "n=%d median=%.3f mean=%.3f RSD=%.3f%% min=%.3f max=%.3f",
+            repeats,
+            finalStats.Median,
+            finalStats.Mean,
+            finalStats.RsdPct,
+            finalStats.Min,
+            finalStats.Max);
+        PrintLine(std::string_view{summary});
+
+        if (targetRsdActive && finalStats.RsdPct > targetRsdPct && hitMax)
+        {
+            char warn[256]{};
+            std::snprintf(warn, sizeof(warn),
+                "[WARN] target RSD exceeded for %s: %.3f%% > %.3f%% (max-repeat reached)",
+                metricName.c_str(),
+                finalStats.RsdPct,
+                targetRsdPct);
+            PrintNote(warn);
+        }
+    };
+
+    // ---- Baseline: NoOp (harness overhead) ---------------------------------
+    {
+        const std::string metricName = std::string{"NoOp"};
+        auto runOnce = [&]() noexcept -> bench::BenchResult {
+            return DNG_BENCH(metricName.c_str(), kIterations, []() noexcept {});
+        };
+        executeScenario(metricName, runOnce);
+    }
 
     // ---- Scenario 1: dng::vector push/pop without reserve -------------------
     {
@@ -285,33 +652,7 @@ int main(int argc, char** argv)
                 values.pop_back();
             });
         };
-        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-        for (int i = 0; i < repeatCount; ++i)
-        {
-            auto r = runOnce();
-            PrintBenchLine(r);
-            auto& agg = find_or_add(r.Name);
-            agg.ns.push_back(r.NsPerOp);
-            if (r.BytesPerOp >= 0.0)
-            {
-                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] bytesPerOp mismatch across repeats for Vector PushPop (no reserve)");
-                    agg.bytesWarned = true;
-                }
-            }
-            if (r.AllocsPerOp >= 0.0)
-            {
-                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] allocsPerOp mismatch across repeats for Vector PushPop (no reserve)");
-                    agg.allocsWarned = true;
-                }
-            }
-        }
-        // No analytical churn printed: growth strategy is implementation dependent.
+        executeScenario(metricName, runOnce);
     }
 
     // ---- Scenario 2: dng::vector push/pop with reserve ----------------------
@@ -326,32 +667,7 @@ int main(int argc, char** argv)
                 values.pop_back();
             });
         };
-        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-        for (int i = 0; i < repeatCount; ++i)
-        {
-            auto r = runOnce();
-            PrintBenchLine(r);
-            auto& agg = find_or_add(r.Name);
-            agg.ns.push_back(r.NsPerOp);
-            if (r.BytesPerOp >= 0.0)
-            {
-                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] bytesPerOp mismatch across repeats for Vector PushPop (reserved)");
-                    agg.bytesWarned = true;
-                }
-            }
-            if (r.AllocsPerOp >= 0.0)
-            {
-                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] allocsPerOp mismatch across repeats for Vector PushPop (reserved)");
-                    agg.allocsWarned = true;
-                }
-            }
-        }
+        executeScenario(metricName, runOnce);
     }
 
     // ---- Scenario 3: Arena allocate/rewind (64 bytes) -----------------------
@@ -367,32 +683,7 @@ int main(int argc, char** argv)
                 arena.Rewind(marker);
             });
         };
-        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-        for (int i = 0; i < repeatCount; ++i)
-        {
-            auto r = runOnce();
-            PrintBenchLine(r);
-            auto& agg = find_or_add(r.Name);
-            agg.ns.push_back(r.NsPerOp);
-            if (r.BytesPerOp >= 0.0)
-            {
-                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] bytesPerOp mismatch across repeats for Arena Allocate/Rewind (64B)");
-                    agg.bytesWarned = true;
-                }
-            }
-            if (r.AllocsPerOp >= 0.0)
-            {
-                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] allocsPerOp mismatch across repeats for Arena Allocate/Rewind (64B)");
-                    agg.allocsWarned = true;
-                }
-            }
-        }
+        executeScenario(metricName, runOnce);
     }
     else
     {
@@ -415,32 +706,7 @@ int main(int argc, char** argv)
                 arena.Rewind(marker);
             });
         };
-        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-        for (int i = 0; i < repeatCount; ++i)
-        {
-            auto r = runOnce();
-            PrintBenchLine(r);
-            auto& agg = find_or_add(r.Name);
-            agg.ns.push_back(r.NsPerOp);
-            if (r.BytesPerOp >= 0.0)
-            {
-                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] bytesPerOp mismatch across repeats for Arena Bulk Allocate/Rewind (8x64B)");
-                    agg.bytesWarned = true;
-                }
-            }
-            if (r.AllocsPerOp >= 0.0)
-            {
-                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] allocsPerOp mismatch across repeats for Arena Bulk Allocate/Rewind (8x64B)");
-                    agg.allocsWarned = true;
-                }
-            }
-        }
+        executeScenario(metricName, runOnce);
     }
 
     // ---- Scenario 4: DefaultAllocator direct alloc/free (64 bytes) ----------
@@ -454,32 +720,7 @@ int main(int argc, char** argv)
                 DeallocateCompat(defaultAlloc, ptr, 64u, alignof(std::max_align_t));
             });
         };
-        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-        for (int i = 0; i < repeatCount; ++i)
-        {
-            auto r = runOnce();
-            PrintBenchLine(r);
-            auto& agg = find_or_add(r.Name);
-            agg.ns.push_back(r.NsPerOp);
-            if (r.BytesPerOp >= 0.0)
-            {
-                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] bytesPerOp mismatch across repeats for DefaultAllocator Alloc/Free 64B)");
-                    agg.bytesWarned = true;
-                }
-            }
-            if (r.AllocsPerOp >= 0.0)
-            {
-                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] allocsPerOp mismatch across repeats for DefaultAllocator Alloc/Free 64B)");
-                    agg.allocsWarned = true;
-                }
-            }
-        }
+        executeScenario(metricName, runOnce);
     }
     else
     {
@@ -497,32 +738,7 @@ int main(int argc, char** argv)
                 DeallocateCompat(tracking, ptr, 64u, alignof(std::max_align_t));
             });
         };
-        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-        for (int i = 0; i < repeatCount; ++i)
-        {
-            auto r = runOnce();
-            PrintBenchLine(r);
-            auto& agg = find_or_add(r.Name);
-            agg.ns.push_back(r.NsPerOp);
-            if (r.BytesPerOp >= 0.0)
-            {
-                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] bytesPerOp mismatch across repeats for TrackingAllocator Alloc/Free 64B)");
-                    agg.bytesWarned = true;
-                }
-            }
-            if (r.AllocsPerOp >= 0.0)
-            {
-                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] allocsPerOp mismatch across repeats for TrackingAllocator Alloc/Free 64B)");
-                    agg.allocsWarned = true;
-                }
-            }
-        }
+        executeScenario(metricName, runOnce);
     }
     else
     {
@@ -543,32 +759,7 @@ int main(int argc, char** argv)
                     trackedValues.pop_back();
                 });
             };
-            for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-            for (int i = 0; i < repeatCount; ++i)
-            {
-                auto r = runOnce();
-                PrintBenchLine(r);
-                auto& agg = find_or_add(r.Name);
-                agg.ns.push_back(r.NsPerOp);
-                if (r.BytesPerOp >= 0.0)
-                {
-                    if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                    else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                    {
-                        PrintNote("[WARN] bytesPerOp mismatch across repeats for tracking_vector PushPop (no reserve)");
-                        agg.bytesWarned = true;
-                    }
-                }
-                if (r.AllocsPerOp >= 0.0)
-                {
-                    if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                    else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                    {
-                        PrintNote("[WARN] allocsPerOp mismatch across repeats for tracking_vector PushPop (no reserve)");
-                        agg.allocsWarned = true;
-                    }
-                }
-            }
+            executeScenario(metricName, runOnce);
         }
 
         // 6b) Reserved: steady-state → 0 churn/op.
@@ -583,33 +774,12 @@ int main(int argc, char** argv)
                     trackedValues.pop_back();
                 });
             };
-            for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-            for (int i = 0; i < repeatCount; ++i)
-            {
-                auto r = runOnce();
-                PrintBenchLine(r);
-                auto& agg = find_or_add(r.Name);
-                agg.ns.push_back(r.NsPerOp);
-                if (r.BytesPerOp >= 0.0)
-                {
-                    if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                    else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                    {
-                        PrintNote("[WARN] bytesPerOp mismatch across repeats for tracking_vector PushPop (reserved)");
-                        agg.bytesWarned = true;
-                    }
-                }
-                if (r.AllocsPerOp >= 0.0)
-                {
-                    if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                    else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                    {
-                        PrintNote("[WARN] allocsPerOp mismatch across repeats for tracking_vector PushPop (reserved)");
-                        agg.allocsWarned = true;
-                    }
-                }
-            }
+            executeScenario(metricName, runOnce);
         }
+    }
+    else
+    {
+        PrintNote("Default allocator unavailable; skipping SmallObject scenario.");
     }
 
     // ---- Scenario 7: SmallObjectAllocator 64B (env-tagged batch) ----------
@@ -624,32 +794,7 @@ int main(int argc, char** argv)
                 DeallocateCompat(&soalloc, ptr, 64u, alignof(std::max_align_t));
             });
         };
-        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
-        for (int i = 0; i < repeatCount; ++i)
-        {
-            auto r = runOnce();
-            PrintBenchLine(r);
-            auto& agg = find_or_add(r.Name);
-            agg.ns.push_back(r.NsPerOp);
-            if (r.BytesPerOp >= 0.0)
-            {
-                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
-                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] bytesPerOp mismatch across repeats for SmallObject 64B");
-                    agg.bytesWarned = true;
-                }
-            }
-            if (r.AllocsPerOp >= 0.0)
-            {
-                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
-                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
-                {
-                    PrintNote("[WARN] allocsPerOp mismatch across repeats for SmallObject 64B");
-                    agg.allocsWarned = true;
-                }
-            }
-        }
+        executeScenario(metricName, runOnce);
     }
     else
     {
@@ -710,33 +855,18 @@ int main(int argc, char** argv)
                 std::fprintf(f, "  \"dateUtc\": \"%s\",\n", timeIso);
                 std::fprintf(f, "  \"platform\": { \"os\": \"Windows\", \"cpu\": \"x64\", \"compiler\": \"MSVC\" },\n");
                 std::fprintf(f, "  \"metrics\": [\n");
-                // Compute and emit aggregated metrics
-                auto compute_stats = [](const std::vector<double>& v, double& outMin, double& outMax,
-                                        double& outMedian, double& outMean, double& outStdDev) noexcept {
-                    if (v.empty()) { outMin = outMax = outMedian = outMean = outStdDev = 0.0; return; }
-                    outMin = *std::min_element(v.begin(), v.end());
-                    outMax = *std::max_element(v.begin(), v.end());
-                    outMean = std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
-                    std::vector<double> tmp = v;
-                    std::sort(tmp.begin(), tmp.end());
-                    if (tmp.size() % 2 == 1)
-                        outMedian = tmp[tmp.size() / 2];
-                    else
-                        outMedian = (tmp[tmp.size() / 2 - 1] + tmp[tmp.size() / 2]) * 0.5;
-                    double var = 0.0;
-                    for (double x : v) { double d = x - outMean; var += d * d; }
-                    var /= static_cast<double>(v.size());
-                    outStdDev = std::sqrt(var);
-                };
-
                 for (std::size_t i = 0; i < aggregates.size(); ++i)
                 {
                     const auto& name = aggregates[i].first;
                     const auto& agg  = aggregates[i].second;
-                    double mn, mx, med, mean, sd;
-                    compute_stats(agg.ns, mn, mx, med, mean, sd);
-                    std::fprintf(f, "    { \"name\": \"%s\", \"unit\": \"ns/op\", \"value\": %.3f, \"min\": %.3f, \"max\": %.3f, \"mean\": %.3f, \"stddev\": %.3f",
-                        name.c_str(), med, mn, mx, mean, sd);
+                    const Stats stats = ComputeStats(agg.ns.data(), agg.ns.size());
+                    std::fprintf(f, "    { \"name\": \"%s\", \"unit\": \"ns/op\", \"value\": %.3f",
+                        name.c_str(), stats.Median);
+                    if (agg.ns.size() > 1)
+                    {
+                        std::fprintf(f, ", \"min\": %.3f, \"max\": %.3f, \"mean\": %.3f, \"stddev\": %.3f",
+                            stats.Min, stats.Max, stats.Mean, stats.StdDev);
+                    }
                     if (agg.bytesPerOp >= 0.0)
                         std::fprintf(f, ", \"bytesPerOp\": %.3f", agg.bytesPerOp);
                     if (agg.allocsPerOp >= 0.0)

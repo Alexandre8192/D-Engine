@@ -202,9 +202,14 @@ namespace dng::core {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(m_mutex);
+        usize totalEntries = 0;
+        VisitShardsConst([&](const AllocationShard& shard)
+        {
+            std::lock_guard<std::mutex> shardLock(shard.mutex);
+            totalEntries += shard.allocations.size();
+        });
 
-        if (m_allocations.empty()) {
+        if (totalEntries == 0) {
             if (infoEnabled) {
                 LogMemoryInfo("No memory leaks detected.");
             }
@@ -217,15 +222,25 @@ namespace dng::core {
 
         LogMemoryError("=== MEMORY LEAKS DETECTED ===");
 
+        std::vector<AllocationRecord> collected;
+        collected.reserve(static_cast<std::size_t>(totalEntries));
+
+        VisitShardsConst([&](const AllocationShard& shard)
+        {
+            std::lock_guard<std::mutex> shardLock(shard.mutex);
+            for (const auto& entry : shard.allocations)
+            {
+                collected.push_back(entry.second);
+            }
+        });
+
         usize totalLeakedBytes = 0;
         usize leakCount = 0;
 
-        // Group leaks by tag for better reporting (hash is local and portable)
         std::unordered_map<AllocTag, std::vector<const AllocationRecord*>, AllocTagHash> leaksByTag;
-        leaksByTag.reserve(m_allocations.size());
+        leaksByTag.reserve(collected.size());
 
-        for (const auto& pair : m_allocations) {
-            const AllocationRecord& record = pair.second;
+        for (const AllocationRecord& record : collected) {
             leaksByTag[record.info.tag].push_back(&record);
             totalLeakedBytes += record.size;
             ++leakCount;
@@ -284,8 +299,13 @@ namespace dng::core {
     }
 
     usize TrackingAllocator::GetActiveAllocationCount() const noexcept {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        return m_allocations.size();
+        usize total = 0;
+        VisitShardsConst([&](const AllocationShard& shard)
+        {
+            std::lock_guard<std::mutex> shardLock(shard.mutex);
+            total += shard.allocations.size();
+        });
+        return total;
     }
 #endif // DNG_MEM_TRACKING
 
