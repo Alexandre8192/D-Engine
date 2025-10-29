@@ -31,9 +31,14 @@ Notes :
 #include <type_traits>  // std::true_type, std::false_type
 #include <vector>       // std::vector for tracking_vector alias
 #include <string_view>  // std::string_view
+#include <string>       // std::string
 #include <ctime>        // std::time_t, std::tm, std::gmtime
 #include <cstdio>       // std::FILE, std::fopen, std::fprintf, std::fclose
-#include <cstdlib>      // std::getenv
+#include <cstdlib>      // std::getenv, std::strtol
+#include <functional>   // std::function
+#include <algorithm>    // std::min_element, std::max_element, std::sort
+#include <numeric>      // std::accumulate
+#include <cmath>        // std::sqrt, std::abs
 
 #ifdef __cpp_lib_print
     #include <print>
@@ -154,7 +159,7 @@ namespace
 
 // -----------------------------------------------------------------------------
 
-int main()
+int main(int argc, char** argv)
 {
     using namespace ::dng;
 
@@ -181,52 +186,164 @@ int main()
     // You can bump iterations to target ~200ms per scenario in Release builds.
     constexpr std::uint64_t kIterations = 1'000'000; // Initial hint; Run() rescales toward ~250 ms.
 
-    // Collect results for JSON export
-    std::vector<bench::BenchResult> allResults;
+    // CLI flags for stable runs
+    int warmupCount = 0;
+    int repeatCount = 1;
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i] ? argv[i] : "";
+        if (arg == "--warmup" && (i + 1) < argc)
+        {
+            warmupCount = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+            if (warmupCount < 0) warmupCount = 0;
+        }
+        else if (arg == "--repeat" && (i + 1) < argc)
+        {
+            repeatCount = static_cast<int>(std::strtol(argv[++i], nullptr, 10));
+            if (repeatCount < 1) repeatCount = 1;
+        }
+    }
+
+    struct Agg
+    {
+        std::vector<double> ns;
+        double bytesPerOp = -1.0;
+        double allocsPerOp = -1.0;
+        bool bytesWarned = false;
+        bool allocsWarned = false;
+    };
+
+    std::vector<std::string> order; // preserve insertion order
+    // name -> aggregate
+    std::vector<std::pair<std::string, Agg>> aggregates; // use vector for deterministic order
+
+    auto find_or_add = [&](const char* name) -> Agg& {
+        for (auto& p : aggregates)
+        {
+            if (p.first == name)
+                return p.second;
+        }
+        order.emplace_back(name ? name : std::string{"<unnamed>"});
+        aggregates.emplace_back(order.back(), Agg{});
+        return aggregates.back().second;
+    };
 
     // ---- Scenario 1: dng::vector push/pop without reserve -------------------
     {
-        vector<int> values;
-        std::uint32_t counter = 0;
-
-        auto result = DNG_BENCH("Vector PushPop (no reserve)", kIterations, [&]() noexcept {
-            values.push_back(static_cast<int>(counter++));
-            values.pop_back();
-        });
-
-        PrintBenchLine(result);
-        allResults.push_back(result);
+        auto runOnce = [&]() noexcept -> bench::BenchResult {
+            vector<int> values;
+            std::uint32_t counter = 0;
+            return DNG_BENCH("Vector PushPop (no reserve)", kIterations, [&]() noexcept {
+                values.push_back(static_cast<int>(counter++));
+                values.pop_back();
+            });
+        };
+        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+        for (int i = 0; i < repeatCount; ++i)
+        {
+            auto r = runOnce();
+            PrintBenchLine(r);
+            auto& agg = find_or_add(r.Name);
+            agg.ns.push_back(r.NsPerOp);
+            if (r.BytesPerOp >= 0.0)
+            {
+                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] bytesPerOp mismatch across repeats for Vector PushPop (no reserve)");
+                    agg.bytesWarned = true;
+                }
+            }
+            if (r.AllocsPerOp >= 0.0)
+            {
+                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] allocsPerOp mismatch across repeats for Vector PushPop (no reserve)");
+                    agg.allocsWarned = true;
+                }
+            }
+        }
         // No analytical churn printed: growth strategy is implementation dependent.
     }
 
     // ---- Scenario 2: dng::vector push/pop with reserve ----------------------
     {
-        vector<int> values;
-        values.reserve(static_cast<std::size_t>(kIterations) + 1);
-        std::uint32_t counter = 0;
-
-        auto result = DNG_BENCH("Vector PushPop (reserved)", kIterations, [&]() noexcept {
-            values.push_back(static_cast<int>(counter++));
-            values.pop_back();
-        });
-
-    PrintBenchLine(result);
+        auto runOnce = [&]() noexcept -> bench::BenchResult {
+            vector<int> values;
+            values.reserve(static_cast<std::size_t>(kIterations) + 1);
+            std::uint32_t counter = 0;
+            return DNG_BENCH("Vector PushPop (reserved)", kIterations, [&]() noexcept {
+                values.push_back(static_cast<int>(counter++));
+                values.pop_back();
+            });
+        };
+        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+        for (int i = 0; i < repeatCount; ++i)
+        {
+            auto r = runOnce();
+            PrintBenchLine(r);
+            auto& agg = find_or_add(r.Name);
+            agg.ns.push_back(r.NsPerOp);
+            if (r.BytesPerOp >= 0.0)
+            {
+                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] bytesPerOp mismatch across repeats for Vector PushPop (reserved)");
+                    agg.bytesWarned = true;
+                }
+            }
+            if (r.AllocsPerOp >= 0.0)
+            {
+                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] allocsPerOp mismatch across repeats for Vector PushPop (reserved)");
+                    agg.allocsWarned = true;
+                }
+            }
+        }
     }
 
     // ---- Scenario 3: Arena allocate/rewind (64 bytes) -----------------------
     if (defaultAlloc)
     {
-        ::dng::core::ArenaAllocator arena{ defaultAlloc, 8u * 1024u * 1024u };
-
-        auto result = DNG_BENCH("Arena Allocate/Rewind (64B)", kIterations, [&]() noexcept {
-            const auto marker = arena.GetMarker();
-            void* ptr = arena.Allocate(64u, alignof(std::max_align_t));
-            DNG_CHECK(ptr != nullptr);
-            arena.Rewind(marker);
-        });
-
-        PrintBenchLine(result);
-        allResults.push_back(result);
+        auto runOnce = [&]() noexcept -> bench::BenchResult {
+            ::dng::core::ArenaAllocator arena{ defaultAlloc, 8u * 1024u * 1024u };
+            return DNG_BENCH("Arena Allocate/Rewind (64B)", kIterations, [&]() noexcept {
+                const auto marker = arena.GetMarker();
+                void* ptr = arena.Allocate(64u, alignof(std::max_align_t));
+                DNG_CHECK(ptr != nullptr);
+                arena.Rewind(marker);
+            });
+        };
+        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+        for (int i = 0; i < repeatCount; ++i)
+        {
+            auto r = runOnce();
+            PrintBenchLine(r);
+            auto& agg = find_or_add(r.Name);
+            agg.ns.push_back(r.NsPerOp);
+            if (r.BytesPerOp >= 0.0)
+            {
+                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] bytesPerOp mismatch across repeats for Arena Allocate/Rewind (64B)");
+                    agg.bytesWarned = true;
+                }
+            }
+            if (r.AllocsPerOp >= 0.0)
+            {
+                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] allocsPerOp mismatch across repeats for Arena Allocate/Rewind (64B)");
+                    agg.allocsWarned = true;
+                }
+            }
+        }
     }
     else
     {
@@ -236,33 +353,82 @@ int main()
     // ---- Scenario 3b: Arena bulk allocate + rewind -------------------------
     if (defaultAlloc)
     {
-        ::dng::core::ArenaAllocator arena{ defaultAlloc, 8u * 1024u * 1024u };
-
-        auto result = DNG_BENCH("Arena Bulk Allocate/Rewind (8x64B)", kIterations, [&]() noexcept {
-            const auto marker = arena.GetMarker();
-            for (int i = 0; i < 8; ++i)
+        auto runOnce = [&]() noexcept -> bench::BenchResult {
+            ::dng::core::ArenaAllocator arena{ defaultAlloc, 8u * 1024u * 1024u };
+            return DNG_BENCH("Arena Bulk Allocate/Rewind (8x64B)", kIterations, [&]() noexcept {
+                const auto marker = arena.GetMarker();
+                for (int i = 0; i < 8; ++i)
+                {
+                    void* ptr = arena.Allocate(64u, alignof(std::max_align_t));
+                    DNG_CHECK(ptr != nullptr);
+                }
+                arena.Rewind(marker);
+            });
+        };
+        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+        for (int i = 0; i < repeatCount; ++i)
+        {
+            auto r = runOnce();
+            PrintBenchLine(r);
+            auto& agg = find_or_add(r.Name);
+            agg.ns.push_back(r.NsPerOp);
+            if (r.BytesPerOp >= 0.0)
             {
-                void* ptr = arena.Allocate(64u, alignof(std::max_align_t));
-                DNG_CHECK(ptr != nullptr);
+                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] bytesPerOp mismatch across repeats for Arena Bulk Allocate/Rewind (8x64B)");
+                    agg.bytesWarned = true;
+                }
             }
-            arena.Rewind(marker);
-        });
-
-        PrintBenchLine(result);
-        allResults.push_back(result);
+            if (r.AllocsPerOp >= 0.0)
+            {
+                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] allocsPerOp mismatch across repeats for Arena Bulk Allocate/Rewind (8x64B)");
+                    agg.allocsWarned = true;
+                }
+            }
+        }
     }
 
     // ---- Scenario 4: DefaultAllocator direct alloc/free (64 bytes) ----------
     if (defaultAlloc)
     {
-        auto result = DNG_BENCH("DefaultAllocator Alloc/Free 64B", kIterations, [&]() noexcept {
-            void* ptr = AllocateCompat(defaultAlloc, 64u, alignof(std::max_align_t));
-            DNG_CHECK(ptr != nullptr);
-            DeallocateCompat(defaultAlloc, ptr, 64u, alignof(std::max_align_t));
-        });
-
-        PrintBenchLine(result);
-        allResults.push_back(result);
+        auto runOnce = [&]() noexcept -> bench::BenchResult {
+            return DNG_BENCH("DefaultAllocator Alloc/Free 64B", kIterations, [&]() noexcept {
+                void* ptr = AllocateCompat(defaultAlloc, 64u, alignof(std::max_align_t));
+                DNG_CHECK(ptr != nullptr);
+                DeallocateCompat(defaultAlloc, ptr, 64u, alignof(std::max_align_t));
+            });
+        };
+        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+        for (int i = 0; i < repeatCount; ++i)
+        {
+            auto r = runOnce();
+            PrintBenchLine(r);
+            auto& agg = find_or_add(r.Name);
+            agg.ns.push_back(r.NsPerOp);
+            if (r.BytesPerOp >= 0.0)
+            {
+                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] bytesPerOp mismatch across repeats for DefaultAllocator Alloc/Free 64B)");
+                    agg.bytesWarned = true;
+                }
+            }
+            if (r.AllocsPerOp >= 0.0)
+            {
+                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] allocsPerOp mismatch across repeats for DefaultAllocator Alloc/Free 64B)");
+                    agg.allocsWarned = true;
+                }
+            }
+        }
     }
     else
     {
@@ -272,14 +438,39 @@ int main()
     // ---- Scenario 5: TrackingAllocator direct alloc/free (64 bytes) ---------
     if (tracking)
     {
-        auto result = DNG_BENCH("TrackingAllocator Alloc/Free 64B", kIterations, [&]() noexcept {
-            void* ptr = AllocateCompat(tracking, 64u, alignof(std::max_align_t));
-            DNG_CHECK(ptr != nullptr);
-            DeallocateCompat(tracking, ptr, 64u, alignof(std::max_align_t));
-        });
-
-        PrintBenchLine(result);
-        allResults.push_back(result);
+        auto runOnce = [&]() noexcept -> bench::BenchResult {
+            return DNG_BENCH("TrackingAllocator Alloc/Free 64B", kIterations, [&]() noexcept {
+                void* ptr = AllocateCompat(tracking, 64u, alignof(std::max_align_t));
+                DNG_CHECK(ptr != nullptr);
+                DeallocateCompat(tracking, ptr, 64u, alignof(std::max_align_t));
+            });
+        };
+        for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+        for (int i = 0; i < repeatCount; ++i)
+        {
+            auto r = runOnce();
+            PrintBenchLine(r);
+            auto& agg = find_or_add(r.Name);
+            agg.ns.push_back(r.NsPerOp);
+            if (r.BytesPerOp >= 0.0)
+            {
+                if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] bytesPerOp mismatch across repeats for TrackingAllocator Alloc/Free 64B)");
+                    agg.bytesWarned = true;
+                }
+            }
+            if (r.AllocsPerOp >= 0.0)
+            {
+                if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                {
+                    PrintNote("[WARN] allocsPerOp mismatch across repeats for TrackingAllocator Alloc/Free 64B)");
+                    agg.allocsWarned = true;
+                }
+            }
+        }
     }
     else
     {
@@ -291,29 +482,79 @@ int main()
     {
         // 6a) No reserve: growth-dependent → no analytical expected printed.
         {
-            tracking_vector<int> trackedValues;
-            std::uint32_t counter = 0;
-
-            auto resultNoReserve = DNG_BENCH("tracking_vector PushPop (no reserve)", kIterations, [&]() noexcept {
-                trackedValues.push_back(static_cast<int>(counter++));
-                trackedValues.pop_back();
-            });
-            PrintBenchLine(resultNoReserve);
-            allResults.push_back(resultNoReserve);
+            auto runOnce = [&]() noexcept -> bench::BenchResult {
+                tracking_vector<int> trackedValues;
+                std::uint32_t counter = 0;
+                return DNG_BENCH("tracking_vector PushPop (no reserve)", kIterations, [&]() noexcept {
+                    trackedValues.push_back(static_cast<int>(counter++));
+                    trackedValues.pop_back();
+                });
+            };
+            for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+            for (int i = 0; i < repeatCount; ++i)
+            {
+                auto r = runOnce();
+                PrintBenchLine(r);
+                auto& agg = find_or_add(r.Name);
+                agg.ns.push_back(r.NsPerOp);
+                if (r.BytesPerOp >= 0.0)
+                {
+                    if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                    else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                    {
+                        PrintNote("[WARN] bytesPerOp mismatch across repeats for tracking_vector PushPop (no reserve)");
+                        agg.bytesWarned = true;
+                    }
+                }
+                if (r.AllocsPerOp >= 0.0)
+                {
+                    if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                    else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                    {
+                        PrintNote("[WARN] allocsPerOp mismatch across repeats for tracking_vector PushPop (no reserve)");
+                        agg.allocsWarned = true;
+                    }
+                }
+            }
         }
 
         // 6b) Reserved: steady-state → 0 churn/op.
         {
-            tracking_vector<int> trackedValues;
-            trackedValues.reserve(static_cast<std::size_t>(kIterations) + 1);
-            std::uint32_t counter = 0;
-
-            auto resultReserved = DNG_BENCH("tracking_vector PushPop (reserved)", kIterations, [&]() noexcept {
-                trackedValues.push_back(static_cast<int>(counter++));
-                trackedValues.pop_back();
-            });
-            PrintBenchLine(resultReserved);
-            allResults.push_back(resultReserved);
+            auto runOnce = [&]() noexcept -> bench::BenchResult {
+                tracking_vector<int> trackedValues;
+                trackedValues.reserve(static_cast<std::size_t>(kIterations) + 1);
+                std::uint32_t counter = 0;
+                return DNG_BENCH("tracking_vector PushPop (reserved)", kIterations, [&]() noexcept {
+                    trackedValues.push_back(static_cast<int>(counter++));
+                    trackedValues.pop_back();
+                });
+            };
+            for (int i = 0; i < warmupCount; ++i) { (void)runOnce(); }
+            for (int i = 0; i < repeatCount; ++i)
+            {
+                auto r = runOnce();
+                PrintBenchLine(r);
+                auto& agg = find_or_add(r.Name);
+                agg.ns.push_back(r.NsPerOp);
+                if (r.BytesPerOp >= 0.0)
+                {
+                    if (agg.bytesPerOp < 0.0) agg.bytesPerOp = r.BytesPerOp;
+                    else if (!agg.bytesWarned && std::abs(agg.bytesPerOp - r.BytesPerOp) > 1e-9)
+                    {
+                        PrintNote("[WARN] bytesPerOp mismatch across repeats for tracking_vector PushPop (reserved)");
+                        agg.bytesWarned = true;
+                    }
+                }
+                if (r.AllocsPerOp >= 0.0)
+                {
+                    if (agg.allocsPerOp < 0.0) agg.allocsPerOp = r.AllocsPerOp;
+                    else if (!agg.allocsWarned && std::abs(agg.allocsPerOp - r.AllocsPerOp) > 1e-9)
+                    {
+                        PrintNote("[WARN] allocsPerOp mismatch across repeats for tracking_vector PushPop (reserved)");
+                        agg.allocsWarned = true;
+                    }
+                }
+            }
         }
     }
     else
@@ -375,17 +616,38 @@ int main()
                 std::fprintf(f, "  \"dateUtc\": \"%s\",\n", timeIso);
                 std::fprintf(f, "  \"platform\": { \"os\": \"Windows\", \"cpu\": \"x64\", \"compiler\": \"MSVC\" },\n");
                 std::fprintf(f, "  \"metrics\": [\n");
-                for (std::size_t i = 0; i < allResults.size(); ++i)
+                // Compute and emit aggregated metrics
+                auto compute_stats = [](const std::vector<double>& v, double& outMin, double& outMax,
+                                        double& outMedian, double& outMean, double& outStdDev) noexcept {
+                    if (v.empty()) { outMin = outMax = outMedian = outMean = outStdDev = 0.0; return; }
+                    outMin = *std::min_element(v.begin(), v.end());
+                    outMax = *std::max_element(v.begin(), v.end());
+                    outMean = std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size());
+                    std::vector<double> tmp = v;
+                    std::sort(tmp.begin(), tmp.end());
+                    if (tmp.size() % 2 == 1)
+                        outMedian = tmp[tmp.size() / 2];
+                    else
+                        outMedian = (tmp[tmp.size() / 2 - 1] + tmp[tmp.size() / 2]) * 0.5;
+                    double var = 0.0;
+                    for (double x : v) { double d = x - outMean; var += d * d; }
+                    var /= static_cast<double>(v.size());
+                    outStdDev = std::sqrt(var);
+                };
+
+                for (std::size_t i = 0; i < aggregates.size(); ++i)
                 {
-                    const auto& r = allResults[i];
-                    // Minimal schema: name + ns/op as value
-                    std::fprintf(f, "    { \"name\": \"%s\", \"unit\": \"ns/op\", \"value\": %.3f",
-                        r.Name ? r.Name : "<unnamed>", r.NsPerOp);
-                    if (r.BytesPerOp >= 0.0)
-                        std::fprintf(f, ", \"bytesPerOp\": %.3f", r.BytesPerOp);
-                    if (r.AllocsPerOp >= 0.0)
-                        std::fprintf(f, ", \"allocsPerOp\": %.3f", r.AllocsPerOp);
-                    std::fprintf(f, " }%s\n", (i + 1 < allResults.size()) ? "," : "");
+                    const auto& name = aggregates[i].first;
+                    const auto& agg  = aggregates[i].second;
+                    double mn, mx, med, mean, sd;
+                    compute_stats(agg.ns, mn, mx, med, mean, sd);
+                    std::fprintf(f, "    { \"name\": \"%s\", \"unit\": \"ns/op\", \"value\": %.3f, \"min\": %.3f, \"max\": %.3f, \"mean\": %.3f, \"stddev\": %.3f",
+                        name.c_str(), med, mn, mx, mean, sd);
+                    if (agg.bytesPerOp >= 0.0)
+                        std::fprintf(f, ", \"bytesPerOp\": %.3f", agg.bytesPerOp);
+                    if (agg.allocsPerOp >= 0.0)
+                        std::fprintf(f, ", \"allocsPerOp\": %.3f", agg.allocsPerOp);
+                    std::fprintf(f, " }%s\n", (i + 1 < aggregates.size()) ? "," : "");
                 }
                 std::fprintf(f, "  ]\n");
                 std::fprintf(f, "}\n");

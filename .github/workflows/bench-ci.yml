@@ -55,7 +55,7 @@ jobs:
           $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
           if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
           Write-Host "Running with CPU affinity=1 and High priority (pre-applied): $exeRel"
-          cmd /c start /wait /affinity 1 /high "D-Engine-BenchRunner" $exeRel
+          cmd /c start /wait /affinity 1 /high "D-Engine-BenchRunner" $exeRel --warmup 1 --repeat 3
 
       - name: Upload bench artifacts
         if: always()
