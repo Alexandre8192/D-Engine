@@ -1,5 +1,14 @@
 #include "Core/Memory/GlobalNewDelete.hpp"
 
+// ---
+// Purpose : Engine-wide global new/delete overloads wired to D-Engine OOM policy.
+// Contract: Throwing operator new forms may emit std::bad_alloc in SOFT mode, but
+//           terminate in FATAL mode; nothrow forms return nullptr in SOFT mode.
+//           Delete variants honor (size, alignment) invariants.
+// Notes   : This file is the ONLY allowed exception boundary for Core regarding
+//           std::bad_alloc; engine code must not rely on exceptions internally.
+// ---
+
 #if DNG_ROUTE_GLOBAL_NEW
 static_assert(DNG_GLOBAL_NEW_SMALL_THRESHOLD >= 0, "DNG_GLOBAL_NEW_SMALL_THRESHOLD must be >= 0");
 static_assert(DNG_GLOBAL_NEW_FALLBACK_MALLOC == 0 || DNG_GLOBAL_NEW_FALLBACK_MALLOC == 1,
@@ -22,6 +31,7 @@ namespace
     using ::dng::core::AllocatorRef;
     using ::dng::core::IsPowerOfTwo;
     using ::dng::core::NormalizeAlignment;
+    using ::dng::core::ShouldFatalOnOOM;
     using ::dng::memory::MemorySystem;
 
     // ---------------------------------------------------------------------
@@ -276,22 +286,24 @@ namespace
     // Purpose : Centralize out-of-memory (OOM) handling for global operator new
     //           overloads.
     // Contract: Returns nullptr when nothrow==true and allocation fails. When
-    //           nothrow==false, terminates the program via std::terminate();
-    //           noexcept (never throws).
-    // Notes   : std::terminate() is chosen over throw to avoid introducing
-    //           exception handling overhead in Core. This aligns with D-Engine's
-    //           no-exceptions policy while still honoring the standard library
-    //           contract that operator new must terminate on failure when not
-    //           nothrow.
+    //           nothrow==false, emits std::bad_alloc in SOFT mode and terminates
+    //           in FATAL mode (either via FatalOOM or std::terminate()).
+    // Notes   : This is the only Core site allowed to throw; OOM hooks still run
+    //           through DNG_MEM_CHECK_OOM for diagnostics and fatal escalation.
     // ---
     [[nodiscard]] void* HandleAllocationFailure(std::size_t size,
         std::size_t alignment,
         bool nothrow,
-        const char* context) noexcept
+        const char* context)
     {
+        const bool fatalMode = ShouldFatalOnOOM();
         DNG_MEM_CHECK_OOM(size, alignment, context);
         if (!nothrow)
         {
+            if (!fatalMode)
+            {
+                throw std::bad_alloc{};
+            }
             std::terminate();
         }
         return nullptr;
@@ -468,6 +480,26 @@ void* operator new(std::size_t size, std::align_val_t alignment, const std::noth
     return AllocateGlobal(size, static_cast<std::size_t>(alignment), true, "operator new aligned nothrow");
 }
 
+void* operator new[](std::size_t size)
+{
+    return AllocateGlobal(size, alignof(std::max_align_t), false, "operator new[]");
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept
+{
+    return AllocateGlobal(size, alignof(std::max_align_t), true, "operator new[] nothrow");
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment)
+{
+    return AllocateGlobal(size, static_cast<std::size_t>(alignment), false, "operator new[] aligned");
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    return AllocateGlobal(size, static_cast<std::size_t>(alignment), true, "operator new[] aligned nothrow");
+}
+
 void operator delete(void* ptr) noexcept
 {
     DeallocateGlobal(ptr, 0, 0);
@@ -504,6 +536,46 @@ void operator delete(void* ptr, std::size_t size, const std::nothrow_t&) noexcep
 }
 
 void operator delete(void* ptr, std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    DeallocateGlobal(ptr, size, static_cast<std::size_t>(alignment));
+}
+
+void operator delete[](void* ptr) noexcept
+{
+    DeallocateGlobal(ptr, 0, 0);
+}
+
+void operator delete[](void* ptr, const std::nothrow_t&) noexcept
+{
+    DeallocateGlobal(ptr, 0, 0);
+}
+
+void operator delete[](void* ptr, std::size_t size) noexcept
+{
+    DeallocateGlobal(ptr, size, 0);
+}
+
+void operator delete[](void* ptr, std::align_val_t alignment) noexcept
+{
+    DeallocateGlobal(ptr, 0, static_cast<std::size_t>(alignment));
+}
+
+void operator delete[](void* ptr, std::size_t size, std::align_val_t alignment) noexcept
+{
+    DeallocateGlobal(ptr, size, static_cast<std::size_t>(alignment));
+}
+
+void operator delete[](void* ptr, std::align_val_t alignment, const std::nothrow_t&) noexcept
+{
+    DeallocateGlobal(ptr, 0, static_cast<std::size_t>(alignment));
+}
+
+void operator delete[](void* ptr, std::size_t size, const std::nothrow_t&) noexcept
+{
+    DeallocateGlobal(ptr, size, 0);
+}
+
+void operator delete[](void* ptr, std::size_t size, std::align_val_t alignment, const std::nothrow_t&) noexcept
 {
     DeallocateGlobal(ptr, size, static_cast<std::size_t>(alignment));
 }

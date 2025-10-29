@@ -196,10 +196,7 @@ namespace dng::core
             AlignUp<std::uintptr_t>(p, alignment));
         if (aligned != p)
         {
-            if (Logger::IsEnabled("Alignment"))
-            {
-                DNG_LOG_INFO("Alignment", "AlignUp adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
-            }
+            DNG_LOG_INFO("Alignment", "AlignUp adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
         }
         return reinterpret_cast<void*>(aligned);
     }
@@ -216,10 +213,7 @@ namespace dng::core
             AlignDown<std::uintptr_t>(p, alignment));
         if (aligned != p)
         {
-            if (Logger::IsEnabled("Alignment"))
-            {
-                DNG_LOG_INFO("Alignment", "AlignDown adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
-            }
+            DNG_LOG_INFO("Alignment", "AlignDown adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
         }
         return reinterpret_cast<void*>(aligned);
     }
@@ -273,10 +267,7 @@ namespace dng::core
         const bool ok = IsAligned<std::uintptr_t>(p, alignment);
         if (!ok)
         {
-            if (Logger::IsEnabled("Alignment"))
-            {
-                DNG_LOG_WARNING("Alignment", "Pointer {} is NOT aligned to {}", ptr, (size_t)NormalizeAlignment(alignment));
-            }
+            DNG_LOG_WARNING("Alignment", "Pointer {} is NOT aligned to {}", ptr, (size_t)NormalizeAlignment(alignment));
         }
         return ok;
     }

@@ -114,11 +114,9 @@ namespace dng::core {
                 aligned = mPtr + padding;
                 mPtr = aligned + size; // bump
             } else if (mConfig.bReturnNullOnOOM) {
-                if (Logger::IsEnabled("Memory")) {
-                    DNG_LOG_WARNING("Memory", "FrameAllocator OOM: requested {} bytes (align {}), used={}, cap={}",
-                        static_cast<size_t>(size), static_cast<size_t>(alignment),
-                        static_cast<size_t>(GetUsed()), static_cast<size_t>(GetCapacity()));
-                }
+                DNG_LOG_WARNING("Memory", "FrameAllocator OOM: requested {} bytes (align {}), used={}, cap={}",
+                    static_cast<size_t>(size), static_cast<size_t>(alignment),
+                    static_cast<size_t>(GetUsed()), static_cast<size_t>(GetCapacity()));
             } else {
                 DNG_MEM_CHECK_OOM(size, alignment, "FrameAllocator::Allocate");
             }
@@ -138,16 +136,24 @@ namespace dng::core {
 
         // ---
         // Purpose : Provide a fallback resize implementation by allocating a new block and copying payload.
-        // Contract: Preserves original data up to `min(oldSize,newSize)`; returns nullptr on allocation failure (subject to config).
+        // Contract: Preserves original data up to `min(oldSize,newSize)`; returns nullptr on allocation failure (subject to config); sets wasInPlace to false when provided.
         // Notes   : Old block remains live until Reset/Rewind; caller must handle lifetime.
         // ---
-        [[nodiscard]] void* Reallocate(void* oldPtr, usize oldSize, usize newSize, usize alignment = alignof(std::max_align_t)) noexcept override {
+        [[nodiscard]] void* Reallocate(void* oldPtr,
+            usize oldSize,
+            usize newSize,
+            usize alignment = alignof(std::max_align_t),
+            bool* wasInPlace = nullptr) noexcept override {
             // Simple strategy: allocate new block, memcpy, leave old as garbage (reclaimed on Reset()).
             if (oldPtr == nullptr) return Allocate(newSize, alignment);
             if (newSize == 0) { /* nothing to do */ return nullptr; }
 
             void* newPtr = Allocate(newSize, alignment);
             if (!newPtr) return nullptr;
+
+            if (wasInPlace) {
+                *wasInPlace = false;
+            }
 
             const usize toCopy = oldSize < newSize ? oldSize : newSize;
             std::memcpy(newPtr, oldPtr, static_cast<size_t>(toCopy));

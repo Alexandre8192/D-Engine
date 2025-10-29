@@ -28,6 +28,9 @@
 - Allowed **only at interop boundaries** (separate module) to **catch and
   translate** third-party exceptions into explicit status for the Core.
   Exceptions must never cross into Core code.
+- The **only** sanctioned emission of `std::bad_alloc` inside Core is the
+  global `operator new/new[]` overrides in `Core/Memory/GlobalNewDelete.cpp`; all
+  other code must remain exception-free.
 
 ### Rationale
 - Determinism and performance (no unwinding tables, no surprise slow paths).

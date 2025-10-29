@@ -17,6 +17,8 @@
 //           RAII helper (MemorySystemScope) is offered for scope-based usage.
 //           When DNG_MEM_GUARDS is enabled, all global allocators are wrapped
 //           inside GuardAllocator to detect buffer overruns and use-after-free.
+//           Global OOM escalation funnels through GlobalNewDelete.cpp, the only
+//           Core site permitted to emit std::bad_alloc.
 // ============================================================================
 
 #include "Core/CoreMinimal.hpp"

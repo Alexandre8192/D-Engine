@@ -10,7 +10,8 @@
 // Notes   : Functions are inline to keep header self-contained; logging macros
 //           are stubbed if the logger subsystem is not yet initialized.
 // ============================================================================
-#include "Core/CoreMinimal.hpp"  // Logger + Types + Platform
+#include "Core/Types.hpp"      // usize, fundamental aliases
+#include "Core/Logger.hpp"     // logging interfaces/macros
 #include "Core/Memory/MemoryConfig.hpp" // compile-time defaults + runtime cfg
 #include <cstdlib>          // std::abort
 
