@@ -29,6 +29,13 @@
 #include <limits>      // std::numeric_limits
 #include <cstdio>      // std::snprintf
 #include <cstdlib>     // std::getenv
+#include <errno.h>     // errno, EEXIST
+#if defined(_WIN32)
+    #include <direct.h>    // _mkdir
+#else
+    #include <sys/types.h>
+    #include <sys/stat.h>  // mkdir
+#endif
 
 // --- Optional memory tracking integration ----------------------------------
 // Define DNG_MEM_TRACKING to enable per-op memory/alloc counts.
@@ -65,10 +72,84 @@ namespace bench {
 #else
     static constexpr const char* kDefault = "artifacts/bench";
 #endif
+    // MSVC marks getenv as deprecated; use a targeted pragma to silence 4996 here.
+#if defined(_MSC_VER)
+#   pragma warning(push)
+#   pragma warning(disable:4996)
+#endif
     const char* env = std::getenv("DNG_BENCH_OUT");
+#if defined(_MSC_VER)
+#   pragma warning(pop)
+#endif
     if (env && env[0] != '\0')
         return env;
     return kDefault;
+}
+
+// ---
+// Purpose : Best-effort creation of the benchmark output directory returned by
+//           BenchOutputDir(), creating intermediate components if necessary.
+// Contract:
+//   - Never throws; returns true if the directory exists (already or after
+//     creation), false on error (including overly long paths).
+//   - Does not allocate on the heap; uses a fixed-size stack buffer (1 KiB);
+//     paths longer than this are not supported and will fail gracefully.
+//   - Thread-safety: benign races if called concurrently; multiple callers may
+//     attempt to create the same component; EEXIST is tolerated.
+// Notes   : Avoids <filesystem>; uses _mkdir (Windows) or mkdir (POSIX).
+// ---
+[[nodiscard]] inline bool EnsureBenchOutputDirExists() noexcept
+{
+    const char* path = BenchOutputDir();
+    if (!path || path[0] == '\0')
+        return false;
+
+    constexpr std::size_t kMax = 1024; // hard ceiling to avoid dynamic allocs
+    char buf[kMax + 1]{};
+    std::size_t len = 0;
+
+#if defined(_WIN32)
+    const char kSep = '\\';
+#else
+    const char kSep = '/';
+#endif
+
+    // Build the path segment by segment and create each prefix directory.
+    for (const char* p = path; ; ++p)
+    {
+        const char c = *p;
+        const bool atEnd = (c == '\0');
+        const bool isSep = (c == '/' || c == '\\');
+
+        if (isSep || atEnd)
+        {
+            if (len > 0)
+            {
+                buf[len] = '\0';
+#if defined(_WIN32)
+                if (_mkdir(buf) != 0)
+                {
+                    if (errno != EEXIST)
+                        return false;
+                }
+#else
+                if (mkdir(buf, 0777) != 0)
+                {
+                    if (errno != EEXIST)
+                        return false;
+                }
+#endif
+            }
+            if (atEnd) break;
+        }
+        else
+        {
+            const char outc = (c == '\\') ? kSep : c;
+            if (len >= kMax) return false;
+            buf[len++] = outc;
+        }
+    }
+    return true;
 }
 
 
