@@ -29,6 +29,7 @@
 #include "Core/Memory/SmallObjectAllocator.hpp"
 #include "Core/Memory/ArenaAllocator.hpp"
 #include "Core/Memory/ThreadSafety.hpp"
+#include "Core/Memory/OOM.hpp"
 
 #include <memory> // Needed for std::destroy_at (see usage on lines 152, 159, 166, etc.)
 #include <new> // placement new / destroy_at
@@ -53,13 +54,6 @@ namespace memory
 
     namespace detail
     {
-        // ---------------------------------------------------------------------
-        // Log category dedicated to MemorySystem lifecycle events.
-        // ---------------------------------------------------------------------
-        #ifndef DNG_MEMORY_SYSTEM_LOG_CATEGORY
-        #define DNG_MEMORY_SYSTEM_LOG_CATEGORY "Memory.System"
-        #endif
-
         // Forward aliases for brevity.
     using DefaultAllocator    = ::dng::core::DefaultAllocator;
     using TrackingAllocator   = ::dng::core::TrackingAllocator;
@@ -144,59 +138,85 @@ namespace memory
         
         inline void DestroyGlobals(MemoryGlobals& globals) noexcept
         {
+            const bool logInfo = ::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Info, "Memory");
+
             if (globals.gameplayArena)
             {
-                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY,
-                    "DestroyGlobals: destroying gameplay arena (ptr={}, capacity={}, valid={})",
-                    static_cast<const void*>(globals.gameplayArena),
-                    static_cast<unsigned long long>(globals.gameplayArena->GetCapacity()),
-                    globals.gameplayArena->IsValid() ? "true" : "false");
+                if (logInfo)
+                {
+                    DNG_LOG_INFO("Memory",
+                        "DestroyGlobals: destroying gameplay arena (ptr={}, capacity={}, valid={})",
+                        static_cast<const void*>(globals.gameplayArena),
+                        static_cast<unsigned long long>(globals.gameplayArena->GetCapacity()),
+                        globals.gameplayArena->IsValid() ? "true" : "false");
+                }
                 std::destroy_at(globals.gameplayArena);
                 globals.gameplayArena = nullptr;
             }
 
             if (globals.audioArena)
             {
-                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying audio arena");
+                if (logInfo)
+                {
+                    DNG_LOG_INFO("Memory", "DestroyGlobals: destroying audio arena");
+                }
                 std::destroy_at(globals.audioArena);
                 globals.audioArena = nullptr;
             }
 
             if (globals.rendererArena)
             {
-                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying renderer arena");
+                if (logInfo)
+                {
+                    DNG_LOG_INFO("Memory", "DestroyGlobals: destroying renderer arena");
+                }
                 std::destroy_at(globals.rendererArena);
                 globals.rendererArena = nullptr;
             }
 
             if (globals.smallObjectAllocator)
             {
-                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying small object allocator");
+                if (logInfo)
+                {
+                    DNG_LOG_INFO("Memory", "DestroyGlobals: destroying small object allocator");
+                }
                 std::destroy_at(globals.smallObjectAllocator);
                 globals.smallObjectAllocator = nullptr;
             }
 
             if (globals.guardAllocator)
             {
-                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying guard allocator");
+                if (logInfo)
+                {
+                    DNG_LOG_INFO("Memory", "DestroyGlobals: destroying guard allocator");
+                }
                 std::destroy_at(globals.guardAllocator);
                 globals.guardAllocator = nullptr;
             }
 
             if (globals.trackingAllocator)
             {
-            #if DNG_MEM_TRACKING
-                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: reporting leaks");
+#if DNG_MEM_TRACKING
+                if (logInfo)
+                {
+                    DNG_LOG_INFO("Memory", "DestroyGlobals: reporting leaks");
+                }
                 globals.trackingAllocator->ReportLeaks();
-            #endif
-                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying tracking allocator");
+#endif
+                if (logInfo)
+                {
+                    DNG_LOG_INFO("Memory", "DestroyGlobals: destroying tracking allocator");
+                }
                 std::destroy_at(globals.trackingAllocator);
                 globals.trackingAllocator = nullptr;
             }
 
             if (globals.defaultAllocator)
             {
-                DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "DestroyGlobals: destroying default allocator");
+                if (logInfo)
+                {
+                    DNG_LOG_INFO("Memory", "DestroyGlobals: destroying default allocator");
+                }
                 std::destroy_at(globals.defaultAllocator);
                 globals.defaultAllocator = nullptr;
             }
@@ -256,7 +276,10 @@ namespace memory
 
             if (globals.initialized)
             {
-                DNG_LOG_WARNING(DNG_MEMORY_SYSTEM_LOG_CATEGORY, "MemorySystem::Init() called twice; ignoring.");
+                if (::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Warn, "Memory"))
+                {
+                    DNG_LOG_WARNING("Memory", "MemorySystem::Init() called twice; ignoring.");
+                }
                 return;
             }
 
@@ -277,15 +300,31 @@ namespace memory
             globals.smallObjectAllocator = new (globals.smallObjectStorage) detail::SmallObjectAllocator(effectiveParent, smallCfg);
 
             globals.rendererArena = new (globals.rendererArenaStorage) detail::ArenaAllocator(effectiveParent, detail::kRendererArenaBytes);
+            if (!globals.rendererArena->IsValid())
+            {
+                DNG_MEM_CHECK_OOM(detail::kRendererArenaBytes, alignof(detail::ArenaAllocator), "MemorySystem::Init rendererArena");
+            }
             globals.audioArena    = new (globals.audioArenaStorage) detail::ArenaAllocator(effectiveParent, detail::kAudioArenaBytes);
+            if (!globals.audioArena->IsValid())
+            {
+                DNG_MEM_CHECK_OOM(detail::kAudioArenaBytes, alignof(detail::ArenaAllocator), "MemorySystem::Init audioArena");
+            }
             globals.gameplayArena = new (globals.gameplayArenaStorage) detail::ArenaAllocator(effectiveParent, detail::kGameplayArenaBytes);
+            if (!globals.gameplayArena->IsValid())
+            {
+                DNG_MEM_CHECK_OOM(detail::kGameplayArenaBytes, alignof(detail::ArenaAllocator), "MemorySystem::Init gameplayArena");
+            }
 
             globals.initialized = true;
 
-            DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY,
-                "MemorySystem initialized (Tracking={}, ThreadSafe={})",
-                globals.activeConfig.enable_tracking ? "true" : "false",
-                globals.activeConfig.global_thread_safe ? "true" : "false");
+            const bool logInfo = ::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Info, "Memory");
+            if (logInfo)
+            {
+                DNG_LOG_INFO("Memory",
+                    "MemorySystem initialized (Tracking={}, ThreadSafe={})",
+                    globals.activeConfig.enable_tracking ? "true" : "false",
+                    globals.activeConfig.global_thread_safe ? "true" : "false");
+            }
             constexpr const char* kGuardState =
 #if DNG_MEM_GUARDS
                 "ENABLED";
@@ -293,9 +332,12 @@ namespace memory
                 "DISABLED";
 #endif
 
-            DNG_LOG_INFO(DNG_MEMORY_SYSTEM_LOG_CATEGORY,
-                "MemorySystem: GuardAllocator {}",
-                kGuardState);
+            if (logInfo)
+            {
+                DNG_LOG_INFO("Memory",
+                    "MemorySystem: GuardAllocator {}",
+                    kGuardState);
+            }
 
             detail::AttachThreadStateUnlocked(globals);
         }
@@ -312,14 +354,17 @@ namespace memory
 
             detail::DetachThreadStateUnlocked(globals);
 
-    #if DNG_MEM_THREAD_SAFE
+#if DNG_MEM_THREAD_SAFE
             if (globals.attachedThreads != 0)
             {
-                DNG_LOG_WARNING(DNG_MEMORY_SYSTEM_LOG_CATEGORY,
-                    "MemorySystem::Shutdown() detected {} threads still attached.",
-                    static_cast<unsigned long long>(globals.attachedThreads));
+                if (::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Warn, "Memory"))
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "MemorySystem::Shutdown() detected {} threads still attached.",
+                        static_cast<unsigned long long>(globals.attachedThreads));
+                }
             }
-    #endif
+#endif
 
             detail::DestroyGlobals(globals);
             ::dng::core::MemoryConfig::GetGlobal() = MemoryConfig{};
@@ -332,8 +377,11 @@ namespace memory
 
             if (!globals.initialized)
             {
-                DNG_LOG_WARNING(DNG_MEMORY_SYSTEM_LOG_CATEGORY,
-                    "OnThreadAttach() ignored: MemorySystem not initialized.");
+                if (::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Warn, "Memory"))
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "OnThreadAttach() ignored: MemorySystem not initialized.");
+                }
                 return;
             }
 
