@@ -57,50 +57,40 @@ namespace dng::core
     //   to override and provide stronger guarantees.
     // ------------------------------------------------------------------------
 
+    // ---
+    // Purpose : Define the engine-wide allocator contract for all memory backends.
+    // Contract: Callers must pair Allocate/Reallocate results with matching (size, alignment) on free.
+    // Notes   : Implementations must honour NormalizeAlignment and remain noexcept.
+    // ---
     class IAllocator
     {
     public:
+        // ---
+        // Purpose : Provide a virtual hook for proper cleanup in derived allocators.
+        // Contract: Must remain noexcept; implementations release allocator-owned resources only.
+        // Notes   : Defaulted because interface owns no state.
+        // ---
         virtual ~IAllocator() = default;
 
-        // Allocate a block of `size` bytes with at least `alignment` alignment.
-        // Implementations must normalize alignment internally.
-        //
-        // Returns: pointer to a usable memory block, or nullptr on failure.
-        // Contract: On success, the returned block is owned by the caller and
-        //           must be released via Deallocate/Reallocate with the SAME
-        //           `(size, alignment)` (see contract above).
-    [[nodiscard]] virtual void* Allocate(usize size, usize alignment) noexcept = 0;
+        // ---
+        // Purpose : Acquire a raw byte buffer honouring the requested alignment.
+        // Contract: `size` > 0; implementations normalize alignment; caller owns block and must free with same tuple.
+        // Notes   : Returns nullptr on failure; OOM policy handled by the caller.
+        // ---
+        [[nodiscard]] virtual void* Allocate(usize size, usize alignment) noexcept = 0;
 
-        // Free a block previously returned by Allocate/Reallocate.
-        // `size` and `alignment` MUST match the original allocation of `ptr`
-        // (after normalization). Debug builds should assert on mismatch.
-        //
-        // Notes:
-        // - Passing `nullptr` is a no-op (implementation may choose to assert).
-        // - Passing a non-matching `(size, alignment)` is undefined behavior.
+        // ---
+        // Purpose : Release a block previously obtained from this allocator.
+        // Contract: `ptr` may be null; `(size, alignment)` must match the original normalized request.
+        // Notes   : Mismatched tuples yield undefined behaviour; implementations typically assert in debug.
+        // ---
         virtual void  Deallocate(void* ptr, usize size, usize alignment) noexcept = 0;
 
-        // Reallocate an existing block to `newSize` with the requested `alignment`.
-        //
-        // Contracts:
-        // - If `ptr == nullptr`, behaves like Allocate(newSize, alignment).
-        // - If `newSize == 0`, behaves like Deallocate(ptr, oldSize, alignment)
-        //   and returns nullptr.
-        // - If `ptr != nullptr`, `oldSize > 0` MUST be the original size, and
-        //   `alignment` MUST match the original one (after normalization),
-        //   unless the concrete allocator documents a different rule.
-        //
-        // Default behavior (see .cpp):
-        // - The default implementation may MOVE the block (allocate/copy/free),
-        //   including when `oldSize == newSize`, to honor a different requested
-        //   alignment. It does NOT attempt "in-place re-alignment."
-        // - `wasInPlace` will be set to `true` ONLY if the returned pointer
-        //   equals `ptr` (which the default impl does not perform unless the
-        //   underlying Allocate returns the same address, which is atypical).
-        //
-        // Overrides:
-        // - A custom allocator is free to implement true in-place reallocation
-        //   or re-alignment, as long as it preserves the public contract.
+        // ---
+        // Purpose : Resize or re-align an existing allocation through the allocator.
+        // Contract: Mirrors Allocate when `ptr==nullptr`; acts as Deallocate when `newSize==0`; caller supplies original `(oldSize, alignment)` otherwise.
+        // Notes   : Default implementation performs allocate-copy-free; `wasInPlace` toggles true only if address unchanged.
+        // ---
         [[nodiscard]] virtual void* Reallocate(void* ptr,
             usize oldSize,
             usize newSize,
@@ -124,19 +114,47 @@ namespace dng::core
     //   return nullptr). This keeps call sites compact without branching.
     // - Typed helpers use std::construct_at / std::destroy_at (C++20).
     // ------------------------------------------------------------------------
+    // ---
+    // Purpose : Lightweight non-owning façade for invoking allocator operations safely.
+    // Contract: Holds a raw IAllocator pointer; all helpers normalize alignment and respect size/alignment tuples.
+    // Notes   : Cheap to copy; intended for hot-path call sites needing typed helpers without ownership.
+    // ---
     class AllocatorRef
     {
     public:
+        // ---
+        // Purpose : Construct an invalid view that performs no allocations.
+        // Contract: Resulting reference must be rebound before use; all helpers return nullptr when invalid.
+        // Notes   : constexpr to allow static initialization.
+        // ---
         constexpr AllocatorRef() noexcept : m_Alloc(nullptr) {}
+        // ---
+        // Purpose : Bind the wrapper to an existing allocator instance.
+        // Contract: `alloc` must outlive the reference; no ownership transfer occurs.
+        // Notes   : constexpr enabling compile-time wiring of global allocators.
+        // ---
         explicit constexpr AllocatorRef(IAllocator* alloc) noexcept : m_Alloc(alloc) {}
 
+        // ---
+        // Purpose : Check whether the wrapper currently targets a valid allocator.
+        // Contract: No side effects; safe in constexpr.
+        // Notes   : Useful for branchless call sites that tolerate null allocators.
+        // ---
         [[nodiscard]] constexpr bool        IsValid() const noexcept { return m_Alloc != nullptr; }
+        // ---
+        // Purpose : Expose the underlying allocator pointer for advanced usage.
+        // Contract: Returned pointer may be null; caller must not assume ownership.
+        // Notes   : Enables interoperability with legacy call paths needing raw interfaces.
+        // ---
         [[nodiscard]] constexpr IAllocator* Get()     const noexcept { return m_Alloc; }
 
         // ---- Raw byte APIs ---------------------------------------------------
 
-        // Allocate `size` bytes with the requested `alignment` (0 means "default").
-        // Returns nullptr if the wrapper is invalid or if allocation fails.
+        // ---
+        // Purpose : Allocate an untyped byte range through the wrapped allocator.
+        // Contract: `size` > 0; alignment normalized; returns nullptr when wrapper invalid or allocation fails (OOM policy triggered separately).
+        // Notes   : Calls DNG_MEM_CHECK_OOM to honour global fatal/non-fatal configuration.
+        // ---
         [[nodiscard]] void* AllocateBytes(usize size,
             usize alignment = alignof(std::max_align_t)) noexcept
         {
@@ -152,9 +170,11 @@ namespace dng::core
             return memory;
         }
 
-        // Free a block previously obtained through this allocator with the SAME
-        // `(size, alignment)` as the original allocation (after normalization).
-        // No-op if wrapper invalid or `ptr == nullptr`.
+        // ---
+        // Purpose : Deallocate a byte range previously acquired via this wrapper.
+        // Contract: `(size, alignment)` must match original normalized request; null pointers are ignored.
+        // Notes   : Wrapper validity checked; no OOM handling required.
+        // ---
         void DeallocateBytes(void* ptr,
             usize size,
             usize alignment = alignof(std::max_align_t)) noexcept
@@ -166,8 +186,11 @@ namespace dng::core
             m_Alloc->Deallocate(ptr, size, alignment);
         }
 
-        // Reallocate a block to `newSize` with the requested `alignment`.
-        // See IAllocator::Reallocate for the full contract.
+        // ---
+        // Purpose : Resize or re-align an existing allocation originating from this wrapper.
+        // Contract: Mirrors `IAllocator::Reallocate`; triggers OOM policy when `newSize>0` and allocation fails.
+        // Notes   : Pass-through for `wasInPlace` flag.
+        // ---
         [[nodiscard]] void* ReallocateBytes(void* ptr,
             usize oldSize,
             usize newSize,
@@ -188,8 +211,11 @@ namespace dng::core
 
         // ---- Typed helpers ---------------------------------------------------
 
-        // Construct a single T with forwarded ctor args.
-        // Returns nullptr on allocation failure or invalid wrapper.
+        // ---
+        // Purpose : Allocate and construct a single object using the wrapped allocator.
+        // Contract: Propagates constructor noexceptness; returns nullptr if wrapper invalid or allocation fails.
+        // Notes   : OOM path escalated through DNG_MEM_CHECK_OOM before returning nullptr.
+        // ---
         template <typename T, typename... Args>
         [[nodiscard]] T* New(Args&&... args) noexcept(std::is_nothrow_constructible_v<T, Args...>)
         {
@@ -204,7 +230,11 @@ namespace dng::core
             return std::construct_at(reinterpret_cast<T*>(mem), std::forward<Args>(args)...);
         }
 
-        // Destroy a single T and deallocate using the original (size, alignment).
+        // ---
+        // Purpose : Destroy a single object and release its storage via the wrapped allocator.
+        // Contract: Accepts null pointers; caller guarantees pointer came from `New` with same type and allocator.
+        // Notes   : Performs destruction before handing bytes back to allocator.
+        // ---
         template <typename T>
         void Delete(T* obj) noexcept
         {
@@ -215,9 +245,11 @@ namespace dng::core
             DeallocateBytes(static_cast<void*>(obj), sizeof(T), alignof(T));
         }
 
-        // Construct an array of `count` Ts.
-        // - Guards against overflow in `sizeof(T) * count`.
-        // - Trivially default-constructible types do not require per-element construction.
+        // ---
+        // Purpose : Allocate and default-construct an array of objects.
+        // Contract: `count` > 0; overflow in total byte count guarded; returns nullptr on failure after OOM policy invocation.
+        // Notes   : Skips manual construction for trivially default-constructible types.
+        // ---
         template <typename T>
         [[nodiscard]] T* NewArray(usize count) noexcept
         {
@@ -264,8 +296,11 @@ namespace dng::core
             }
         }
 
-        // Destroy an array of `count` Ts and free the entire block.
-        // Assumes the array was allocated by NewArray<T>(count) with this wrapper.
+        // ---
+        // Purpose : Destroy `count` elements and release the contiguous storage.
+        // Contract: Pointer must originate from `NewArray` with matching `count` and allocator; accepts null.
+        // Notes   : Skips destruction for trivially destructible types for performance.
+        // ---
         template <typename T>
         void DeleteArray(T* ptr, usize count) noexcept
         {

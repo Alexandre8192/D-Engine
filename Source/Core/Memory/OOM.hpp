@@ -1,4 +1,15 @@
 #pragma once
+// ============================================================================
+// D-Engine - Core/Memory/OOM.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Declare the engine-wide out-of-memory policy helpers invoked by
+//           allocators and wrappers after allocation failure.
+// Contract: All entry points are header-only, constexpr-safe, and noexcept;
+//           they neither allocate nor throw and terminate deterministically
+//           according to configuration.
+// Notes   : Functions are inline to keep header self-contained; logging macros
+//           are stubbed if the logger subsystem is not yet initialized.
+// ============================================================================
 #include "Core/CoreMinimal.hpp"  // Logger + Types + Platform
 #include "Core/Memory/MemoryConfig.hpp" // compile-time defaults + runtime cfg
 #include <cstdlib>          // std::abort
@@ -14,6 +25,11 @@
 namespace dng::core {
 
     // Runtime policy takes precedence when available; falls back to compile-time gate.
+    // ---
+    // Purpose : Determine whether the current OOM policy requires termination.
+    // Contract: Reads compile-time flag and optional runtime config; never allocates.
+    // Notes   : constexpr-friendly to allow compile-time evaluation in static paths.
+    // ---
     inline bool ShouldFatalOnOOM() noexcept {
         if constexpr (CompiledFatalOnOOM()) {
             return MemoryConfig::GetGlobal().fatal_on_oom;
@@ -23,8 +39,11 @@ namespace dng::core {
         }
     }
 
-    // Fatal OOM handler: must not return.
-    // Logs at fatal level, then forces immediate process termination.
+    // ---
+    // Purpose : Execute the fatal OOM path, logging context before terminating.
+    // Contract: Never returns; safe to call with null `where`; uses std::abort for termination.
+    // Notes   : Logging category defined via DNG_MEM_LOG_CATEGORY and may be a stub early in startup.
+    // ---
     [[noreturn]] inline void FatalOOM(usize size, usize align,
         const char* where,
         const char* file, int line) noexcept
@@ -38,7 +57,11 @@ namespace dng::core {
         std::abort();
     }
 
-    // Non-fatal OOM report: logs and returns to the caller (who will see nullptr).
+    // ---
+    // Purpose : Report a recoverable OOM while allowing the caller to continue.
+    // Contract: Logs at error severity when verbosity threshold permits; does not throw.
+    // Notes   : All parameters preserved for diagnostics even when logging disabled.
+    // ---
     inline void ReportOOM(usize size, usize align,
         const char* where,
         const char* file, int line) noexcept
@@ -53,7 +76,11 @@ namespace dng::core {
 #endif
     }
 
-    // Dispatch OOM handling according to policy: fatal or non-fatal.
+    // ---
+    // Purpose : Route allocation failures to fatal or non-fatal handler based on policy.
+    // Contract: Strongly noexcept; `where` may be null; never reallocates.
+    // Notes   : Central entry used by the DNG_MEM_CHECK_OOM macro.
+    // ---
     inline void OnAllocFailure(usize size, usize align,
         const char* where, const char* file, int line) noexcept
     {
@@ -68,7 +95,10 @@ namespace dng::core {
 
 } // namespace dng::core
 
-// Always invoke this macro AFTER detecting an allocation failure (nullptr).
-// It delegates to the runtime policy (fatal vs non-fatal) via OnAllocFailure().
+// ---
+// Purpose : Convenience macro for invoking OOM policy after allocation failure.
+// Contract: Evaluate each argument exactly once; safe in constexpr contexts only when unused.
+// Notes   : Wraps OnAllocFailure with file/line capture for diagnostics.
+// ---
 #define DNG_MEM_CHECK_OOM(size, align, where) \
     do { ::dng::core::OnAllocFailure((size), (align), (where), __FILE__, __LINE__); } while(0)

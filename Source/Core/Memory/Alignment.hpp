@@ -27,10 +27,11 @@ namespace dng::core
     // =========================================================================
     // Basic predicate: IsPowerOfTwo
     // =========================================================================
-    /**
-     * @brief Returns true if x is a power of two (and > 0).
-     *        Works in constexpr context.
-     */
+    // ---
+    // Purpose : Test whether the provided unsigned value has exactly one bit set.
+    // Contract: Accepts any `usize`; returns true only when value > 0 and power-of-two.
+    // Notes   : constexpr-friendly so callers can guard static_assert invariants.
+    // ---
     [[nodiscard]] constexpr bool IsPowerOfTwo(usize x) noexcept
     {
         // For x > 0: power-of-two if only a single bit is set.
@@ -42,10 +43,11 @@ namespace dng::core
     // =========================================================================
     namespace detail
     {
-        /**
-         * @brief Returns the highest power of two representable by `usize`.
-         *        Example (64-bit): 1ULL << 63.
-         */
+        // ---
+        // Purpose : Compute the largest power-of-two value representable in `usize`.
+        // Contract: constexpr, no side effects, valid for all platforms.
+        // Notes   : Used to saturate alignment computations when inputs overflow.
+        // ---
         [[nodiscard]] constexpr usize HighestPow2() noexcept
         {
             // `digits` = number of value bits (no sign bit for unsigned types).
@@ -53,19 +55,11 @@ namespace dng::core
             return (usize{ 1 } << (std::numeric_limits<usize>::digits - 1));
         }
 
-        /**
-         * @brief Returns the next power-of-two >= x with SATURATION.
-         *        - If x == 0 -> returns 1.
-         *        - If x is already a power-of-two -> returns x.
-         *        - Otherwise rounds up to the next power-of-two.
-         *        - If rounding up would overflow, returns HighestPow2().
-         *
-         * Rationale:
-         *   When x is extremely large (close to SIZE_MAX), there may be no
-         *   representable "next" power-of-two in `usize`. In that case we
-         *   saturate to the largest representable power-of-two instead of
-         *   overflowing or producing undefined behavior.
-         */
+        // ---
+        // Purpose : Round arbitrary unsigned input up to the next power-of-two with saturation.
+        // Contract: Accepts any `usize`; returns at least 1; clamps to HighestPow2() on overflow.
+        // Notes   : Keeps alignment math deterministic even for adversarial SIZE_MAX requests.
+        // ---
         [[nodiscard]] constexpr usize NextPow2Saturated(usize x) noexcept
         {
             if (x == 0) return usize{ 1 };
@@ -100,10 +94,11 @@ namespace dng::core
             return (usize{ 1 } << nextBit);
         }
 
-        /**
-         * @brief Add-with-overflow check for UNSIGNED values.
-         *        Returns true if (a + b) would overflow.
-         */
+        // ---
+        // Purpose : Detect unsigned addition overflow for helper routines.
+        // Contract: Only accepts unsigned integral types; constexpr-safe.
+        // Notes   : Centralises overflow detection to keep AlignUp implementation minimal.
+        // ---
         template <class U>
         [[nodiscard]] constexpr bool add_would_overflow(U a, U b) noexcept
         {
@@ -115,21 +110,11 @@ namespace dng::core
     // =========================================================================
     // NormalizeAlignment
     // =========================================================================
-    /**
-     * Alignment policy:
-     *  - Callers may pass ANY `alignment` (including 0 = "default").
-     *  - The engine normalizes it as follows:
-     *      1) If alignment == 0 -> use at least alignof(std::max_align_t).
-     *      2) Otherwise round UP to the NEXT power-of-two (constexpr).
-     *      3) Guarantee the result is >= alignof(std::max_align_t).
-     *      4) If "next power-of-two" is not representable (overflow),
-     *         we SATURATE to the largest representable power-of-two.
-     *
-     * Guarantees:
-     *  - Result is a power-of-two.
-     *  - Result >= alignof(std::max_align_t).
-     *  - Result >= 1.
-     */
+    // ---
+    // Purpose : Canonicalize caller-provided alignment to the engine's power-of-two policy.
+    // Contract: Accepts any `usize`; maps zero to `alignof(std::max_align_t)`; never returns 0.
+    // Notes   : Saturates on overflow so allocators never emit undefined behaviour.
+    // ---
     [[nodiscard]] constexpr usize NormalizeAlignment(usize alignment) noexcept
     {
         const usize minAlign = alignof(std::max_align_t);
@@ -152,12 +137,11 @@ namespace dng::core
     //   cast it to an unsigned type (e.g., `usize`) first, then call AlignUp.
     // -------------------------------------------------------------------------
 
-    /**
-     * @brief Aligns 'value' UP to the next multiple of 'alignment'.
-     *        If already aligned, returns value.
-     *        Overflow-safe: asserts in debug if value + (alignment-1) would overflow
-     *        and clamps to max in that case.
-     */
+    // ---
+    // Purpose : Bump an unsigned integral value up to the next aligned multiple.
+    // Contract: T must be unsigned integral; alignment normalized via NormalizeAlignment().
+    // Notes   : Clamps on overflow in debug builds to preserve deterministic behaviour.
+    // ---
     template <class T>
     [[nodiscard]] constexpr T AlignUp(T value, usize alignment) noexcept
     {
@@ -182,10 +166,11 @@ namespace dng::core
         return aligned;
     }
 
-    /**
-     * @brief Aligns 'value' DOWN to the previous multiple of 'alignment'.
-     *        No overflow risk.
-     */
+    // ---
+    // Purpose : Truncate an unsigned integral value down to the previous aligned multiple.
+    // Contract: T must be unsigned integral; alignment normalized before use.
+    // Notes   : Pure arithmetic, no overflow paths.
+    // ---
     template <class T>
     [[nodiscard]] constexpr T AlignDown(T value, usize alignment) noexcept
     {
@@ -199,10 +184,11 @@ namespace dng::core
     // =========================================================================
     // Pointer overloads (use uintptr_t for arithmetic)
     // =========================================================================
-    /**
-     * @brief Aligns a pointer UP to the next multiple of 'alignment'.
-     *        Emits a runtime log if the pointer was not aligned and had to move.
-     */
+    // ---
+    // Purpose : Promote a raw pointer to the next alignment boundary.
+    // Contract: Zero alignment treated as default; returns original pointer when already aligned.
+    // Notes   : Emits guarded diagnostics to highlight unexpected realignment work.
+    // ---
     [[nodiscard]] inline void* AlignUp(void* ptr, usize alignment) noexcept
     {
         const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(ptr);
@@ -218,10 +204,11 @@ namespace dng::core
         return reinterpret_cast<void*>(aligned);
     }
 
-    /**
-     * @brief Aligns a pointer DOWN to the previous multiple of 'alignment'.
-     *        Emits a runtime log if the pointer was not aligned and had to move.
-     */
+    // ---
+    // Purpose : Snap a raw pointer down to the previous alignment boundary.
+    // Contract: Accepts null pointers; treats zero alignment as default.
+    // Notes   : Logging remains conditional to avoid perturbing hot paths.
+    // ---
     [[nodiscard]] inline void* AlignDown(void* ptr, usize alignment) noexcept
     {
         const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(ptr);
@@ -237,13 +224,22 @@ namespace dng::core
         return reinterpret_cast<void*>(aligned);
     }
 
-    // Const-pointer overloads
+    // ---
+    // Purpose : Provide const-correct façade for pointer alignment without duplicating logic.
+    // Contract: Mirrors mutable overload; never mutates the pointed-to data.
+    // Notes   : Casts away const temporarily to reuse core implementation safely.
+    // ---
     [[nodiscard]] inline const void* AlignUp(const void* ptr, usize alignment) noexcept
     {
         return const_cast<const void*>(
             AlignUp(const_cast<void*>(ptr), alignment));
     }
 
+    // ---
+    // Purpose : Const overload for aligning pointers downward while preserving qualifier.
+    // Contract: Equivalent behaviour to mutable version; returns original pointer when already aligned.
+    // Notes   : Implementation delegates to mutable helper for arithmetic reuse.
+    // ---
     [[nodiscard]] inline const void* AlignDown(const void* ptr, usize alignment) noexcept
     {
         return const_cast<const void*>(
@@ -253,9 +249,11 @@ namespace dng::core
     // =========================================================================
     // IsAligned helpers
     // =========================================================================
-    /**
-     * @brief Checks if an UNSIGNED integer value is aligned to 'alignment'.
-     */
+    // ---
+    // Purpose : Verify an unsigned integer adheres to the requested alignment.
+    // Contract: Accepts unsigned integral types only; alignment normalized before evaluation.
+    // Notes   : constexpr-friendly to enable compile-time validation in templates.
+    // ---
     template <class T,
               std::enable_if_t<std::is_integral_v<T> && std::is_unsigned_v<T>, int> = 0>
     [[nodiscard]] constexpr bool IsAligned(T value, usize alignment) noexcept
@@ -264,10 +262,11 @@ namespace dng::core
         return (value & (a - T{ 1 })) == T{ 0 };
     }
 
-    /**
-     * @brief Checks if a pointer is aligned to 'alignment'.
-     *        Logs at verbose level when misaligned.
-     */
+    // ---
+    // Purpose : Determine whether a pointer satisfies the requested alignment.
+    // Contract: Works with null pointers; normalizes alignment before evaluation.
+    // Notes   : Misalignment diagnostics are logged only when the category is enabled.
+    // ---
     [[nodiscard]] inline bool IsAligned(const void* ptr, usize alignment) noexcept
     {
         const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(ptr);
