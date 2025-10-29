@@ -26,6 +26,11 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Build (MSBuild)
         run: |
           msbuild D-Engine.sln -m -p:Configuration=${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }}
@@ -36,10 +41,18 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           DNG_BENCH_OUT: artifacts/bench
         run: |
-          $exe = Join-Path "x64" $env:PLATFORM | Join-Path -ChildPath $env:CONFIGURATION | Join-Path -ChildPath "D-Engine-BenchRunner.exe"
+          $exe = Join-Path (Join-Path (Join-Path "x64" $env:PLATFORM) $env:CONFIGURATION) "D-Engine-BenchRunner.exe"
           if (-not (Test-Path $exe)) { throw "BenchRunner not found: $exe" }
-          Write-Host "Running: $exe"
-          & $exe
+          Write-Host "Running with CPU affinity=1 and High priority: $exe"
+          $p = Start-Process -FilePath $exe -PassThru -Priority High
+          try {
+            # Pin to CPU0 to reduce variance
+            $p.ProcessorAffinity = 1
+          } catch {
+            Write-Host "WARN: Failed to set ProcessorAffinity to 1: $($_.Exception.Message)"
+          }
+          $p.WaitForExit()
+          if ($p.ExitCode -ne 0) { throw "BenchRunner exited with code $($p.ExitCode)" }
 
       - name: Upload bench artifacts
         if: always()
@@ -50,48 +63,39 @@ jobs:
             artifacts/bench/**/*.bench.json
           if-no-files-found: error
 
-      - name: Compare with baseline
+      - name: Compare with baseline (Python)
+        env:
+          PERF_THRESHOLD_PCT: ${{ env.PERF_THRESHOLD_PCT }}
+          PERF_ABS_NS: ${{ env.PERF_ABS_NS || '5' }}
+          PERF_THRESHOLD_PCT_TRACKING: ${{ env.PERF_THRESHOLD_PCT_TRACKING || '15' }}
+          PERF_ABS_NS_TRACKING: ${{ env.PERF_ABS_NS_TRACKING || '12' }}
+          BYTES_OP_MAX_ABS: ${{ env.BYTES_OP_MAX_ABS || '0' }}
+          BYTES_OP_MAX_REL_PCT: ${{ env.BYTES_OP_MAX_REL_PCT || '0' }}
+          ALLOCS_OP_MAX_ABS: ${{ env.ALLOCS_OP_MAX_ABS || '0' }}
+          ALLOCS_OP_MAX_REL_PCT: ${{ env.ALLOCS_OP_MAX_REL_PCT || '0' }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $thresholdPct = [double]${{ env.PERF_THRESHOLD_PCT }}
           $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
           if (-not (Test-Path $baseline)) { throw "Baseline not found: $baseline" }
-
           $latest = Get-ChildItem -Path "artifacts/bench" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $latest) { throw "No bench json found in artifacts/bench" }
-
           Write-Host "Baseline: $baseline"
           Write-Host "Current : $($latest.FullName)"
+          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)"
 
-          $baseJson = Get-Content -Raw -Path $baseline | ConvertFrom-Json
-          $currJson = Get-Content -Raw -Path $latest.FullName | ConvertFrom-Json
-
-          if (-not $baseJson.metrics -or -not $currJson.metrics) { throw "Invalid JSON schema: missing metrics[]" }
-
-          $baseMap = @{}
-          foreach ($m in $baseJson.metrics) { $baseMap[$m.name] = $m }
-
-          $regressions = @()
-          foreach ($m in $currJson.metrics) {
-            $name = $m.name
-            if (-not $baseMap.ContainsKey($name)) { continue }
-            $b = $baseMap[$name]
-            $bval = [double]$b.value
-            $cval = [double]$m.value
-            if ($bval -le 0) { continue }
-            $deltaPct = (($cval - $bval) / $bval) * 100.0
-            Write-Host ("{0} : baseline={1:F3} {2}, current={3:F3} {4}, delta={5:F2} %" -f $name, $bval, $b.unit, $cval, $m.unit, $deltaPct)
-            if ($deltaPct -gt $thresholdPct) {
-              $regressions += @{ name=$name; baseline=$bval; current=$cval; unit=$m.unit; delta=$deltaPct }
-            }
-          }
-
-          if ($regressions.Count -gt 0) {
-            Write-Error ("Performance regression(s) detected beyond threshold {0}%:" -f $thresholdPct)
-            foreach ($r in $regressions) {
-              Write-Error (" - {0}: {1:F3} -> {2:F3} {3} ({4:F2}% worse)" -f $r.name, $r.baseline, $r.current, $r.unit, $r.delta)
-            }
-            exit 1
+      - name: Emit Markdown bench report
+        if: always()
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
+          $latest = Get-ChildItem -Path "artifacts/bench" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($latest) {
+            python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --emit-md bench_report.md
+            Write-Host "===== Bench Report (Markdown) ====="
+            Get-Content -Raw bench_report.md | Write-Host
+            $md = Get-Content -Raw bench_report.md
+            $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
+            Write-Host "::notice title=Bench performance summary::$escaped"
           } else {
-            Write-Host ("No regressions above {0}% threshold." -f $thresholdPct)
+            Write-Host "No current bench json found; skipping report."
           }
