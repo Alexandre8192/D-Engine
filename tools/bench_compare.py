@@ -106,6 +106,8 @@ def compare(baseline_path: str, current_path: str) -> Tuple[bool, List[str], Lis
         unit_b = str(b.get("unit", ""))
         unit_c = str(c.get("unit", ""))
         unit = unit_c or unit_b
+        if unit_b and unit_c and unit_b != unit_c:
+            warns.append(f"WARN: Unit mismatch for metric '{name}': baseline='{unit_b}' vs current='{unit_c}'")
         try:
             bval = float(b.get("value", 0))
             cval = float(c.get("value", 0))
@@ -264,6 +266,26 @@ def main(argv: List[str]) -> int:
     ap.add_argument("current", help="Path to current .json")
     ap.add_argument("--emit-md", dest="emit_md", help="Write a Markdown summary table to this path.")
     args = ap.parse_args(argv)
+
+    # Print thresholds for transparency
+    print("Thresholds:")
+    print(f"  PERF_THRESHOLD_PCT={_env_float('PERF_THRESHOLD_PCT', 10.0)}%")
+    print(f"  PERF_ABS_NS={_env_float('PERF_ABS_NS', 5.0)} ns")
+    print(f"  PERF_THRESHOLD_PCT_TRACKING={_env_float('PERF_THRESHOLD_PCT_TRACKING', 15.0)}%")
+    print(f"  PERF_ABS_NS_TRACKING={_env_float('PERF_ABS_NS_TRACKING', 12.0)} ns")
+    print(f"  BYTES_OP_MAX_ABS={_env_float('BYTES_OP_MAX_ABS', 0.0)} bytes")
+    print(f"  BYTES_OP_MAX_REL_PCT={_env_float('BYTES_OP_MAX_REL_PCT', 0.0)}%")
+    print(f"  ALLOCS_OP_MAX_ABS={_env_float('ALLOCS_OP_MAX_ABS', 0.0)} allocs")
+    print(f"  ALLOCS_OP_MAX_REL_PCT={_env_float('ALLOCS_OP_MAX_REL_PCT', 0.0)}%")
+
+    # Log file selection and timestamps
+    def _ts(p: str) -> str:
+        try:
+            return __import__("datetime").datetime.utcfromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            return "unknown"
+    print(f"Baseline JSON: {args.baseline} (mtime UTC: {_ts(args.baseline)})")
+    print(f"Current  JSON: {args.current} (mtime UTC: {_ts(args.current)})")
 
     ok, warns, _rows = compare(args.baseline, args.current)
 

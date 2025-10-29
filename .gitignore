@@ -81,5 +81,9 @@ out/
 **/*.bench.json
 **/*.bench.csv
 
+# CI bench reports (not versioned)
+bench_report.md
+**/*.bench.md
+
 # Optional editor caches
 .vscode/

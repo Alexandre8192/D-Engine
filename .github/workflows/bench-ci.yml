@@ -1,5 +1,15 @@
 name: Bench CI
 
+# Threshold environment variables (defaults):
+# - PERF_THRESHOLD_PCT: 10        # ns/op relative threshold (%)
+# - PERF_ABS_NS: 5                # ns/op absolute threshold (ns)
+# - PERF_THRESHOLD_PCT_TRACKING: 15  # ns/op relative threshold for Tracking* (%)
+# - PERF_ABS_NS_TRACKING: 12         # ns/op absolute threshold for Tracking* (ns)
+# - BYTES_OP_MAX_ABS: 0           # bytes/op max allowed absolute increase
+# - BYTES_OP_MAX_REL_PCT: 0       # bytes/op max allowed relative increase (%)
+# - ALLOCS_OP_MAX_ABS: 0          # allocs/op max allowed absolute increase
+# - ALLOCS_OP_MAX_REL_PCT: 0      # allocs/op max allowed relative increase (%)
+
 on:
   pull_request:
     branches: [ main ]
@@ -14,8 +24,9 @@ env:
 
 jobs:
   bench-windows:
-    name: Bench (Windows ${{ env.CONFIGURATION }}|${{ env.PLATFORM }})
+    name: Bench (Windows)
     runs-on: windows-latest
+    timeout-minutes: 15
     defaults:
       run:
         shell: pwsh
@@ -41,18 +52,10 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           DNG_BENCH_OUT: artifacts/bench
         run: |
-          $exe = Join-Path (Join-Path (Join-Path "x64" $env:PLATFORM) $env:CONFIGURATION) "D-Engine-BenchRunner.exe"
-          if (-not (Test-Path $exe)) { throw "BenchRunner not found: $exe" }
-          Write-Host "Running with CPU affinity=1 and High priority: $exe"
-          $p = Start-Process -FilePath $exe -PassThru -Priority High
-          try {
-            # Pin to CPU0 to reduce variance
-            $p.ProcessorAffinity = 1
-          } catch {
-            Write-Host "WARN: Failed to set ProcessorAffinity to 1: $($_.Exception.Message)"
-          }
-          $p.WaitForExit()
-          if ($p.ExitCode -ne 0) { throw "BenchRunner exited with code $($p.ExitCode)" }
+          $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
+          if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
+          Write-Host "Running with CPU affinity=1 and High priority (pre-applied): $exeRel"
+          cmd /c start /wait /affinity 1 /high "D-Engine-BenchRunner" $exeRel
 
       - name: Upload bench artifacts
         if: always()
@@ -99,3 +102,11 @@ jobs:
           } else {
             Write-Host "No current bench json found; skipping report."
           }
+
+      - name: Upload bench report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-report
+          path: bench_report.md
+          if-no-files-found: warn
