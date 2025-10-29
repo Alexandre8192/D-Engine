@@ -114,18 +114,29 @@ namespace bench {
     const char kSep = '/';
 #endif
 
-    // Build the path segment by segment and create each prefix directory.
+    // Build the path and create each prefix directory when a separator is seen.
     for (const char* p = path; ; ++p)
     {
         const char c = *p;
         const bool atEnd = (c == '\0');
-        const bool isSep = (c == '/' || c == '\\');
+        const bool isSep = (!atEnd) && (c == '/' || c == '\\');
+
+        if (!atEnd)
+        {
+            const char outc = (c == '/' || c == '\\') ? kSep : c;
+            if (len >= kMax) return false;
+            buf[len++] = outc;
+        }
 
         if (isSep || atEnd)
         {
-            if (len > 0)
+            // Determine prefix length without trailing separators
+            std::size_t t = len;
+            while (t > 0 && buf[t - 1] == kSep) { --t; }
+            if (t > 0)
             {
-                buf[len] = '\0';
+                const char saved = buf[t];
+                buf[t] = '\0';
 #if defined(_WIN32)
                 if (_mkdir(buf) != 0)
                 {
@@ -139,14 +150,9 @@ namespace bench {
                         return false;
                 }
 #endif
+                buf[t] = saved;
             }
             if (atEnd) break;
-        }
-        else
-        {
-            const char outc = (c == '\\') ? kSep : c;
-            if (len >= kMax) return false;
-            buf[len++] = outc;
         }
     }
     return true;

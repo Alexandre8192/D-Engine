@@ -1,7 +1,9 @@
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS 1
+#endif
 /*
 ===============================================================================
 D-Engine - tests/Test_BenchDriver.cpp  (BenchDriver v2)
--------------------------------------------------------------------------------
 Purpose :
     Exercise Core/Diagnostics/Bench.hpp with representative allocator-centric
     scenarios to validate timing, warm-up, auto-scaling, and monotonic churn
@@ -29,6 +31,9 @@ Notes :
 #include <type_traits>  // std::true_type, std::false_type
 #include <vector>       // std::vector for tracking_vector alias
 #include <string_view>  // std::string_view
+#include <ctime>        // std::time_t, std::tm, std::gmtime
+#include <cstdio>       // std::FILE, std::fopen, std::fprintf, std::fclose
+#include <cstdlib>      // std::getenv
 
 #ifdef __cpp_lib_print
     #include <print>
@@ -176,6 +181,9 @@ int main()
     // You can bump iterations to target ~200ms per scenario in Release builds.
     constexpr std::uint64_t kIterations = 1'000'000; // Initial hint; Run() rescales toward ~250 ms.
 
+    // Collect results for JSON export
+    std::vector<bench::BenchResult> allResults;
+
     // ---- Scenario 1: dng::vector push/pop without reserve -------------------
     {
         vector<int> values;
@@ -187,6 +195,7 @@ int main()
         });
 
         PrintBenchLine(result);
+        allResults.push_back(result);
         // No analytical churn printed: growth strategy is implementation dependent.
     }
 
@@ -217,6 +226,7 @@ int main()
         });
 
         PrintBenchLine(result);
+        allResults.push_back(result);
     }
     else
     {
@@ -239,6 +249,7 @@ int main()
         });
 
         PrintBenchLine(result);
+        allResults.push_back(result);
     }
 
     // ---- Scenario 4: DefaultAllocator direct alloc/free (64 bytes) ----------
@@ -251,6 +262,7 @@ int main()
         });
 
         PrintBenchLine(result);
+        allResults.push_back(result);
     }
     else
     {
@@ -267,6 +279,7 @@ int main()
         });
 
         PrintBenchLine(result);
+        allResults.push_back(result);
     }
     else
     {
@@ -286,6 +299,7 @@ int main()
                 trackedValues.pop_back();
             });
             PrintBenchLine(resultNoReserve);
+            allResults.push_back(resultNoReserve);
         }
 
         // 6b) Reserved: steady-state → 0 churn/op.
@@ -299,11 +313,87 @@ int main()
                 trackedValues.pop_back();
             });
             PrintBenchLine(resultReserved);
+            allResults.push_back(resultReserved);
         }
     }
     else
     {
         PrintNote("Tracking allocator unavailable; skipping tracking_vector scenarios.");
+    }
+
+    // --- Export JSON to artifacts/bench -------------------------------------
+    {
+        using namespace ::dng::bench;
+        // Ensure output directory exists
+        if (!EnsureBenchOutputDirExists())
+        {
+            PrintNote("Failed to create bench output directory; skipping JSON export.");
+        }
+        else
+        {
+            const char* outDir = BenchOutputDir();
+#if defined(_WIN32)
+            const char kSep = '\\';
+#else
+            const char kSep = '/';
+#endif
+            // Build ISO-like UTC timestamp
+            char timeIso[32]{};
+            std::time_t now = std::time(nullptr);
+            std::tm tmUtc{};
+#if defined(_WIN32)
+            gmtime_s(&tmUtc, &now);
+#else
+            gmtime_r(&now, &tmUtc);
+#endif
+            // Use filename-safe UTC stamp (no ':' for Windows): YYYYMMDDTHHMMSSZ
+            std::snprintf(timeIso, sizeof(timeIso), "%04d%02d%02dT%02d%02d%02dZ",
+                tmUtc.tm_year + 1900, tmUtc.tm_mon + 1, tmUtc.tm_mday,
+                tmUtc.tm_hour, tmUtc.tm_min, tmUtc.tm_sec);
+
+            // Choose gitSha from environment if available (e.g., CI)
+            const char* sha = std::getenv("GITHUB_SHA");
+            if (!sha || sha[0] == '\0') sha = std::getenv("GIT_COMMIT");
+            if (!sha || sha[0] == '\0') sha = "unknown";
+
+            // Compose filename: bench-runner-{gitsha}-{dateUtc}-windows-x64-msvc.bench.json
+            char filePath[1024]{};
+            std::snprintf(filePath, sizeof(filePath), "%s%cbench-runner-%s-%s-windows-x64-msvc.bench.json",
+                outDir, kSep, sha, timeIso);
+
+            PrintNote(filePath);
+            std::FILE* f = std::fopen(filePath, "wb");
+            if (!f)
+            {
+                PrintNote("Failed to open bench JSON file for writing.");
+            }
+            else
+            {
+                std::fprintf(f, "{\n");
+                std::fprintf(f, "  \"suite\": \"bench-runner\",\n");
+                std::fprintf(f, "  \"gitSha\": \"%s\",\n", sha);
+                std::fprintf(f, "  \"dateUtc\": \"%s\",\n", timeIso);
+                std::fprintf(f, "  \"platform\": { \"os\": \"Windows\", \"cpu\": \"x64\", \"compiler\": \"MSVC\" },\n");
+                std::fprintf(f, "  \"metrics\": [\n");
+                for (std::size_t i = 0; i < allResults.size(); ++i)
+                {
+                    const auto& r = allResults[i];
+                    // Minimal schema: name + ns/op as value
+                    std::fprintf(f, "    { \"name\": \"%s\", \"unit\": \"ns/op\", \"value\": %.3f",
+                        r.Name ? r.Name : "<unnamed>", r.NsPerOp);
+                    if (r.BytesPerOp >= 0.0)
+                        std::fprintf(f, ", \"bytesPerOp\": %.3f", r.BytesPerOp);
+                    if (r.AllocsPerOp >= 0.0)
+                        std::fprintf(f, ", \"allocsPerOp\": %.3f", r.AllocsPerOp);
+                    std::fprintf(f, " }%s\n", (i + 1 < allResults.size()) ? "," : "");
+                }
+                std::fprintf(f, "  ]\n");
+                std::fprintf(f, "}\n");
+                std::fclose(f);
+
+                PrintNote("Bench JSON exported to artifacts/bench/");
+            }
+        }
     }
 
     memory::MemorySystem::Shutdown();
