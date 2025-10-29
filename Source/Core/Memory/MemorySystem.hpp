@@ -20,6 +20,8 @@
 // ============================================================================
 
 #include "Core/CoreMinimal.hpp"
+#include "Core/Diagnostics/Check.hpp"
+#include "Core/Logger.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/DefaultAllocator.hpp"
 #include "Core/Memory/TrackingAllocator.hpp"
