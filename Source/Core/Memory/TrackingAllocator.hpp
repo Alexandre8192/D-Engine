@@ -18,6 +18,7 @@
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/Alignment.hpp"
+#include "Core/Memory/OOM.hpp"
 #include "Core/Platform/PlatformMacros.hpp"
 #include "Core/Types.hpp"
 
@@ -364,7 +365,10 @@ namespace dng::core {
 
             // Forward allocation to base allocator
             void* ptr = m_baseAllocator->Allocate(size, alignment);
-            if (!ptr) return nullptr;
+            if (!ptr) {
+                DNG_MEM_CHECK_OOM(size, alignment, "TrackingAllocator::AllocateTagged");
+                return nullptr;
+            }
             // Monotonic counters (allocation path)
             m_totalAllocCalls.fetch_add(1, std::memory_order_relaxed);
             m_totalBytesAllocated.fetch_add(static_cast<std::uint64_t>(size), std::memory_order_relaxed);

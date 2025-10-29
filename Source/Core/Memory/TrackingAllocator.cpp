@@ -34,9 +34,7 @@
 // Ensure memory config/log categories if they exist
 #include "Core/Memory/MemoryConfig.hpp"     // DNG_MEM_TRACKING, DNG_MEM_LOG_VERBOSITY, etc. (if available)
 
-#if __has_include("Logger.hpp")
-#include "Logger.hpp"
-#endif
+#include "Core/Logger.hpp"
 
 // Standard Library
 #include <iostream>
@@ -47,28 +45,9 @@
 #include <mutex>
 #include <type_traits>
 
-// -----------------------------------------------------------------------------
-// Fallback logging macros (no-ops) if not provided elsewhere.
-// These keep this TU buildable in isolation without forcing logger linkage.
-// -----------------------------------------------------------------------------
-#ifndef DNG_LOG_INFO
-#define DNG_LOG_INFO(category, fmt, ...)    ((void)0)
-#endif
-#ifndef DNG_LOG_WARNING
-#define DNG_LOG_WARNING(category, fmt, ...) ((void)0)
-#endif
-#ifndef DNG_LOG_ERROR
-#define DNG_LOG_ERROR(category, fmt, ...)   ((void)0)
-#endif
-
 // Provide a default for log verbosity if not defined by config.
 #ifndef DNG_MEM_LOG_VERBOSITY
 #define DNG_MEM_LOG_VERBOSITY 1
-#endif
-
-// Provide a default log category token if not defined.
-#ifndef DNG_MEM_LOG_CATEGORY
-#define DNG_MEM_LOG_CATEGORY "Memory"
 #endif
 
 namespace dng::core {
@@ -89,18 +68,30 @@ namespace dng::core {
         // ---------------------------------------------------------------------
         void LogMemoryInfo(const char* message) {
 #if DNG_MEM_LOG_VERBOSITY >= 1
-            DNG_LOG_INFO(DNG_MEM_LOG_CATEGORY, "%s", message);
+            if (Logger::IsEnabled(LogLevel::Info, "Memory")) {
+                DNG_LOG_INFO("Memory", "{}", message);
+            }
 #else
             (void)message;
 #endif
         }
 
         void LogMemoryWarning(const char* message) {
-            DNG_LOG_WARNING(DNG_MEM_LOG_CATEGORY, "%s", message);
+            if (Logger::IsEnabled(LogLevel::Warn, "Memory")) {
+                DNG_LOG_WARNING("Memory", "{}", message);
+            }
+            else {
+                (void)message;
+            }
         }
 
         void LogMemoryError(const char* message) {
-            DNG_LOG_ERROR(DNG_MEM_LOG_CATEGORY, "%s", message);
+            if (Logger::IsEnabled(LogLevel::Error, "Memory")) {
+                DNG_LOG_ERROR("Memory", "{}", message);
+            }
+            else {
+                (void)message;
+            }
         }
 
         // ---------------------------------------------------------------------
@@ -144,6 +135,9 @@ namespace dng::core {
 
     void TrackingAllocator::ReportStatistics() const noexcept {
 #if DNG_MEM_TRACKING
+        if (!Logger::IsEnabled(LogLevel::Info, "Memory")) {
+            return;
+        }
         LogMemoryInfo("=== Memory Allocation Statistics ===");
 
         usize totalCurrentBytes = 0;
@@ -193,16 +187,31 @@ namespace dng::core {
 
         LogMemoryInfo("=====================================");
 #else
+        if (!Logger::IsEnabled(LogLevel::Info, "Memory")) {
+            return;
+        }
         LogMemoryInfo("Memory tracking is disabled. Enable DNG_MEM_TRACKING for statistics.");
 #endif
     }
 
 #if DNG_MEM_TRACKING
     void TrackingAllocator::ReportLeaks() const noexcept {
+        const bool infoEnabled = Logger::IsEnabled(LogLevel::Info, "Memory");
+        const bool errorEnabled = Logger::IsEnabled(LogLevel::Error, "Memory");
+        if (!infoEnabled && !errorEnabled) {
+            return;
+        }
+
         std::lock_guard<std::mutex> lock(m_mutex);
 
         if (m_allocations.empty()) {
-            LogMemoryInfo("No memory leaks detected.");
+            if (infoEnabled) {
+                LogMemoryInfo("No memory leaks detected.");
+            }
+            return;
+        }
+
+        if (!errorEnabled) {
             return;
         }
 
