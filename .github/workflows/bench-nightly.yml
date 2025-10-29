@@ -1,0 +1,103 @@
+name: Bench Nightly
+
+# Nightly performance run across toggles; does not fail on regressions.
+# Threshold env vars (defaults from bench-ci):
+# - PERF_THRESHOLD_PCT: 10 (ns/op rel)
+# - PERF_ABS_NS: 5 (ns/op abs ns)
+# - PERF_THRESHOLD_PCT_TRACKING: 15 (ns/op rel, Tracking*)
+# - PERF_ABS_NS_TRACKING: 12 (ns/op abs ns, Tracking*)
+# - BYTES_OP_MAX_ABS: 0 (bytes/op)
+# - BYTES_OP_MAX_REL_PCT: 0 (bytes/op)
+# - ALLOCS_OP_MAX_ABS: 0 (allocs/op)
+# - ALLOCS_OP_MAX_REL_PCT: 0 (allocs/op)
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  CONFIGURATION: Release
+  PLATFORM: x64
+
+jobs:
+  bench-nightly-windows:
+    name: Bench Nightly (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        tracking: [on, off]
+        guards: [on, off]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Build (MSBuild)
+        run: |
+          msbuild D-Engine.sln -m -p:Configuration=${{ env.CONFIGURATION }} -p:Platform=${{ env.PLATFORM }}
+
+      - name: Run BenchRunner
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          # Separate nightly outputs per matrix combo
+          DNG_BENCH_OUT: artifacts/bench/nightly/${{ matrix.tracking }}-${{ matrix.guards }}
+          DNG_BENCH_TRACKING: ${{ matrix.tracking }}
+          DNG_GUARDS: ${{ matrix.guards }}
+        run: |
+          $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
+          if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
+          Write-Host "Running (nightly) with CPU affinity=1 and High priority: $exeRel"
+          cmd /c start /wait /affinity 1 /high "D-Engine-BenchRunner" $exeRel
+
+      - name: Compare with baseline (nightly, doubled thresholds; never fail)
+        env:
+          # Double the normal thresholds for nightly signal-only checks
+          PERF_THRESHOLD_PCT: '20'
+          PERF_ABS_NS: '10'
+          PERF_THRESHOLD_PCT_TRACKING: '30'
+          PERF_ABS_NS_TRACKING: '24'
+          BYTES_OP_MAX_ABS: '0'
+          BYTES_OP_MAX_REL_PCT: '0'
+          ALLOCS_OP_MAX_ABS: '0'
+          ALLOCS_OP_MAX_REL_PCT: '0'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
+          if (-not (Test-Path $baseline)) { throw "Baseline not found: $baseline" }
+          $root = Join-Path "artifacts/bench/nightly" ("${{ matrix.tracking }}-${{ matrix.guards }}")
+          $latest = Get-ChildItem -Path $root -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $latest) {
+            Write-Host "No bench json found in $root"
+            exit 0
+          }
+          Write-Host "Baseline: $baseline"
+          Write-Host "Current : $($latest.FullName)"
+          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --emit-md bench_report.md
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning title=Nightly performance regression exceeded doubled thresholds::See summary table below."
+          }
+          Write-Host "===== Nightly Bench Report (Markdown) ====="
+          if (Test-Path bench_report.md) { Get-Content -Raw bench_report.md | Write-Host }
+
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-nightly-${{ matrix.tracking }}-${{ matrix.guards }}
+          path: |
+            artifacts/bench/nightly/${{ matrix.tracking }}-${{ matrix.guards }}/**/*.bench.json
+            bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json
+            bench_report.md
+          if-no-files-found: warn
