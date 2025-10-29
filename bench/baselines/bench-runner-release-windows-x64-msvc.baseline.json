@@ -1,0 +1,15 @@
+{
+  "suite": "bench-runner",
+  "gitSha": "unknown",
+  "dateUtc": "20251029T091605Z",
+  "platform": { "os": "Windows", "cpu": "x64", "compiler": "MSVC" },
+  "metrics": [
+    { "name": "Vector PushPop (no reserve)", "unit": "ns/op", "value": 3.203, "bytesPerOp": 0.000, "allocsPerOp": 0.000 },
+    { "name": "Arena Allocate/Rewind (64B)", "unit": "ns/op", "value": 9.788, "bytesPerOp": 0.000, "allocsPerOp": 0.000 },
+    { "name": "Arena Bulk Allocate/Rewind (8x64B)", "unit": "ns/op", "value": 79.740, "bytesPerOp": 0.000, "allocsPerOp": 0.000 },
+    { "name": "DefaultAllocator Alloc/Free 64B", "unit": "ns/op", "value": 54.090, "bytesPerOp": 0.000, "allocsPerOp": 0.000 },
+    { "name": "TrackingAllocator Alloc/Free 64B", "unit": "ns/op", "value": 254.982, "bytesPerOp": 64.000, "allocsPerOp": 1.000 },
+    { "name": "tracking_vector PushPop (no reserve)", "unit": "ns/op", "value": 3.206, "bytesPerOp": 0.000, "allocsPerOp": 0.000 },
+    { "name": "tracking_vector PushPop (reserved)", "unit": "ns/op", "value": 3.206, "bytesPerOp": 0.000, "allocsPerOp": 0.000 }
+  ]
+}
