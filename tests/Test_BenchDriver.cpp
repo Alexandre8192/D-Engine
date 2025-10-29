@@ -214,7 +214,7 @@ int main()
             arena.Rewind(marker);
         });
 
-    PrintBenchLine(result);
+        PrintBenchLine(result);
     }
     else
     {
@@ -248,7 +248,7 @@ int main()
             DeallocateCompat(defaultAlloc, ptr, 64u, alignof(std::max_align_t));
         });
 
-    PrintBenchLine(result);
+        PrintBenchLine(result);
     }
     else
     {
@@ -264,7 +264,7 @@ int main()
             DeallocateCompat(tracking, ptr, 64u, alignof(std::max_align_t));
         });
 
-    PrintBenchLine(result);
+        PrintBenchLine(result);
     }
     else
     {
