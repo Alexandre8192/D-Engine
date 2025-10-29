@@ -17,6 +17,7 @@
 // ============================================================================
 
 #include "Core/Types.hpp"
+#include "Core/Diagnostics/Check.hpp"
 #include "Core/Memory/Alignment.hpp"    // NormalizeAlignment()
 #include "Core/Memory/MemoryConfig.hpp" // DNG_MEM_* knobs
 #include "Core/Memory/Allocator.hpp"    // IAllocator (for interface compatibility)
@@ -35,10 +36,6 @@
 #ifndef DNG_LOG_ERROR
 #  define DNG_LOG_ERROR(Category, Fmt, ...) ((void)0)
 #endif
-#ifndef DNG_ASSERT
-#  define DNG_ASSERT(Expr, Msg) ((void)0)
-#endif
-
 namespace dng::core {
 
     // ------------------------------------------------------------------------
