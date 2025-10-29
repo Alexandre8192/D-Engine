@@ -18,9 +18,11 @@
 
 #include "Core/Types.hpp"
 #include "Core/Diagnostics/Check.hpp"
+#include "Core/Logger.hpp"
 #include "Core/Memory/Alignment.hpp"    // NormalizeAlignment()
 #include "Core/Memory/MemoryConfig.hpp" // DNG_MEM_* knobs
 #include "Core/Memory/Allocator.hpp"    // IAllocator (for interface compatibility)
+#include "Core/Memory/OOM.hpp"
 #include "Core/Platform/PlatformCompiler.hpp"
 #include "Core/Platform/PlatformDefines.hpp"
 
@@ -29,13 +31,6 @@
 #include <cstring>
 #include <new>
 
-// Temporary logging/assert fallbacks (no-ops until Logger.hpp is wired)
-#ifndef DNG_LOG_WARNING
-#  define DNG_LOG_WARNING(Category, Fmt, ...) ((void)0)
-#endif
-#ifndef DNG_LOG_ERROR
-#  define DNG_LOG_ERROR(Category, Fmt, ...) ((void)0)
-#endif
 namespace dng::core {
 
     // ------------------------------------------------------------------------
@@ -107,32 +102,32 @@ namespace dng::core {
 
         // IAllocator interface -----------------------------------------------------------------
         [[nodiscard]] void* Allocate(usize size, usize alignment = alignof(std::max_align_t)) noexcept override {
-            if (size == 0) return nullptr;
+            if (size == 0) {
+                return nullptr;
+            }
 
             alignment = NormalizeAlignment(alignment);
 
             // Compute aligned pointer from current bump
             u8* current = mPtr;
-            std::uintptr_t p = reinterpret_cast<std::uintptr_t>(current);
-            std::uintptr_t mis = p % alignment;
-            usize padding = mis ? (alignment - static_cast<usize>(mis)) : 0u;
+            const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(current);
+            const std::uintptr_t mis = p % alignment;
+            const usize padding = mis ? (alignment - static_cast<usize>(mis)) : 0u;
 
-            // Check space
-            if (mPtr + padding + size > mEnd) {
-                // OOM path
-                if (mConfig.bReturnNullOnOOM) {
-                    DNG_LOG_WARNING(Memory, "FrameAllocator OOM: requested %zu bytes (align %zu), used=%zu, cap=%zu",
+            u8* aligned = nullptr;
+            if (mPtr + padding + size <= mEnd) {
+                aligned = mPtr + padding;
+                mPtr = aligned + size; // bump
+            } else if (mConfig.bReturnNullOnOOM) {
+                if (Logger::IsEnabled("Memory")) {
+                    DNG_LOG_WARNING("Memory", "FrameAllocator OOM: requested {} bytes (align {}), used={}, cap={}",
                         static_cast<size_t>(size), static_cast<size_t>(alignment),
                         static_cast<size_t>(GetUsed()), static_cast<size_t>(GetCapacity()));
-                    return nullptr;
                 }
-                // Fail fast via engine policy (will typically log + abort)
-                OnOutOfMemory(size, alignment);
-                return nullptr; // unreachable in most policies
+            } else {
+                DNG_MEM_CHECK_OOM(size, alignment, "FrameAllocator::Allocate");
             }
 
-            u8* aligned = mPtr + padding;
-            mPtr = aligned + size; // bump
             return aligned;
         }
 
@@ -206,15 +201,6 @@ namespace dng::core {
             if (!obj) return;
             std::destroy_at(obj);
             // memory is not reclaimed individually; Reset()/Rewind() will free en masse
-        }
-
-    private:
-        // Dispatch to the engine OOM policy (OOM.hpp). The concrete symbol lives elsewhere.
-        DNG_NO_INLINE void OnOutOfMemory(usize size, usize alignment) noexcept {
-            // The engine policy may log, break, or abort; keeping the call indirect here.
-            (void)size; (void)alignment;
-            // If your OOM policy is a macro function, call it here instead of this stub.
-            DNG_LOG_ERROR(Memory, "FrameAllocator hard OOM (requested=%zu, align=%zu)", (size_t)size, (size_t)alignment);
         }
 
     private:
