@@ -15,8 +15,8 @@
 #include <cstdint>      // std::uintptr_t
 #include <limits>       // std::numeric_limits
 #include <type_traits>  // std::is_integral_v, std::is_unsigned_v
-#include <cassert>      // assert (kept for constexpr-safe checks)
 
+#include "Core/Diagnostics/Check.hpp"
 #include "Core/Logger.hpp" // DNG_LOG_*
 
 namespace dng::core
@@ -174,7 +174,7 @@ namespace dng::core
         if (detail::add_would_overflow<T>(value, mask))
         {
             // Keep assert (works in non-constexpr evaluation); do not use logger here.
-            assert(!"AlignUp overflow: value + (alignment-1) exceeds max");
+            DNG_ASSERT(false && "AlignUp overflow: value + (alignment-1) exceeds max");
             return (std::numeric_limits<T>::max)(); // clamp (defined, not UB)
         }
 
