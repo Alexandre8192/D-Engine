@@ -28,6 +28,7 @@
 #include <type_traits> // std::is_same
 #include <limits>      // std::numeric_limits
 #include <cstdio>      // std::snprintf
+#include <cstdlib>     // std::getenv
 
 // --- Optional memory tracking integration ----------------------------------
 // Define DNG_MEM_TRACKING to enable per-op memory/alloc counts.
@@ -49,6 +50,27 @@
 
 namespace dng {
 namespace bench {
+// ---
+// Purpose : Resolve the output directory for benchmark artifacts.
+// Contract: Reads environment variable DNG_BENCH_OUT; when unset, returns a
+//           stable default ("artifacts/bench"). No allocations; caller may
+//           create the directory if needed. Thread-safe; returns pointer to a
+//           static string literal or the process environment memory.
+// Notes   : Kept header-only per engine guidance; path uses platform separators.
+// ---
+[[nodiscard]] inline const char* BenchOutputDir() noexcept
+{
+#if defined(_WIN32)
+    static constexpr const char* kDefault = "artifacts\\bench";
+#else
+    static constexpr const char* kDefault = "artifacts/bench";
+#endif
+    const char* env = std::getenv("DNG_BENCH_OUT");
+    if (env && env[0] != '\0')
+        return env;
+    return kDefault;
+}
+
 
 // === BenchResult ============================================================
 // Purpose : Immutable container describing a single benchmark outcome.

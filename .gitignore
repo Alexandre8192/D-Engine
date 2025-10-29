@@ -74,3 +74,12 @@ Makefile
 
 # debug information files
 *.dwo
+
+# Benchmark outputs (local/CI artifacts)
+artifacts/
+out/
+**/*.bench.json
+**/*.bench.csv
+
+# Optional editor caches
+.vscode/
