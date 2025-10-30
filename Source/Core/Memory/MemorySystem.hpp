@@ -24,6 +24,7 @@
 #include "Core/CoreMinimal.hpp"
 #include "Core/Diagnostics/Check.hpp"
 #include "Core/Logger.hpp"
+#include "Core/Memory/MemMacros.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/DefaultAllocator.hpp"
 #include "Core/Memory/TrackingAllocator.hpp"
@@ -566,9 +567,20 @@ namespace memory
 
             const std::uint32_t effectiveBatch = batch.value;
 
+            const bool tlsBinsRequested = globalConfig.enable_smallobj_tls_bins;
+            const bool tlsBinsCompiled  = (DNG_SMALLOBJ_TLS_BINS != 0);
+            const bool tlsBinsEffective = tlsBinsCompiled && tlsBinsRequested;
+
+            // Truth table (CT = DNG_SMALLOBJ_TLS_BINS, RT = enable_smallobj_tls_bins):
+            // CT RT | Effective
+            //  0  x | false (feature compiled out)
+            //  1  0 | false (runtime opts out)
+            //  1  1 | true  (TLS bins enabled)
+
             globalConfig.tracking_sampling_rate = effectiveSampling;
             globalConfig.tracking_shard_count   = effectiveShards;
             globalConfig.small_object_batch     = effectiveBatch;
+            globalConfig.enable_smallobj_tls_bins = tlsBinsEffective;
             globals.activeConfig = globalConfig;
 
             if (warnEnabled)
@@ -645,6 +657,13 @@ namespace memory
                         break;
                     }
                 }
+#if !DNG_SMALLOBJ_TLS_BINS
+                if (tlsBinsRequested)
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "Ignoring MemoryConfig::enable_smallobj_tls_bins request (DNG_SMALLOBJ_TLS_BINS=0).");
+                }
+#endif
             }
 
             globals.defaultAllocator = new (globals.defaultAllocatorStorage) detail::DefaultAllocator();
@@ -668,7 +687,9 @@ namespace memory
             ::dng::core::SmallObjectConfig smallCfg{};
             smallCfg.ReturnNullOnOOM = !globals.activeConfig.fatal_on_oom;
             smallCfg.TLSBatchSize = static_cast<std::size_t>(globals.activeConfig.small_object_batch);
+            smallCfg.EnableTLSBins = globals.activeConfig.enable_smallobj_tls_bins;
             globals.smallObjectAllocator = new (globals.smallObjectStorage) detail::SmallObjectAllocator(effectiveParent, smallCfg);
+            // Future hook: platform thread-detach callback should invoke globals.smallObjectAllocator->OnThreadExit().
 
             globals.rendererArena = new (globals.rendererArenaStorage) detail::ArenaAllocator(effectiveParent, detail::kRendererArenaBytes);
             if (!globals.rendererArena->IsValid())
@@ -707,6 +728,11 @@ namespace memory
                     "SmallObject TLS batch={} (source={})",
                     static_cast<unsigned long long>(globals.activeConfig.small_object_batch),
                     detail::ToString(batch.source));
+                DNG_LOG_INFO("Memory",
+                    "SMALLOBJ_TLS_BINS: CT={} RT={} EFFECTIVE={}",
+                    DNG_SMALLOBJ_TLS_BINS ? "1" : "0",
+                    tlsBinsRequested ? "1" : "0",
+                    globals.activeConfig.enable_smallobj_tls_bins ? "1" : "0");
             }
             constexpr const char* kGuardState =
 #if DNG_MEM_GUARDS

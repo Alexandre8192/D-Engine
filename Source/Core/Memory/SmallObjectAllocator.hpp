@@ -11,24 +11,31 @@
 //           mutexes deliver coarse thread-safety.
 // Notes   : Slabs are sourced from a parent allocator. Diagnostics expose peak
 //           usage via `DumpStats`. `Reallocate` is copy-based and never grows in
-//           place.
+//           place. Thread-local magazines reduce contention and detect
+//           cross-thread frees, forwarding them to the shared shards.
 // ============================================================================
 
 #include "Core/Types.hpp"
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/Alignment.hpp"
+#include "Core/Memory/MemMacros.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
+#include "Core/Memory/GlobalNewDelete.hpp"
 #include "Core/Memory/OOM.hpp"
+#if DNG_SMALLOBJ_TLS_BINS
+#    include "Core/Memory/SmallObjectTLSBins.hpp"
+#endif
 #include "Core/Logger.hpp"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstring>    // std::memcpy
+#include <cstdint>
 #include <functional>
 #include <mutex>
-#include <new>        // std::nothrow
 #include <thread>
 
 namespace dng::core
@@ -43,7 +50,8 @@ struct SmallObjectConfig
     usize MaxClassSize = 1024;       // > MaxClassSize => route to Parent
     bool  ReturnNullOnOOM = false;   // if false => escalate to OOM policy
     // Allow callers to tune TLS refill batches without rebuilding; 0 defers to bench defaults.
-    usize TLSBatchSize   = static_cast<usize>(DNG_SOALLOC_BATCH); // default TLS refill batch (bench derived)
+    usize TLSBatchSize  = static_cast<usize>(DNG_SOALLOC_BATCH); // default TLS refill batch (bench derived)
+    bool  EnableTLSBins = false;     // respected only when DNG_SMALLOBJ_TLS_BINS != 0.
 };
 
 // ---
@@ -73,18 +81,42 @@ class SmallObjectAllocator final : public IAllocator
             const usize maxBatch = kMagazineCapacity;
             const usize requested = (cfg.TLSBatchSize == 0) ? kDefaultBatch : cfg.TLSBatchSize;
             mBaseBatch = std::clamp(requested, minBatch, maxBatch);
+
+#if DNG_SMALLOBJ_TLS_BINS
+            mTLSBinsEnabled = cfg.EnableTLSBins;
+#endif
         }
 
         ~SmallObjectAllocator() override
         {
-            ThreadCache& cache = sThreadCache;
-            if (cache.Owner == this)
+#if DNG_SMALLOBJ_TLS_BINS
+            if (mTLSBinsEnabled)
             {
-                FlushThreadCache(cache);
-                cache.Owner = nullptr;
-                cache.Reset(mBaseBatch);
+                ThreadCache& cache = TLSBins::Cache();
+                if (cache.OwnerInstance == this)
+                {
+                    FlushThreadCache(cache);
+                    cache.OwnerInstance = nullptr;
+                    cache.Reset(mBaseBatch);
+                }
             }
+#endif
             mAlive.store(false, std::memory_order_release);
+        }
+
+        // ---
+        // Purpose : Allow owning systems to flush per-thread caches when a thread terminates.
+        // Contract: Safe to invoke even if TLS bins are disabled at compile time or runtime.
+        // Notes   : Platform layers can hook this into their thread-detach callbacks when needed.
+        void OnThreadExit() noexcept
+        {
+#if DNG_SMALLOBJ_TLS_BINS
+            if (!mTLSBinsEnabled)
+            {
+                return;
+            }
+            TLSBins::FlushOnThreadExit(*this);
+#endif
         }
 
         // ---
@@ -249,8 +281,6 @@ class SmallObjectAllocator final : public IAllocator
         }
 
     private:
-        friend struct ThreadCache;
-
         // ---- Fixed size-class table (bytes) --------------------------------
         static constexpr std::array<usize, 7> kClassSizes = {
             16, 32, 64, 128, 256, 512, 1024
@@ -289,74 +319,51 @@ class SmallObjectAllocator final : public IAllocator
 
         struct FreeNode;
 
+#if DNG_SMALLOBJ_TLS_BINS
+        template<typename OwnerT, typename NodeT, std::size_t NumClassesT>
+        friend class SmallObjectTLSBins;
+
+        using TLSBins = SmallObjectTLSBins<SmallObjectAllocator, FreeNode, static_cast<std::size_t>(kNumClasses)>;
+        using Magazine = typename TLSBins::Magazine;
+        using ThreadCache = typename TLSBins::ThreadCache;
+        static constexpr std::uint64_t kNoThreadOwner = TLSBins::kNoThreadOwner;
+#endif
+
         struct Shard
         {
             FreeNode* FreeList = nullptr;
             std::mutex Mutex;
         };
 
-        struct Magazine
-        {
-            FreeNode* Head = nullptr;
-            usize      Count = 0;
-            usize      Batch = kDefaultBatch;
-            Clock::time_point LastRefillTime{};
-            bool       HasRefilled = false;
-
-            void Reset(usize baseBatch) noexcept
-            {
-                Head = nullptr;
-                Count = 0;
-                Batch = baseBatch;
-                LastRefillTime = {};
-                HasRefilled = false;
-            }
-        };
-
-        struct ThreadCache
-        {
-            SmallObjectAllocator* Owner = nullptr;
-            Magazine Magazines[kNumClasses]{};
-
-            ~ThreadCache() noexcept
-            {
-                if (Owner && Owner->IsAlive())
-                {
-                    Owner->FlushThreadCache(*this);
-                }
-                Owner = nullptr;
-                Reset(SmallObjectAllocator::kDefaultBatch);
-            }
-
-            void Reset(usize baseBatch) noexcept
-            {
-                for (Magazine& mag : Magazines)
-                {
-                    mag.Reset(baseBatch);
-                }
-            }
-        };
-
-        static thread_local ThreadCache sThreadCache;
-
         [[nodiscard]] static std::uint64_t ThreadFingerprint() noexcept
         {
+#if DNG_SMALLOBJ_TLS_BINS
+            return TLSBins::ThreadFingerprint();
+#else
             thread_local const std::uint64_t value = []() noexcept {
                 std::hash<std::thread::id> hasher;
-                return static_cast<std::uint64_t>(hasher(std::this_thread::get_id()));
+                std::uint64_t hashed = static_cast<std::uint64_t>(hasher(std::this_thread::get_id()));
+                return hashed == 0ull ? 0x1ull : hashed;
             }();
             return value;
+#endif
+        }
+
+        [[nodiscard]] static usize SelectShard(std::uint64_t fingerprint) noexcept
+        {
+            if constexpr (kShardCount == 1)
+            {
+                (void)fingerprint;
+                return 0;
+            }
+            const std::uint64_t hash = fingerprint * kShardHashMultiplier;
+            const unsigned shift = 64u - kShardBits;
+            return static_cast<usize>(hash >> shift);
         }
 
         [[nodiscard]] static usize SelectShard() noexcept
         {
-            if constexpr (kShardCount == 1)
-            {
-                return 0;
-            }
-            const std::uint64_t hash = ThreadFingerprint() * kShardHashMultiplier;
-            const unsigned shift = 64u - kShardBits;
-            return static_cast<usize>(hash >> shift);
+            return SelectShard(ThreadFingerprint());
         }
 
         static constexpr i32 ClassForSize(usize s) noexcept
@@ -382,6 +389,9 @@ class SmallObjectAllocator final : public IAllocator
         struct BlockHeader
         {
             SlabHeader* OwnerSlab; // back-pointer to slab
+#if DNG_SMALLOBJ_TLS_BINS
+            std::uint64_t OwningThreadFingerprint = kNoThreadOwner;
+#endif
         };
 
         // A slab contains contiguous blocks of the same class.
@@ -410,10 +420,13 @@ class SmallObjectAllocator final : public IAllocator
             std::atomic<usize> CachedCount{ 0 };
         };
 
-        IAllocator* mParent;
+        IAllocator*       mParent;
         SmallObjectConfig mCfg;
-    usize            mBaseBatch{ kDefaultBatch };
-        Class          mClasses[kNumClasses]{};
+#if DNG_SMALLOBJ_TLS_BINS
+        bool              mTLSBinsEnabled{ false };
+#endif
+        usize             mBaseBatch{ kDefaultBatch };
+        Class             mClasses[kNumClasses]{};
         std::atomic<bool> mAlive{ true };
 
         // --- Helpers ---
@@ -486,6 +499,9 @@ class SmallObjectAllocator final : public IAllocator
             {
                 auto* bh = reinterpret_cast<BlockHeader*>(cursor);
                 bh->OwnerSlab = slab;
+#if DNG_SMALLOBJ_TLS_BINS
+                bh->OwningThreadFingerprint = kNoThreadOwner;
+#endif
 
                 auto* fn = reinterpret_cast<FreeNode*>(bh + 1);
                 fn->Next = headNew;
@@ -509,24 +525,24 @@ class SmallObjectAllocator final : public IAllocator
             klass.SlabCount.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
-
+#if DNG_SMALLOBJ_TLS_BINS
         [[nodiscard]] Magazine* GetThreadMagazines() noexcept
         {
-            ThreadCache& cache = sThreadCache;
-            if (cache.Owner == this)
+            ThreadCache& cache = TLSBins::Cache();
+            if (cache.OwnerInstance == this)
             {
-                return cache.Magazines;
+                return cache.Magazines.data();
             }
 
-            if (cache.Owner && cache.Owner->IsAlive())
+            if (cache.OwnerInstance && cache.OwnerInstance->IsAlive())
             {
-                cache.Owner->FlushThreadCache(cache);
-                cache.Owner = nullptr;
+                cache.OwnerInstance->FlushThreadCache(cache);
+                cache.OwnerInstance = nullptr;
             }
 
             cache.Reset(mBaseBatch);
-            cache.Owner = this;
-            return cache.Magazines;
+            cache.OwnerInstance = this;
+            return cache.Magazines.data();
         }
 
         [[nodiscard]] bool RefillMagazine(i32 classIdx, Magazine& mag) noexcept
@@ -615,14 +631,18 @@ class SmallObjectAllocator final : public IAllocator
             std::unique_lock<std::mutex> shardLock(shard.Mutex);
 
             FreeNode* batchHead = mag.Head;
-            FreeNode* batchTail = batchHead;
-            for (usize i = 1; i < toRelease; ++i)
+            FreeNode* current = batchHead;
+            FreeNode* batchTail = nullptr;
+            for (usize i = 0; i < toRelease; ++i)
             {
-                DNG_CHECK(batchTail->Next != nullptr);
-                batchTail = batchTail->Next;
+                DNG_CHECK(current != nullptr);
+                auto* header = reinterpret_cast<BlockHeader*>(current) - 1;
+                header->OwningThreadFingerprint = kNoThreadOwner;
+                batchTail = current;
+                current = current->Next;
             }
 
-            FreeNode* remainingHead = batchTail->Next;
+            FreeNode* remainingHead = current;
             batchTail->Next = shard.FreeList;
             shard.FreeList = batchHead;
 
@@ -647,21 +667,23 @@ class SmallObjectAllocator final : public IAllocator
 
         void FlushThreadCache(ThreadCache& cache) noexcept
         {
-            if (cache.Owner != this)
+            if (cache.OwnerInstance != this)
             {
                 return;
             }
             for (i32 i = 0; i < kNumClasses; ++i)
             {
-                Magazine& mag = cache.Magazines[i];
+                const std::size_t idx = static_cast<std::size_t>(i);
+                Magazine& mag = cache.Magazines[idx];
                 if (mag.Count > 0)
                 {
                     DrainMagazineToClass(i, mag, mag.Count);
                 }
             }
             cache.Reset(mBaseBatch);
-            cache.Owner = nullptr;
+            cache.OwnerInstance = nullptr;
         }
+#endif // DNG_SMALLOBJ_TLS_BINS
 
         [[nodiscard]] bool IsAlive() const noexcept
         {
@@ -675,41 +697,126 @@ class SmallObjectAllocator final : public IAllocator
         // ---
         void* AllocateFromClass(ClassIndex ci, usize requestSize, usize alignment) noexcept
         {
-            const i32 idx = ci.Index;
-            Magazine* magazines = GetThreadMagazines();
-            Magazine& mag = magazines[idx];
-            Class& C = mClasses[idx];
-
-            if (mag.Head)
+#if DNG_SMALLOBJ_TLS_BINS
+            if (mTLSBinsEnabled)
             {
+                DNG_ASSERT(ci.Index >= 0 && ci.Index < kNumClasses, "SmallObjectAllocator TLS class index out of range");
+                DNG_ASSERT(requestSize > 0, "SmallObjectAllocator expects non-zero size in TLS path");
+                const usize normalizedAlignment = NormalizeAlignment(alignment);
+                DNG_ASSERT(normalizedAlignment == alignment, "TLS path requires normalized alignment");
+                (void)normalizedAlignment;
+
+                const usize tlsThreshold = static_cast<usize>(DNG_GLOBAL_NEW_SMALL_THRESHOLD);
+                if (requestSize > tlsThreshold)
+                {
+                    DNG_ASSERT(requestSize <= tlsThreshold && "TLS bins cannot service requests larger than the global small threshold");
+                    return AllocateFromShared(ci, requestSize, alignment);
+                }
+
+                const i32 idx = ci.Index;
+                Magazine* magazines = GetThreadMagazines();
+                Magazine& mag = magazines[idx];
+                Class& C = mClasses[idx];
+
+                if (mag.Head)
+                {
+                    FreeNode* node = mag.Head;
+                    mag.Head = node->Next;
+                    --mag.Count;
+                    const usize prevCache = C.CachedCount.fetch_sub(1, std::memory_order_relaxed);
+                    DNG_CHECK(prevCache > 0);
+                    DNG_ASSERT(IsAligned(node, alignment), "SmallObjectAllocator returned misaligned pointer");
+                    auto* header = reinterpret_cast<BlockHeader*>(node) - 1;
+                    header->OwningThreadFingerprint = ThreadFingerprint();
+                    return static_cast<void*>(node);
+                }
+
+                if (!RefillMagazine(idx, mag))
+                {
+                    if (mCfg.ReturnNullOnOOM)
+                    {
+                        DNG_LOG_WARNING("Memory",
+                            "SmallObjectAllocator OOM: class=%d request=%zu align=%zu",
+                            (int)idx, static_cast<size_t>(requestSize), static_cast<size_t>(alignment));
+                    }
+                    return nullptr;
+                }
+
                 FreeNode* node = mag.Head;
+                DNG_CHECK(node != nullptr);
                 mag.Head = node->Next;
                 --mag.Count;
                 const usize prevCache = C.CachedCount.fetch_sub(1, std::memory_order_relaxed);
                 DNG_CHECK(prevCache > 0);
                 DNG_ASSERT(IsAligned(node, alignment), "SmallObjectAllocator returned misaligned pointer");
+                auto* header = reinterpret_cast<BlockHeader*>(node) - 1;
+                header->OwningThreadFingerprint = ThreadFingerprint();
                 return static_cast<void*>(node);
             }
+#endif
+            return AllocateFromShared(ci, requestSize, alignment);
+        }
 
-            if (!RefillMagazine(idx, mag))
+        void* AllocateFromShared(ClassIndex ci, usize requestSize, usize alignment) noexcept
+        {
+            (void)requestSize;
+            const i32 idx = ci.Index;
+            Class& C = mClasses[idx];
+            const usize shardIndex = SelectShard();
+            Shard& shard = C.Shards[shardIndex];
+            std::unique_lock<std::mutex> shardLock(shard.Mutex);
+
+            while (!shard.FreeList)
             {
-                if (mCfg.ReturnNullOnOOM)
+                if (!AllocateSlabLocked(idx, C, shard))
                 {
-                    DNG_LOG_WARNING("Memory",
-                        "SmallObjectAllocator OOM: class=%d request=%zu align=%zu",
-                        (int)idx, static_cast<size_t>(requestSize), static_cast<size_t>(alignment));
+                    shardLock.unlock();
+                    return nullptr;
                 }
-                return nullptr;
             }
 
-            FreeNode* node = mag.Head;
-            DNG_CHECK(node != nullptr);
-            mag.Head = node->Next;
-            --mag.Count;
-            const usize prevCache = C.CachedCount.fetch_sub(1, std::memory_order_relaxed);
-            DNG_CHECK(prevCache > 0);
+            FreeNode* node = shard.FreeList;
+            shard.FreeList = node->Next;
+            const usize prevFree = C.FreeCount.fetch_sub(1, std::memory_order_relaxed);
+            DNG_CHECK(prevFree > 0);
+            shardLock.unlock();
+
             DNG_ASSERT(IsAligned(node, alignment), "SmallObjectAllocator returned misaligned pointer");
+#if DNG_SMALLOBJ_TLS_BINS
+            auto* header = reinterpret_cast<BlockHeader*>(node) - 1;
+            header->OwningThreadFingerprint = kNoThreadOwner;
+#endif
             return static_cast<void*>(node);
+        }
+
+    // ---
+    // Purpose : Requeue a block into the shared shard selected by the fingerprint hint.
+    // Contract: `node` must belong to `classIdx`; fingerprint hint may be zero to use the current thread.
+    // Notes   : Runs in O(1) without logging to keep the slow path deterministic even under contention.
+    void ReturnToGlobal(FreeNode* node, i32 classIdx, std::uint64_t fingerprintHint) noexcept
+        {
+#if DNG_SMALLOBJ_TLS_BINS
+            auto* header = reinterpret_cast<BlockHeader*>(node) - 1;
+            header->OwningThreadFingerprint = kNoThreadOwner;
+            const std::uint64_t hint = (fingerprintHint == kNoThreadOwner)
+                ? ThreadFingerprint()
+                : fingerprintHint;
+#else
+            const std::uint64_t hint = (fingerprintHint == 0ull)
+                ? ThreadFingerprint()
+                : fingerprintHint;
+#endif
+            Class& C = mClasses[classIdx];
+            const usize shardIndex = SelectShard(hint);
+            Shard& shard = C.Shards[shardIndex];
+            std::unique_lock<std::mutex> shardLock(shard.Mutex);
+
+            node->Next = shard.FreeList;
+            shard.FreeList = node;
+
+            shardLock.unlock();
+
+            C.FreeCount.fetch_add(1, std::memory_order_relaxed);
         }
 
         // ---
@@ -719,20 +826,43 @@ class SmallObjectAllocator final : public IAllocator
         // ---
         void FreeBlock(void* userPtr, i32 classIdx) noexcept
         {
-            auto* node = reinterpret_cast<FreeNode*>(userPtr);
-            Magazine* magazines = GetThreadMagazines();
-            Magazine& mag = magazines[classIdx];
-
-            if (mag.Count >= kMagazineCapacity)
+#if DNG_SMALLOBJ_TLS_BINS
+            if (mTLSBinsEnabled)
             {
-                const usize release = std::min(mag.Count, std::max(mag.Batch, mBaseBatch));
-                DrainMagazineToClass(classIdx, mag, release);
-            }
+                auto* node = reinterpret_cast<FreeNode*>(userPtr);
+                auto* header = reinterpret_cast<BlockHeader*>(node) - 1;
+                const std::uint64_t currentFingerprint = ThreadFingerprint();
+                const std::uint64_t ownerFingerprint = header->OwningThreadFingerprint;
 
-            node->Next = mag.Head;
-            mag.Head = node;
-            ++mag.Count;
-            mClasses[classIdx].CachedCount.fetch_add(1, std::memory_order_relaxed);
+                // Purpose : Detect cross-thread frees and return blocks via shared shards deterministically.
+                // Contract: When fingerprints differ, no TLS mutation occurs; the block goes straight to the shard list in O(1).
+                // Notes   : Keeps TLS magazines strictly single-owner without logging or OS involvement on the hot path.
+                if (ownerFingerprint != kNoThreadOwner && ownerFingerprint != currentFingerprint)
+                {
+                    ReturnToGlobal(node, classIdx, ownerFingerprint);
+                    return;
+                }
+
+                header->OwningThreadFingerprint = currentFingerprint;
+
+                Magazine* magazines = GetThreadMagazines();
+                Magazine& mag = magazines[classIdx];
+
+                if (mag.Count >= kMagazineCapacity)
+                {
+                    const usize release = std::min(mag.Count, std::max(mag.Batch, mBaseBatch));
+                    DrainMagazineToClass(classIdx, mag, release);
+                }
+
+                node->Next = mag.Head;
+                mag.Head = node;
+                ++mag.Count;
+                mClasses[classIdx].CachedCount.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+#endif
+            auto* node = reinterpret_cast<FreeNode*>(userPtr);
+            ReturnToGlobal(node, classIdx, ThreadFingerprint());
         }
 
         // ---
@@ -753,8 +883,21 @@ class SmallObjectAllocator final : public IAllocator
                 DNG_MEM_CHECK_OOM(size, alignment, context);
             }
         }
-    };
+#if !DNG_SMALLOBJ_TLS_BINS
+        struct SmallObjectAllocatorNoTLSLayout
+        {
+            IAllocator*       Parent;
+            SmallObjectConfig Config;
+            usize             BaseBatch;
+            Class             Classes[kNumClasses];
+            std::atomic<bool> Alive;
+        };
 
-    inline thread_local SmallObjectAllocator::ThreadCache SmallObjectAllocator::sThreadCache{};
+        static_assert(sizeof(SmallObjectAllocatorNoTLSLayout) == sizeof(SmallObjectAllocator),
+            "SmallObjectAllocator ABI changed when TLS bins disabled.");
+        static_assert(alignof(SmallObjectAllocatorNoTLSLayout) == alignof(SmallObjectAllocator),
+            "SmallObjectAllocator alignment changed when TLS bins disabled.");
+#endif
+    };
 
 } // namespace dng::core

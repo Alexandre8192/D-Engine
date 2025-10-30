@@ -38,6 +38,7 @@ Notes :
 #include <cstdlib>      // std::getenv, std::strtol
 #include <algorithm>    // std::sort
 #include <cmath>        // std::sqrt, std::abs
+#include <atomic>       // std::atomic for LocalBarrier
 #include <thread>       // std::thread::hardware_concurrency
 #include <cerrno>       // errno
 
@@ -288,6 +289,205 @@ namespace
 #endif
 
         PrintLine(std::string_view{buffer});
+    }
+
+    // --- Small-object benchmark helpers ------------------------------------
+
+    constexpr std::size_t kSmallObjectSizes[] = { 8u, 16u, 32u, 64u, 128u, 256u, 512u };
+    constexpr std::size_t kSmallObjectSizeCount = sizeof(kSmallObjectSizes) / sizeof(kSmallObjectSizes[0]);
+    constexpr std::size_t kSmallObjectBurst = 64u;
+    constexpr std::size_t kMaxSmallObjectThreads = 8u;
+    constexpr std::size_t kSmallObjectSlotCount = kSmallObjectSizeCount * kSmallObjectBurst;
+
+#if defined(DNG_SMALLOBJ_TLS_BINS)
+    constexpr bool kSmallObjectTLSCompiled = (DNG_SMALLOBJ_TLS_BINS != 0);
+#else
+    constexpr bool kSmallObjectTLSCompiled = false;
+#endif
+
+#if defined(DNG_GLOBAL_NEW_SMALL_THRESHOLD)
+    constexpr std::size_t kGlobalNewSmallThreshold = static_cast<std::size_t>(DNG_GLOBAL_NEW_SMALL_THRESHOLD);
+#else
+    constexpr std::size_t kGlobalNewSmallThreshold = 0u;
+#endif
+
+#if defined(DNG_SOALLOC_BATCH)
+    constexpr std::size_t kSmallObjectBatchCompiled = static_cast<std::size_t>(DNG_SOALLOC_BATCH);
+#else
+    constexpr std::size_t kSmallObjectBatchCompiled = 0u;
+#endif
+
+    struct SmallObjectThreadContext
+    {
+        void* slots[kSmallObjectSlotCount]{};
+
+        void Reset() noexcept
+        {
+            for (std::size_t i = 0; i < kSmallObjectSlotCount; ++i)
+            {
+                slots[i] = nullptr;
+            }
+        }
+    };
+
+    inline void BestEffortPinWorker(unsigned logicalIndex) noexcept
+    {
+#if defined(_WIN32)
+        const HANDLE thread = ::GetCurrentThread();
+        const unsigned bitCount = static_cast<unsigned>(sizeof(DWORD_PTR) * 8u);
+        const unsigned shift = (bitCount == 0u) ? 0u : (logicalIndex % bitCount);
+        DWORD_PTR mask = (bitCount == 0u) ? 1u : (static_cast<DWORD_PTR>(1) << shift);
+        if (mask == 0)
+        {
+            mask = 1;
+        }
+        (void)::SetThreadAffinityMask(thread, mask);
+#else
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        CPU_SET(static_cast<int>(logicalIndex % CPU_SETSIZE), &set);
+        (void)::sched_setaffinity(0, sizeof(set), &set);
+#endif
+    }
+
+    class LocalBarrier
+    {
+    public:
+        explicit LocalBarrier(std::size_t count) noexcept
+            : mThreshold(count == 0u ? 1u : static_cast<unsigned>(count)),
+              mCount(mThreshold),
+              mGeneration(0u)
+        {
+        }
+
+        void ArriveAndWait() noexcept
+        {
+            const unsigned generation = mGeneration.load(std::memory_order_acquire);
+            if (mCount.fetch_sub(1u, std::memory_order_acq_rel) == 1u)
+            {
+                mCount.store(mThreshold, std::memory_order_release);
+                mGeneration.fetch_add(1u, std::memory_order_acq_rel);
+            }
+            else
+            {
+                while (mGeneration.load(std::memory_order_acquire) == generation)
+                {
+                    std::this_thread::yield();
+                }
+            }
+        }
+
+    private:
+        const unsigned mThreshold;
+        std::atomic<unsigned> mCount;
+        std::atomic<unsigned> mGeneration;
+    };
+
+    inline void PrintSmallObjectBanner(const char* caseLabel,
+        bool runtimeRequested,
+        bool effective,
+        std::size_t threadCount) noexcept
+    {
+        char banner[256]{};
+        const int written = std::snprintf(banner, sizeof(banner),
+            "[SmallObject] %s CT=%c RT=%c EFFECTIVE=%c threshold=%llu batch=%llu threads=%llu",
+            caseLabel ? caseLabel : "<unnamed>",
+            kSmallObjectTLSCompiled ? '1' : '0',
+            runtimeRequested ? '1' : '0',
+            effective ? '1' : '0',
+            static_cast<unsigned long long>(kGlobalNewSmallThreshold),
+            static_cast<unsigned long long>(kSmallObjectBatchCompiled),
+            static_cast<unsigned long long>(threadCount));
+
+        if (written > 0)
+        {
+            const std::size_t length = (written >= static_cast<int>(sizeof(banner)))
+                ? (sizeof(banner) - 1u)
+                : static_cast<std::size_t>(written);
+            PrintLine(std::string_view{ banner, length });
+        }
+    }
+
+    inline void RunSmallObjectMultithreadIteration(::dng::core::SmallObjectAllocator& allocator,
+        std::size_t threadCount,
+        bool crossThreadFree,
+        SmallObjectThreadContext* contexts,
+        std::size_t contextCapacity) noexcept
+    {
+        const std::size_t requestedThreads = (threadCount == 0u) ? 1u : threadCount;
+        const std::size_t useThreads = (requestedThreads > contextCapacity) ? contextCapacity : requestedThreads;
+
+        for (std::size_t t = 0; t < useThreads; ++t)
+        {
+            contexts[t].Reset();
+        }
+
+        LocalBarrier barrier(useThreads);
+        const std::size_t alignment = alignof(std::max_align_t);
+
+        auto worker = [&](std::size_t threadIndex) noexcept
+        {
+            BestEffortPinWorker(static_cast<unsigned>(threadIndex));
+            SmallObjectThreadContext& ctx = contexts[threadIndex];
+            for (std::size_t sizeIdx = 0; sizeIdx < kSmallObjectSizeCount; ++sizeIdx)
+            {
+                const std::size_t size = kSmallObjectSizes[sizeIdx];
+                void** const mySlot = ctx.slots + (sizeIdx * kSmallObjectBurst);
+
+                for (std::size_t i = 0; i < kSmallObjectBurst; ++i)
+                {
+                    void* ptr = allocator.Allocate(size, alignment);
+                    DNG_CHECK(ptr != nullptr);
+                    mySlot[i] = ptr;
+                }
+
+                barrier.ArriveAndWait();
+
+                if (crossThreadFree && useThreads > 1u)
+                {
+                    const std::size_t recipientIndex = (threadIndex + 1u) % useThreads;
+                    void** const recipientSlot = contexts[recipientIndex].slots + (sizeIdx * kSmallObjectBurst);
+                    const std::size_t crossCount = kSmallObjectBurst / 2u;
+                    for (std::size_t i = 0; i < crossCount; ++i)
+                    {
+                        void* target = recipientSlot[i];
+                        DNG_CHECK(target != nullptr);
+                        allocator.Deallocate(target, size, alignment);
+                        recipientSlot[i] = nullptr;
+                    }
+                }
+
+                barrier.ArriveAndWait();
+
+                for (std::size_t i = 0; i < kSmallObjectBurst; ++i)
+                {
+                    void* target = mySlot[i];
+                    if (target != nullptr)
+                    {
+                        allocator.Deallocate(target, size, alignment);
+                        mySlot[i] = nullptr;
+                    }
+                }
+
+                barrier.ArriveAndWait();
+            }
+        };
+
+        std::thread threadPool[kMaxSmallObjectThreads];
+        for (std::size_t t = 1; t < useThreads; ++t)
+        {
+            threadPool[t - 1] = std::thread(worker, t);
+        }
+
+        worker(0u);
+
+        for (std::size_t t = 1; t < useThreads; ++t)
+        {
+            if (threadPool[t - 1].joinable())
+            {
+                threadPool[t - 1].join();
+            }
+        }
     }
 
     // Build environment-driven suffixes for metric names to support param sweeps.
@@ -799,6 +999,60 @@ int main(int argc, char** argv)
     else
     {
         PrintNote("Tracking allocator unavailable; skipping tracking_vector scenarios.");
+    }
+
+    // ---- Scenario 8: SmallObjectAllocator multi-thread stress --------------
+    if (defaultAlloc)
+    {
+        struct SmallScenario
+        {
+            const char* Label;
+            bool RuntimeTLS;
+            bool CrossThreadFree;
+            std::size_t Threads;
+        };
+
+        const SmallScenario scenarios[] = {
+            { "ST-Local", false, false, 1u },
+            { "ST-TLS",   true,  false, 1u },
+            { "MT2-Local", false, false, 2u },
+            { "MT2-TLS",   true,  false, 2u },
+            { "MT2-TLS-XFree", true, true, 2u },
+            { "MT4-TLS",   true,  false, 4u },
+        };
+
+        SmallObjectThreadContext contexts[kMaxSmallObjectThreads]{};
+
+        for (const SmallScenario& scenario : scenarios)
+        {
+            ::dng::core::SmallObjectConfig config{};
+            config.EnableTLSBins = scenario.RuntimeTLS;
+            ::dng::core::SmallObjectAllocator soalloc{ defaultAlloc, config };
+
+            const bool effectiveTLS = scenario.RuntimeTLS && kSmallObjectTLSCompiled;
+            PrintSmallObjectBanner(scenario.Label, scenario.RuntimeTLS, effectiveTLS, scenario.Threads);
+
+            std::string metricName = std::string{"SmallObject/"} + scenario.Label;
+            metricName += scenario.CrossThreadFree ? " CrossFree" : " LocalFree";
+            metricName += " T";
+            metricName += std::to_string(static_cast<unsigned long long>(scenario.Threads));
+
+            auto runOnce = [&]() noexcept -> bench::BenchResult {
+                return DNG_BENCH(metricName.c_str(), kIterations, [&]() noexcept {
+                    RunSmallObjectMultithreadIteration(soalloc,
+                        scenario.Threads,
+                        scenario.CrossThreadFree,
+                        contexts,
+                        kMaxSmallObjectThreads);
+                });
+            };
+
+            executeScenario(metricName, runOnce);
+        }
+    }
+    else
+    {
+        PrintNote("Default allocator unavailable; skipping SmallObject TLS scenarios.");
     }
 
     // --- Export JSON to artifacts/bench -------------------------------------

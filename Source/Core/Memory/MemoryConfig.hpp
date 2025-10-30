@@ -18,6 +18,8 @@
 
 #include <cstdint>
 
+#include "Core/Memory/MemMacros.hpp"
+
 // -----------------------------------------------------------------------------
 // Minimal logging fallbacks (avoid dependency on Logger.hpp here)
 // -----------------------------------------------------------------------------
@@ -245,6 +247,11 @@ namespace dng::core
         bool global_thread_safe = CompiledThreadSafe();
         int  global_thread_policy = CompiledThreadPolicy(); // 0 = none, 1 = mutex
 
+        // Purpose : Runtime gate for TLS small-object bins. Default off, requires compile-time support.
+        // Contract: Effective only when DNG_SMALLOBJ_TLS_BINS==1; otherwise setters warn and value remains false.
+        // Notes   : MemorySystem applies the compile/runtime truth table before instantiating SmallObjectAllocator.
+        bool enable_smallobj_tls_bins = false;
+
         // Purpose : Optional runtime override for tracking sampling (0 preserves env/macro defaults).
         // Contract: Value sanitized to >=1 during MemorySystem::Init; API overrides win over env, which win over macros.
     // Notes   : Release builds typically leave this at 0 and rely on compile-time defaults to avoid redundant config.
@@ -402,6 +409,16 @@ namespace dng::core
                 DNG_LOG_WARNING("Memory", "[no-op] Thread-policy ignored: thread safety compiled out.");
             }
         }
+
+        void SetEnableSmallObjectTLSBins(bool v) noexcept
+        {
+#if DNG_SMALLOBJ_TLS_BINS
+            enable_smallobj_tls_bins = v;
+#else
+            (void)v;
+            DNG_LOG_WARNING("Memory", "[no-op] SmallObject TLS bins compiled out (DNG_SMALLOBJ_TLS_BINS=0).");
+#endif
+        }
     };
 
 #endif // DNG_CORE_MEMORYCONFIG_CONSTANTS_DEFINED
@@ -436,6 +453,7 @@ namespace dng::core
 // Report on Exit          | DNG_MEM_REPORT_ON_EXIT    | report_on_exit           | ON iff CT=1 AND RT=true
 // Global Thread-Safety    | DNG_MEM_THREAD_SAFE       | global_thread_safe       | ON iff CT=1 AND RT=true
 // Thread Policy           | DNG_MEM_THREAD_POLICY(0/1)| global_thread_policy(0/1)| Policy applies iff Thread-Safety Eff=ON
+// SmallObject TLS Bins    | DNG_SMALLOBJ_TLS_BINS     | enable_smallobj_tls_bins | ON iff CT=1 AND RT=true
 // ---------------------------------------------------------------------------
 //
 // Notes:
