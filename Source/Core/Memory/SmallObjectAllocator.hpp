@@ -7,12 +7,15 @@
 //           allocator contract.
 // Contract: All requests normalise alignment via `NormalizeAlignment`. Blocks
 //           must be freed with the same `(size, alignment)`; larger requests or
-//           unusual alignments fall back to the parent allocator. Per-class
-//           mutexes deliver coarse thread-safety.
+//           unusual alignments fall back to the parent allocator. Sharded mutexes
+//           reduce contention while keeping the design lock-based and auditable.
 // Notes   : Slabs are sourced from a parent allocator. Diagnostics expose peak
 //           usage via `DumpStats`. `Reallocate` is copy-based and never grows in
 //           place. Thread-local magazines reduce contention and detect
-//           cross-thread frees, forwarding them to the shared shards.
+//           cross-thread frees, forwarding them to sharded global lists keyed by
+//           pointer hashes. Hot paths allocate exclusively through the configured
+//           parent allocator with no hidden std:: allocations; callers must free
+//           with the exact `(size, alignment)` pair supplied at allocation time.
 // ============================================================================
 
 #include "Core/Types.hpp"
@@ -36,14 +39,18 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <new>
+#include <memory>
 #include <thread>
+#include <vector>
 
 namespace dng::core
 {
 
 // Purpose : Configuration knobs that tailor SmallObjectAllocator behaviour.
 // Contract: Values are read-only after construction; caller owns the struct.
-// Notes   : TLSBatchSize may be clamped by the allocator to [1, DNG_SOA_TLS_MAG_CAPACITY].
+// Notes   : TLSBatchSize may be clamped by the allocator to [1, DNG_SOA_TLS_MAG_CAPACITY];
+//           ShardCountOverride normalises to the nearest power-of-two when non-zero.
 struct SmallObjectConfig
 {
     usize SlabSizeBytes = 64 * 1024; // 64 KB per slab by default
@@ -52,6 +59,8 @@ struct SmallObjectConfig
     // Allow callers to tune TLS refill batches without rebuilding; 0 defers to bench defaults.
     usize TLSBatchSize  = static_cast<usize>(DNG_SOALLOC_BATCH); // default TLS refill batch (bench derived)
     bool  EnableTLSBins = false;     // respected only when DNG_SMALLOBJ_TLS_BINS != 0.
+    // Optional runtime override for shard fan-out; 0 => use compile-time default, value is normalized to power-of-two.
+    usize ShardCountOverride = 0;
 };
 
 // ---
@@ -85,6 +94,11 @@ class SmallObjectAllocator final : public IAllocator
 #if DNG_SMALLOBJ_TLS_BINS
             mTLSBinsEnabled = cfg.EnableTLSBins;
 #endif
+            const usize requestedShards = (cfg.ShardCountOverride == 0u)
+                ? kDefaultShardCount
+                : cfg.ShardCountOverride;
+            InitShards(requestedShards);
+            mCfg.ShardCountOverride = mShardCount;
         }
 
         ~SmallObjectAllocator() override
@@ -288,28 +302,14 @@ class SmallObjectAllocator final : public IAllocator
         static constexpr i32   kNumClasses        = static_cast<i32>(kClassSizes.size());
         static constexpr usize kMagazineCapacity  = static_cast<usize>(DNG_SOA_TLS_MAG_CAPACITY);
         static constexpr usize kDefaultBatch      = static_cast<usize>(DNG_SOA_TLS_BATCH_COUNT);
-        static constexpr usize kShardCount        = static_cast<usize>(DNG_SOA_SHARD_COUNT);
+        static constexpr usize kDefaultShardCount = static_cast<usize>(DNG_SOA_SHARD_COUNT);
 
         static_assert(kMagazineCapacity >= 1,   "SmallObjectAllocator TLS magazine capacity must be >= 1");
         static_assert(kDefaultBatch   >= 1,     "SmallObjectAllocator TLS batch count must be >= 1");
         static_assert(kDefaultBatch   <= kMagazineCapacity, "TLS batch count cannot exceed magazine capacity");
-        static_assert(kShardCount     >= 1,     "SmallObjectAllocator requires at least one shard");
-        static_assert((kShardCount & (kShardCount - 1)) == 0, "Shard count must be a power of two");
+        static_assert(kDefaultShardCount >= 1,  "SmallObjectAllocator requires at least one shard");
 
-        template<usize Count>
-        struct ShardBitHelper
-        {
-            static constexpr unsigned value = 1 + ShardBitHelper<Count / 2>::value;
-        };
-
-        template<>
-        struct ShardBitHelper<1>
-        {
-            static constexpr unsigned value = 0;
-        };
-
-        static constexpr unsigned kShardBits = ShardBitHelper<kShardCount>::value;
-        static constexpr std::uint64_t kShardHashMultiplier = 11400714819323198485ull; // Knuth golden ratio
+        static constexpr std::uint64_t kPointerShardHashSalt = 11400714819323198485ull; // Knuth golden ratio
         static constexpr std::int64_t  kFastRefillThresholdNs = 200'000;   // 0.2 ms
         static constexpr std::int64_t  kIdleDecayThresholdNs  = 5'000'000; // 5 ms
 
@@ -329,12 +329,6 @@ class SmallObjectAllocator final : public IAllocator
         static constexpr std::uint64_t kNoThreadOwner = TLSBins::kNoThreadOwner;
 #endif
 
-        struct Shard
-        {
-            FreeNode* FreeList = nullptr;
-            std::mutex Mutex;
-        };
-
         [[nodiscard]] static std::uint64_t ThreadFingerprint() noexcept
         {
 #if DNG_SMALLOBJ_TLS_BINS
@@ -347,23 +341,6 @@ class SmallObjectAllocator final : public IAllocator
             }();
             return value;
 #endif
-        }
-
-        [[nodiscard]] static usize SelectShard(std::uint64_t fingerprint) noexcept
-        {
-            if constexpr (kShardCount == 1)
-            {
-                (void)fingerprint;
-                return 0;
-            }
-            const std::uint64_t hash = fingerprint * kShardHashMultiplier;
-            const unsigned shift = 64u - kShardBits;
-            return static_cast<usize>(hash >> shift);
-        }
-
-        [[nodiscard]] static usize SelectShard() noexcept
-        {
-            return SelectShard(ThreadFingerprint());
         }
 
         static constexpr i32 ClassForSize(usize s) noexcept
@@ -382,6 +359,34 @@ class SmallObjectAllocator final : public IAllocator
             if (s <= 64)  return 16;
             if (s <= 128) return 16;
             return 16; // MVP: keep it simple; alignment is capped by class block layout
+        }
+
+        [[nodiscard]] static constexpr usize NextPowerOfTwo(usize value) noexcept
+        {
+            if (value <= 1)
+            {
+                return 1;
+            }
+
+            --value;
+            value |= value >> 1;
+            value |= value >> 2;
+            value |= value >> 4;
+            value |= value >> 8;
+            value |= value >> 16;
+#if UINTPTR_MAX > 0xFFFFFFFFu
+            value |= value >> 32;
+#endif
+            return value + 1;
+        }
+
+        [[nodiscard]] static constexpr usize NormalizeShardCount(usize requested) noexcept
+        {
+            if (requested == 0)
+            {
+                return 1;
+            }
+            return ::dng::core::IsPowerOfTwo(requested) ? requested : NextPowerOfTwo(requested);
         }
 
         // Internal per-block header to retrieve the owning slab on free().
@@ -409,16 +414,67 @@ class SmallObjectAllocator final : public IAllocator
             FreeNode* Next;
         };
 
+        struct Shard
+        {
+            std::mutex Mutex;
+            FreeNode* FreeLists[kNumClasses]{};
+        };
+
         struct Class
         {
             SlabHeader* Slabs = nullptr;
             mutable std::mutex SlabMutex;
-            std::array<Shard, kShardCount> Shards{};
 
             std::atomic<usize> SlabCount{ 0 };
             std::atomic<usize> FreeCount{ 0 };
             std::atomic<usize> CachedCount{ 0 };
         };
+
+        void InitShards(usize requestedCount) noexcept
+        {
+            const usize normalized = NormalizeShardCount(requestedCount);
+            auto* storage = new (std::nothrow) Shard[normalized];
+            DNG_CHECK(storage != nullptr && "SmallObjectAllocator::InitShards allocation failed");
+            mShardCount = normalized;
+            mShards.reset(storage);
+        }
+
+        [[nodiscard]] constexpr usize ShardMask() const noexcept
+        {
+            return mShardCount - 1;
+        }
+
+        [[nodiscard]] usize SelectShardIndexForPointer(const void* ptr) const noexcept
+        {
+            if (mShardCount == 1)
+            {
+                (void)ptr;
+                return 0;
+            }
+
+            const auto addr = static_cast<std::uintptr_t>(reinterpret_cast<std::uintptr_t>(ptr));
+            const std::uintptr_t mixed = addr >> 4;
+            const auto hashed = static_cast<usize>((mixed * kPointerShardHashSalt) & ShardMask());
+            return hashed;
+        }
+
+        [[nodiscard]] usize SelectShardIndexForThread() const noexcept
+        {
+            if (mShardCount == 1)
+            {
+                return 0;
+            }
+
+            const std::uint64_t fingerprint = ThreadFingerprint();
+            const auto hashed = static_cast<usize>((fingerprint * kPointerShardHashSalt) & ShardMask());
+            return hashed;
+        }
+
+        [[nodiscard]] Shard& ShardByIndex(usize index) const noexcept
+        {
+            DNG_ASSERT(index < mShardCount, "SmallObjectAllocator shard index out of range");
+            return mShards[index];
+        }
 
         IAllocator*       mParent;
         SmallObjectConfig mCfg;
@@ -426,12 +482,14 @@ class SmallObjectAllocator final : public IAllocator
         bool              mTLSBinsEnabled{ false };
 #endif
         usize             mBaseBatch{ kDefaultBatch };
+    usize             mShardCount{ 1 };
+    std::unique_ptr<Shard[]> mShards;
         Class             mClasses[kNumClasses]{};
         std::atomic<bool> mAlive{ true };
 
         // --- Helpers ---
 
-        ClassIndex SizeToClass(usize request) const noexcept
+        [[nodiscard]] ClassIndex SizeToClass(usize request) const noexcept
         {
             const i32 idx = ClassForSize(request);
             ClassIndex ci;
@@ -440,10 +498,10 @@ class SmallObjectAllocator final : public IAllocator
         }
 
         // Size of the metadata placed before the user memory
-        static constexpr usize BlockHeaderSize() noexcept { return sizeof(BlockHeader); }
+        [[nodiscard]] static constexpr usize BlockHeaderSize() noexcept { return sizeof(BlockHeader); }
 
         // Effective per-block payload size for a class (including header & padding to keep user aligned)
-        usize EffectiveUserBlockSize(i32 classIdx) const noexcept
+        [[nodiscard]] usize EffectiveUserBlockSize(i32 classIdx) const noexcept
         {
             const usize userMax = kClassSizes[(usize)classIdx];
             const usize natural = NaturalAlignFor(userMax);
@@ -457,7 +515,7 @@ class SmallObjectAllocator final : public IAllocator
             return padded;
         }
 
-        usize BlocksPerSlab(i32 classIdx) const noexcept
+        [[nodiscard]] usize BlocksPerSlab(i32 classIdx) const noexcept
         {
             const usize bsz = EffectiveUserBlockSize(classIdx);
             // Slab layout: [SlabHeader | padding-to-natural | blocks...]
@@ -467,12 +525,19 @@ class SmallObjectAllocator final : public IAllocator
         }
 
         // ---
-        // Purpose : Back new slab storage for the specified size-class and seed a shard.
-        // Contract: Caller must hold the shard mutex; this function serialises slab creation via SlabMutex.
-        // Notes   : On failure we honour ReturnNullOnOOM via HandleOutOfMemory().
+        // Purpose : Back new slab storage for the specified size-class and fan-out blocks across shards.
+        // Contract: Serialised via `Class::SlabMutex`. On failure the OOM policy is honoured.
+        // Notes   : Blocks are hashed by user-pointer to pick their shard, ensuring deterministic routing.
         // ---
-        bool AllocateSlabLocked(i32 ci, Class& klass, Shard& targetShard) noexcept
+        bool AllocateSlabForClass(i32 ci, Class& klass) noexcept
         {
+            struct BatchList
+            {
+                FreeNode* Head{ nullptr };
+                FreeNode* Tail{ nullptr };
+                usize Count{ 0 };
+            };
+
             std::scoped_lock slabGuard(klass.SlabMutex);
 
             u8* raw = static_cast<u8*>(mParent->Allocate(mCfg.SlabSizeBytes, alignof(std::max_align_t)));
@@ -493,8 +558,10 @@ class SmallObjectAllocator final : public IAllocator
             const usize blkSize = EffectiveUserBlockSize(ci);
             const usize count = (slab->End - slab->Begin) / blkSize;
 
+            std::vector<BatchList> batches(mShardCount);
+            usize totalEnqueued = 0;
+
             u8* cursor = slab->Begin;
-            FreeNode* headNew = nullptr;
             for (usize i = 0; i < count; ++i)
             {
                 auto* bh = reinterpret_cast<BlockHeader*>(cursor);
@@ -504,24 +571,40 @@ class SmallObjectAllocator final : public IAllocator
 #endif
 
                 auto* fn = reinterpret_cast<FreeNode*>(bh + 1);
-                fn->Next = headNew;
-                headNew = fn;
+                fn->Next = nullptr;
+
+                const usize shardIndex = SelectShardIndexForPointer(fn);
+                BatchList& bucket = batches[shardIndex];
+                if (!bucket.Head)
+                {
+                    bucket.Head = bucket.Tail = fn;
+                }
+                else
+                {
+                    bucket.Tail->Next = fn;
+                    bucket.Tail = fn;
+                }
+                ++bucket.Count;
+                ++totalEnqueued;
 
                 cursor += blkSize;
             }
 
-            if (headNew)
+            for (usize shardIdx = 0; shardIdx < mShardCount; ++shardIdx)
             {
-                FreeNode* tail = headNew;
-                while (tail->Next)
+                BatchList& bucket = batches[shardIdx];
+                if (!bucket.Head)
                 {
-                    tail = tail->Next;
+                    continue;
                 }
-                tail->Next = targetShard.FreeList;
-                targetShard.FreeList = headNew;
-                klass.FreeCount.fetch_add(count, std::memory_order_relaxed);
+
+                Shard& shard = ShardByIndex(shardIdx);
+                std::unique_lock<std::mutex> shardLock(shard.Mutex);
+                bucket.Tail->Next = shard.FreeLists[ci];
+                shard.FreeLists[ci] = bucket.Head;
             }
 
+            klass.FreeCount.fetch_add(totalEnqueued, std::memory_order_relaxed);
             klass.SlabCount.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
@@ -572,34 +655,47 @@ class SmallObjectAllocator final : public IAllocator
 
             const usize desiredCount = std::min(kMagazineCapacity, mag.Count + mag.Batch);
 
-            const usize shardIndex = SelectShard();
-            Shard& shard = C.Shards[shardIndex];
-            std::unique_lock<std::mutex> shardLock(shard.Mutex);
-
             usize pulled = 0;
+
             while (mag.Count < desiredCount)
             {
-                if (!shard.FreeList)
+                const usize startShard = SelectShardIndexForThread();
+                bool progress = false;
+
+                for (usize offset = 0; offset < mShardCount && mag.Count < desiredCount; ++offset)
                 {
-                    if (!AllocateSlabLocked(classIdx, C, shard))
+                    const usize shardIdx = (startShard + offset) & ShardMask();
+                    Shard& shard = ShardByIndex(shardIdx);
+                    std::unique_lock<std::mutex> shardLock(shard.Mutex);
+
+                    FreeNode*& freeList = shard.FreeLists[classIdx];
+                    while (freeList && mag.Count < desiredCount)
                     {
-                        break;
+                        FreeNode* node = freeList;
+                        freeList = node->Next;
+
+                        node->Next = mag.Head;
+                        mag.Head = node;
+                        ++mag.Count;
+                        ++pulled;
+                        progress = true;
                     }
-                    continue;
                 }
 
-                FreeNode* node = shard.FreeList;
-                shard.FreeList = node->Next;
-                C.FreeCount.fetch_sub(1, std::memory_order_relaxed);
+                if (progress)
+                {
+                    break;
+                }
 
-                node->Next = mag.Head;
-                mag.Head = node;
-                ++mag.Count;
-                ++pulled;
+                if (!AllocateSlabForClass(classIdx, C))
+                {
+                    break;
+                }
             }
 
             if (pulled > 0)
             {
+                C.FreeCount.fetch_sub(pulled, std::memory_order_relaxed);
                 C.CachedCount.fetch_add(pulled, std::memory_order_relaxed);
             }
 
@@ -626,33 +722,60 @@ class SmallObjectAllocator final : public IAllocator
             }
 
             Class& C = mClasses[classIdx];
-            const usize shardIndex = SelectShard();
-            Shard& shard = C.Shards[shardIndex];
-            std::unique_lock<std::mutex> shardLock(shard.Mutex);
+            struct BatchList
+            {
+                FreeNode* Head{ nullptr };
+                FreeNode* Tail{ nullptr };
+                usize Count{ 0 };
+            };
 
-            FreeNode* batchHead = mag.Head;
-            FreeNode* current = batchHead;
-            FreeNode* batchTail = nullptr;
+            std::vector<BatchList> batches(mShardCount);
+
+            FreeNode* current = mag.Head;
             for (usize i = 0; i < toRelease; ++i)
             {
                 DNG_CHECK(current != nullptr);
                 auto* header = reinterpret_cast<BlockHeader*>(current) - 1;
                 header->OwningThreadFingerprint = kNoThreadOwner;
-                batchTail = current;
-                current = current->Next;
+
+                FreeNode* next = current->Next;
+                current->Next = nullptr;
+
+                const usize shardIdx = SelectShardIndexForPointer(current);
+                BatchList& bucket = batches[shardIdx];
+                if (!bucket.Head)
+                {
+                    bucket.Head = bucket.Tail = current;
+                }
+                else
+                {
+                    bucket.Tail->Next = current;
+                    bucket.Tail = current;
+                }
+                ++bucket.Count;
+
+                current = next;
             }
 
-            FreeNode* remainingHead = current;
-            batchTail->Next = shard.FreeList;
-            shard.FreeList = batchHead;
+            for (usize shardIdx = 0; shardIdx < mShardCount; ++shardIdx)
+            {
+                BatchList& bucket = batches[shardIdx];
+                if (!bucket.Head)
+                {
+                    continue;
+                }
 
-            shardLock.unlock();
+                Shard& shard = ShardByIndex(shardIdx);
+                std::unique_lock<std::mutex> shardLock(shard.Mutex);
+                bucket.Tail->Next = shard.FreeLists[classIdx];
+                shard.FreeLists[classIdx] = bucket.Head;
+            }
 
             C.FreeCount.fetch_add(toRelease, std::memory_order_relaxed);
             const usize prevCache = C.CachedCount.fetch_sub(toRelease, std::memory_order_relaxed);
             DNG_CHECK(prevCache >= toRelease);
 
-            mag.Head = remainingHead;
+            mag.Head = current;
             mag.Count -= toRelease;
 
             if (mag.Count == 0 || !mag.Head)
@@ -762,31 +885,42 @@ class SmallObjectAllocator final : public IAllocator
             (void)requestSize;
             const i32 idx = ci.Index;
             Class& C = mClasses[idx];
-            const usize shardIndex = SelectShard();
-            Shard& shard = C.Shards[shardIndex];
-            std::unique_lock<std::mutex> shardLock(shard.Mutex);
 
-            while (!shard.FreeList)
+            while (true)
             {
-                if (!AllocateSlabLocked(idx, C, shard))
+                const usize startShard = SelectShardIndexForThread();
+                for (usize offset = 0; offset < mShardCount; ++offset)
                 {
+                    const usize shardIdx = (startShard + offset) & ShardMask();
+                    Shard& shard = ShardByIndex(shardIdx);
+                    std::unique_lock<std::mutex> shardLock(shard.Mutex);
+
+                    FreeNode*& freeList = shard.FreeLists[idx];
+                    if (!freeList)
+                    {
+                        continue;
+                    }
+
+                    FreeNode* node = freeList;
+                    freeList = node->Next;
                     shardLock.unlock();
+
+                    const usize prevFree = C.FreeCount.fetch_sub(1, std::memory_order_relaxed);
+                    DNG_CHECK(prevFree > 0);
+
+                    DNG_ASSERT(IsAligned(node, alignment), "SmallObjectAllocator returned misaligned pointer");
+#if DNG_SMALLOBJ_TLS_BINS
+                    auto* header = reinterpret_cast<BlockHeader*>(node) - 1;
+                    header->OwningThreadFingerprint = kNoThreadOwner;
+#endif
+                    return static_cast<void*>(node);
+                }
+
+                if (!AllocateSlabForClass(idx, C))
+                {
                     return nullptr;
                 }
             }
-
-            FreeNode* node = shard.FreeList;
-            shard.FreeList = node->Next;
-            const usize prevFree = C.FreeCount.fetch_sub(1, std::memory_order_relaxed);
-            DNG_CHECK(prevFree > 0);
-            shardLock.unlock();
-
-            DNG_ASSERT(IsAligned(node, alignment), "SmallObjectAllocator returned misaligned pointer");
-#if DNG_SMALLOBJ_TLS_BINS
-            auto* header = reinterpret_cast<BlockHeader*>(node) - 1;
-            header->OwningThreadFingerprint = kNoThreadOwner;
-#endif
-            return static_cast<void*>(node);
         }
 
     // ---
@@ -798,21 +932,15 @@ class SmallObjectAllocator final : public IAllocator
 #if DNG_SMALLOBJ_TLS_BINS
             auto* header = reinterpret_cast<BlockHeader*>(node) - 1;
             header->OwningThreadFingerprint = kNoThreadOwner;
-            const std::uint64_t hint = (fingerprintHint == kNoThreadOwner)
-                ? ThreadFingerprint()
-                : fingerprintHint;
-#else
-            const std::uint64_t hint = (fingerprintHint == 0ull)
-                ? ThreadFingerprint()
-                : fingerprintHint;
 #endif
+            (void)fingerprintHint;
             Class& C = mClasses[classIdx];
-            const usize shardIndex = SelectShard(hint);
-            Shard& shard = C.Shards[shardIndex];
+            const usize shardIndex = SelectShardIndexForPointer(node);
+            Shard& shard = ShardByIndex(shardIndex);
             std::unique_lock<std::mutex> shardLock(shard.Mutex);
 
-            node->Next = shard.FreeList;
-            shard.FreeList = node;
+            node->Next = shard.FreeLists[classIdx];
+            shard.FreeLists[classIdx] = node;
 
             shardLock.unlock();
 
@@ -884,20 +1012,32 @@ class SmallObjectAllocator final : public IAllocator
             }
         }
 #if !DNG_SMALLOBJ_TLS_BINS
-        struct SmallObjectAllocatorNoTLSLayout
+        struct SmallObjectAllocatorNoTLSLayout : IAllocator
         {
             IAllocator*       Parent;
             SmallObjectConfig Config;
             usize             BaseBatch;
+            usize             ShardCount;
+            std::unique_ptr<Shard[]> Shards;
             Class             Classes[kNumClasses];
             std::atomic<bool> Alive;
         };
 
-        static_assert(sizeof(SmallObjectAllocatorNoTLSLayout) == sizeof(SmallObjectAllocator),
-            "SmallObjectAllocator ABI changed when TLS bins disabled.");
-        static_assert(alignof(SmallObjectAllocatorNoTLSLayout) == alignof(SmallObjectAllocator),
-            "SmallObjectAllocator alignment changed when TLS bins disabled.");
+    public:
+        // Purpose : Snapshot the allocator footprint when TLS bins are compiled out.
+        // Contract: constexpr audit hooks; do not persist or depend on at runtime.
+        // Notes   : Exists solely to back the compile-time static_asserts below; no hidden work.
+        static constexpr std::size_t kNoTLSSize = sizeof(SmallObjectAllocatorNoTLSLayout);
+        static constexpr std::size_t kNoTLSAlignment = alignof(SmallObjectAllocatorNoTLSLayout);
+    private:
 #endif
     };
 
 } // namespace dng::core
+
+#if !DNG_SMALLOBJ_TLS_BINS
+static_assert(::dng::core::SmallObjectAllocator::kNoTLSSize == sizeof(::dng::core::SmallObjectAllocator),
+    "SmallObjectAllocator ABI changed when TLS bins disabled.");
+static_assert(::dng::core::SmallObjectAllocator::kNoTLSAlignment == alignof(::dng::core::SmallObjectAllocator),
+    "SmallObjectAllocator alignment changed when TLS bins disabled.");
+#endif

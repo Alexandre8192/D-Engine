@@ -24,8 +24,11 @@
 
 #include <array>
 #include <atomic>
+#if DNG_MEM_TRACKING
+// Design Note: unordered_map + mutex remain behind DNG_MEM_TRACKING to keep stats-only builds lean.
 #include <mutex>
 #include <unordered_map>
+#endif
 #include <memory>
 #include <cstring>   // std::memset
 #include <cstddef>   // std::max_align_t
