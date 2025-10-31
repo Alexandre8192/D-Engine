@@ -19,6 +19,10 @@
 #include "Core/Diagnostics/Check.hpp"
 #include "Core/Logger.hpp" // DNG_LOG_*
 
+#ifndef DNG_LOGCAT_ALIGNMENT
+#define DNG_LOGCAT_ALIGNMENT "Memory.Alignment"
+#endif
+
 namespace dng::core
 {
     // Prefer an unsigned integral for sizes/alignments.
@@ -196,7 +200,10 @@ namespace dng::core
             AlignUp<std::uintptr_t>(p, alignment));
         if (aligned != p)
         {
-            DNG_LOG_INFO("Alignment", "AlignUp adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
+            if (Logger::IsEnabled(LogLevel::Info, DNG_LOGCAT_ALIGNMENT))
+            {
+                DNG_LOG_INFO(DNG_LOGCAT_ALIGNMENT, "AlignUp adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
+            }
         }
         return reinterpret_cast<void*>(aligned);
     }
@@ -213,7 +220,10 @@ namespace dng::core
             AlignDown<std::uintptr_t>(p, alignment));
         if (aligned != p)
         {
-            DNG_LOG_INFO("Alignment", "AlignDown adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
+            if (Logger::IsEnabled(LogLevel::Info, DNG_LOGCAT_ALIGNMENT))
+            {
+                DNG_LOG_INFO(DNG_LOGCAT_ALIGNMENT, "AlignDown adjusted pointer {} -> {} (align={})", (void*)p, (void*)aligned, (size_t)NormalizeAlignment(alignment));
+            }
         }
         return reinterpret_cast<void*>(aligned);
     }
@@ -267,7 +277,10 @@ namespace dng::core
         const bool ok = IsAligned<std::uintptr_t>(p, alignment);
         if (!ok)
         {
-            DNG_LOG_WARNING("Alignment", "Pointer {} is NOT aligned to {}", ptr, (size_t)NormalizeAlignment(alignment));
+            if (Logger::IsEnabled(LogLevel::Warn, DNG_LOGCAT_ALIGNMENT))
+            {
+                DNG_LOG_WARNING(DNG_LOGCAT_ALIGNMENT, "Pointer {} is NOT aligned to {}", ptr, (size_t)NormalizeAlignment(alignment));
+            }
         }
         return ok;
     }

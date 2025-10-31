@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "Core/Memory/MemMacros.hpp"
@@ -209,6 +210,7 @@ static_assert((DNG_SOALLOC_BATCH) >= 1, "SmallObject batch must be >= 1");
 // ============================================================================
 namespace dng::core
 {
+    void SetFatalOnOOMPolicy(bool fatal) noexcept;
 #if !defined(DNG_CORE_MEMORYCONFIG_CONSTANTS_DEFINED)
 #define DNG_CORE_MEMORYCONFIG_CONSTANTS_DEFINED
     // clang-format off
@@ -254,8 +256,8 @@ namespace dng::core
 
         // Purpose : Optional runtime override for tracking sampling (0 preserves env/macro defaults).
         // Contract: Value sanitized to >=1 during MemorySystem::Init; API overrides win over env, which win over macros.
-    // Notes   : Release builds typically leave this at 0 and rely on compile-time defaults to avoid redundant config.
-    //           Values greater than 1 currently fall back to 1 with a warning until sampling support lands.
+        // Notes   : Release builds typically leave this at 0 and rely on compile-time defaults to avoid redundant config.
+        //           Values greater than 1 currently fall back to 1 with a warning until sampling support lands.
         std::uint32_t tracking_sampling_rate = 0;
 
         // Purpose : Optional runtime override for tracking allocator shard count (0 preserves env/macro defaults).
@@ -267,6 +269,14 @@ namespace dng::core
         // Contract: Clamped to [1, DNG_SOA_TLS_MAG_CAPACITY]; precedence mirrors other knobs.
         // Notes   : Helps tune hot-path refill behaviour without rebuilding.
         std::uint32_t small_object_batch = 0;
+
+        // Purpose : Configure the optional per-thread frame allocator used by MemorySystem::GetThreadFrameAllocator().
+        // Contract: `thread_frame_allocator_bytes == 0` disables provisioning; MemorySystem normalizes alignment during Init().
+        // Notes   : Poison toggles apply only when the allocator is active; DebugPoisonByte mirrors FrameAllocatorConfig defaults.
+        std::size_t thread_frame_allocator_bytes = 0;
+        bool thread_frame_return_null = true;
+        bool thread_frame_poison_on_reset = false;
+        std::uint8_t thread_frame_poison_value = 0xDD;
 
         // Purpose : Allow callers to suppress expensive stack collection even when full tracking is compiled in.
         // Contract: When false, TrackingAllocator skips map bookkeeping and only maintains counters.
@@ -317,6 +327,7 @@ namespace dng::core
             if constexpr (CompiledFatalOnOOM())
             {
                 fatal_on_oom = v;
+                SetFatalOnOOMPolicy(v);
             }
             else
             {
@@ -418,6 +429,38 @@ namespace dng::core
             (void)v;
             DNG_LOG_WARNING("Memory", "[no-op] SmallObject TLS bins compiled out (DNG_SMALLOBJ_TLS_BINS=0).");
 #endif
+        }
+
+        void SetThreadFrameAllocatorBytes(std::size_t bytes) noexcept
+        {
+            // Purpose : Record requested backing-store capacity for per-thread frame allocators.
+            // Contract: Value is normalized during MemorySystem::Init; zero disables provisioning.
+            // Notes   : Stored raw to keep this header dependency-light; alignment handled later.
+            thread_frame_allocator_bytes = bytes;
+        }
+
+        void SetThreadFrameReturnNull(bool v) noexcept
+        {
+            // Purpose : Toggle soft-OOM behaviour for thread frame allocators.
+            // Contract: When true, FrameAllocator::Allocate may yield nullptr; when false, OOM escalates via DNG_MEM_CHECK_OOM.
+            // Notes   : Mirrors FrameAllocatorConfig::bReturnNullOnOOM; applied during MemorySystem::Init.
+            thread_frame_return_null = v;
+        }
+
+        void SetThreadFramePoisonOnReset(bool v) noexcept
+        {
+            // Purpose : Enable debug poison fills when frame allocators Reset()/Rewind().
+            // Contract: Extra cost applies only when the allocator is provisioned; respected by FrameScope lifetimes.
+            // Notes   : Defaults off to preserve release performance; ideal for deterministic QA captures.
+            thread_frame_poison_on_reset = v;
+        }
+
+        void SetThreadFramePoisonValue(std::uint8_t value) noexcept
+        {
+            // Purpose : Choose the debug fill byte used when poison-on-reset is active.
+            // Contract: Value stored verbatim; caller ensures semantic meaning (0xDD, 0xFE, etc.).
+            // Notes   : Applied to FrameAllocatorConfig::DebugPoisonByte during MemorySystem initialization.
+            thread_frame_poison_value = value;
         }
     };
 

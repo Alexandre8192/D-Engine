@@ -50,6 +50,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp" />
+    <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp" />
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp" />
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
     <ClCompile Include="tests\Test_GlobalNewDelete_BuildOnly.cpp" />

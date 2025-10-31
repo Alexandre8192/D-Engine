@@ -8,12 +8,14 @@
 //           they neither allocate nor throw and terminate deterministically
 //           according to configuration.
 // Notes   : Functions are inline to keep header self-contained; logging macros
-//           are stubbed if the logger subsystem is not yet initialized.
+//           are stubbed if the logger subsystem is not yet initialized. The
+//           runtime policy flag is updated by MemorySystem via SetFatalOnOOMPolicy.
+//           No hidden allocations occur; soft OOM escalation to std::bad_alloc
+//           remains confined to the global new/delete bridge.
 // ============================================================================
-#include "Core/Types.hpp"      // usize, fundamental aliases
-#include "Core/Logger.hpp"     // logging interfaces/macros
-#include "Core/Memory/MemoryConfig.hpp" // compile-time defaults + runtime cfg
-#include <cstdlib>          // std::abort
+#include <atomic>
+#include <cstddef>
+#include <cstdlib>
 
 // Minimal logging fallbacks (allow usage before logger is included)
 #ifndef DNG_LOG_FATAL
@@ -23,21 +25,63 @@
 #define DNG_LOG_ERROR(category, fmt, ...) ((void)0)
 #endif
 
-namespace dng::core {
+#ifndef DNG_MEM_LOG_CATEGORY
+#define DNG_MEM_LOG_CATEGORY "Memory" // Purpose : Default core memory logging category when callers omit an override.
+#endif
+
+namespace dng {
+namespace core {
+
+#ifndef DNG_MEM_FATAL_ON_OOM
+#define DNG_MEM_FATAL_ON_OOM 0
+#endif
+
+    namespace detail
+    {
+        [[nodiscard]] inline std::atomic<bool>& FatalPolicyFlag() noexcept
+        {
+            static std::atomic<bool> policy{ DNG_MEM_FATAL_ON_OOM != 0 };
+            return policy;
+        }
+    }
 
     // Runtime policy takes precedence when available; falls back to compile-time gate.
     // ---
     // Purpose : Determine whether the current OOM policy requires termination.
-    // Contract: Reads compile-time flag and optional runtime config; never allocates.
-    // Notes   : constexpr-friendly to allow compile-time evaluation in static paths.
+    // Contract: Reads runtime configuration (falls back to compile-time default);
+    //           no allocation, no logging. Result is stable until policy changes
+    //           through `SetFatalOnOOMPolicy`.
+    // Notes   : `true` => Hard/OOM: abort immediately. `false` => Soft/OOM: caller
+    //           observes nullptr (only global new/delete translate it to
+    //           std::bad_alloc).
     // ---
-    inline bool ShouldFatalOnOOM() noexcept {
-        if constexpr (CompiledFatalOnOOM()) {
-            return MemoryConfig::GetGlobal().fatal_on_oom;
-        }
-        else {
-            return CompiledFatalOnOOM();
-        }
+    [[nodiscard]] inline bool ShouldFatalOnOOM() noexcept
+    {
+        return detail::FatalPolicyFlag().load(std::memory_order_relaxed);
+    }
+
+    // ---
+    // Purpose : Convenience helper for Soft/OOM sites (non-terminating).
+    // Contract: Pure wrapper around `ShouldFatalOnOOM()`; provided to clarify
+    //           intent at call sites without duplicating the negation logic.
+    // Notes   : Only global new/delete may escalate Soft/OOM to std::bad_alloc.
+    // ---
+    [[nodiscard]] inline bool ShouldSurfaceBadAlloc() noexcept
+    {
+        return !ShouldFatalOnOOM();
+    }
+
+    // ---
+    // Purpose : Update the runtime OOM disposition (Hard abort vs Soft/nullptr).
+    // Contract: Callable from any thread; MemorySystem invokes it after resolving
+    //           configuration. Changes take effect immediately for subsequent
+    //           allocations. Remains noexcept and lock-free.
+    // Notes   : Tests may toggle this directly; production code should go through
+    //           MemoryConfig APIs.
+    // ---
+    inline void SetFatalOnOOMPolicy(bool fatal) noexcept
+    {
+        detail::FatalPolicyFlag().store(fatal, std::memory_order_relaxed);
     }
 
     // ---
@@ -45,7 +89,7 @@ namespace dng::core {
     // Contract: Never returns; safe to call with null `where`; uses std::abort for termination.
     // Notes   : Logging category defined via DNG_MEM_LOG_CATEGORY and may be a stub early in startup.
     // ---
-    [[noreturn]] inline void FatalOOM(usize size, usize align,
+    [[noreturn]] inline void FatalOOM(std::size_t size, std::size_t align,
         const char* where,
         const char* file, int line) noexcept
     {
@@ -63,7 +107,7 @@ namespace dng::core {
     // Contract: Logs at error severity when verbosity threshold permits; does not throw.
     // Notes   : All parameters preserved for diagnostics even when logging disabled.
     // ---
-    inline void ReportOOM(usize size, usize align,
+    inline void ReportOOM(std::size_t size, std::size_t align,
         const char* where,
         const char* file, int line) noexcept
     {
@@ -82,7 +126,7 @@ namespace dng::core {
     // Contract: Strongly noexcept; `where` may be null; never reallocates.
     // Notes   : Central entry used by the DNG_MEM_CHECK_OOM macro.
     // ---
-    inline void OnAllocFailure(usize size, usize align,
+    inline void OnAllocFailure(std::size_t size, std::size_t align,
         const char* where, const char* file, int line) noexcept
     {
         if (ShouldFatalOnOOM()) {
@@ -94,7 +138,8 @@ namespace dng::core {
         }
     }
 
-} // namespace dng::core
+} // namespace core
+} // namespace dng
 
 // ---
 // Purpose : Convenience macro for invoking OOM policy after allocation failure.

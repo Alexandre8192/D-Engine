@@ -17,6 +17,7 @@
 // ============================================================================
 
 #include "Core/Diagnostics/Check.hpp"
+#include "Core/Logger.hpp"
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/Alignment.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
@@ -111,7 +112,9 @@ namespace dng::core {
 
             const usize offset = static_cast<usize>(alignedStart - rawStart);
             if (offset >= m_bufferSize) {
-                DNG_LOG_WARNING("Memory", "PoolAllocator: buffer too small after alignment adjustment.");
+                if (Logger::IsEnabled(LogLevel::Warn, "Memory")) {
+                    DNG_LOG_WARNING("Memory", "PoolAllocator: buffer too small after alignment adjustment.");
+                }
                 m_blockCount = 0;
                 m_capacity = 0;
                 return;
@@ -127,7 +130,9 @@ namespace dng::core {
             }
 
             if (previousCount != 0 && possibleCount < previousCount) {
-                DNG_LOG_WARNING("Memory", "PoolAllocator: reduced block count from {} to {} due to alignment slack.", previousCount, possibleCount);
+                if (Logger::IsEnabled(LogLevel::Warn, "Memory")) {
+                    DNG_LOG_WARNING("Memory", "PoolAllocator: reduced block count from {} to {} due to alignment slack.", previousCount, possibleCount);
+                }
             }
 
             m_blockCount = (previousCount == 0) ? possibleCount : ((possibleCount < previousCount) ? possibleCount : previousCount);
@@ -195,7 +200,9 @@ namespace dng::core {
             m_stride = ComputeStride(blockSize, m_blockAlign);
 
             if (!buffer || bufferSize < m_stride) {
-                DNG_LOG_ERROR("Memory", "PoolAllocator: invalid external buffer or too small.");
+                if (Logger::IsEnabled(LogLevel::Error, "Memory")) {
+                    DNG_LOG_ERROR("Memory", "PoolAllocator: invalid external buffer or too small.");
+                }
                 return false;
             }
 

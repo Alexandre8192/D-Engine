@@ -103,24 +103,26 @@ namespace dng::core {
 
             alignment = NormalizeAlignment(alignment);
 
-            // Compute aligned pointer from current bump
-            u8* current = mPtr;
-            const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(current);
-            const std::uintptr_t mis = p % alignment;
-            const usize padding = mis ? (alignment - static_cast<usize>(mis)) : 0u;
+            const std::uintptr_t currentAddr = reinterpret_cast<std::uintptr_t>(mPtr);
+            const std::uintptr_t alignedAddr = AlignUp<std::uintptr_t>(currentAddr, alignment);
+            const usize padding = static_cast<usize>(alignedAddr - currentAddr);
+            const usize remaining = static_cast<usize>(mEnd - mPtr);
 
-            u8* aligned = nullptr;
-            if (mPtr + padding + size <= mEnd) {
-                aligned = mPtr + padding;
-                mPtr = aligned + size; // bump
-            } else if (mConfig.bReturnNullOnOOM) {
-                DNG_LOG_WARNING("Memory", "FrameAllocator OOM: requested {} bytes (align {}), used={}, cap={}",
-                    static_cast<size_t>(size), static_cast<size_t>(alignment),
-                    static_cast<size_t>(GetUsed()), static_cast<size_t>(GetCapacity()));
-            } else {
+            if ((padding > remaining) || (size > (remaining - padding))) {
+                if (mConfig.bReturnNullOnOOM) {
+                    if (Logger::IsEnabled(LogLevel::Warn, "Memory")) {
+                        DNG_LOG_WARNING("Memory", "FrameAllocator OOM: requested {} bytes (align {}), used={}, cap={}",
+                            static_cast<size_t>(size), static_cast<size_t>(alignment),
+                            static_cast<size_t>(GetUsed()), static_cast<size_t>(GetCapacity()));
+                    }
+                    return nullptr;
+                }
                 DNG_MEM_CHECK_OOM(size, alignment, "FrameAllocator::Allocate");
+                return nullptr;
             }
 
+            u8* aligned = reinterpret_cast<u8*>(alignedAddr);
+            mPtr = aligned + size;
             return aligned;
         }
 

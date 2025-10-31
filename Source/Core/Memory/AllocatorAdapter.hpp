@@ -2,31 +2,27 @@
 // ============================================================================
 // D-Engine - Core/Memory/AllocatorAdapter.hpp
 // ----------------------------------------------------------------------------
-// Purpose : Provide a standard-library compatible allocator that forwards all
-//           storage requests to the engine's AllocatorRef abstraction so STL
-//           containers can participate in the memory tracking/guarding layer.
-// Contract: Header-only, no hidden globals, and safe to include from any TU.
-//           The adapter requires MemorySystem::Init() (or an explicit
-//           AllocatorRef) before the first allocation. All allocations honour
-//           NormalizeAlignment and propagate the exact (size, alignment) pair
-//           back to the originating allocator on deallocate.
-// Notes   : This adapter intentionally stores AllocatorRef by value, keeping
-//           the allocator choice deterministic for each container instance.
-//           Adapted containers remain thread-safe exactly to the extent the
-//           underlying allocator is thread-safe. Metadata allocations use the
-//           engine's own allocators; no STL heap usage occurs here.
+// Purpose : Publish a deterministic STL allocator/view over AllocatorRef so
+//           standard containers honour the engine's tracking, alignment, and
+//           OOM policies without introducing hidden costs.
+// Contract: Header-only, self-contained, no RTTI or exceptions. All allocation
+//           paths normalise alignment via NormalizeAlignment, verify tuples
+//           with compile-time guards, and fail through DNG_MEM_CHECK_OOM +
+//           std::terminate. Requires MemorySystem::Init() or an explicit
+//           AllocatorRef prior to first allocation.
+// Notes   : The adapter stays POD so it can be copied by value, keeps allocator
+//           selection per-container, and only touches std::pmr internally when
+//           platform containers demand polymorphic resources.
 // ============================================================================
 
 #include <cstddef>
-#include <cstdint>
 #include <exception>
 #include <limits>
-#include <new>
 #include <type_traits>
 
 #include "Core/Diagnostics/Check.hpp"
-#include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/Alignment.hpp"
+#include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/MemorySystem.hpp"
 #include "Core/Memory/OOM.hpp"
 
@@ -34,26 +30,36 @@ namespace dng
 {
 namespace core
 {
-    class AllocatorRef;
+    namespace detail
+    {
+        template <class T>
+        struct AllocatorAdapterStaticChecks
+        {
+            static constexpr std::size_t kNativeAlignment = static_cast<std::size_t>(alignof(T));
+            static constexpr std::size_t kValueSize = static_cast<std::size_t>(sizeof(T));
+            static constexpr std::size_t kAlignedSize = AlignUp(kValueSize, kNativeAlignment);
+
+            static_assert(kValueSize > 0, "AllocatorAdapter requires a complete value_type");
+            static_assert(IsPowerOfTwo(kNativeAlignment), "value_type alignment must be power-of-two");
+            static_assert(kAlignedSize >= kValueSize, "AlignUp must never shrink the allocation footprint");
+        };
+    } // namespace detail
 
     // -------------------------------------------------------------------------
     // AllocatorAdapter
     // -------------------------------------------------------------------------
-    // Purpose : STL allocator bridge that routes allocations through
-    //           dng::core::AllocatorRef, defaulting to the engine default
-    //           allocator when no explicit reference is supplied.
-    // Contract: Follows the C++23 Allocator named requirements. Allocation
-    //           failures honour the engine OOM policy and terminate when the
-    //           policy is fatal. deallocate() is noexcept. Propagation traits
-    //           favour move/swap.
-    // Notes   : Containers copy-constructed from adapters inherit the same
-    //           allocator reference. ResolveAllocator() performs lazy binding
-    //           to avoid touching MemorySystem when the user passes an explicit
-    //           AllocatorRef.
+    // Purpose : STL-compatible allocator that forwards to AllocatorRef without
+    //           adding behavioural surprises or secondary allocations.
+    // Contract: Meets C++23 Allocator named requirements. All observable state
+    //           is trivial; allocation failure terminates via engine OOM policy.
+    // Notes   : Lazy binds to MemorySystem default allocator only when needed,
+    //           preserving deterministic ownership of explicit AllocatorRefs.
     // -------------------------------------------------------------------------
     template <class T>
-    class AllocatorAdapter
+    class AllocatorAdapter final
     {
+        using StaticChecks = detail::AllocatorAdapterStaticChecks<T>;
+
     public:
         using value_type = T;
         using size_type = std::size_t;
@@ -65,43 +71,35 @@ namespace core
 
         template <class U> friend class AllocatorAdapter;
 
-        // ---
-        // Purpose : Default-construct without an allocator binding.
-        // Contract: Caller must ensure MemorySystem::Init() before first
-        //           allocation so ResolveAllocator() can bind lazily.
-        // Notes   : Keeping the ctor trivial preserves aggregate friendliness.
-        // ---
+        // Purpose : Default to an unbound adapter; binds lazily on first use.
+        // Contract: Caller guarantees MemorySystem::Init() before any hot-path
+        //           allocation; otherwise allocate() terminates deterministically.
+        // Notes   : constexpr default keeps the adapter usable in globals.
         constexpr AllocatorAdapter() noexcept = default;
 
-        // ---
-        // Purpose : Bind adapter to a specific AllocatorRef supplied by caller.
-        // Contract: The referenced allocator must outlive the adapter.
-        // Notes   : Useful for containers backed by arenas or scoped allocators.
-        // ---
-    explicit constexpr AllocatorAdapter(AllocatorRef ref) noexcept
+        // Purpose : Bind the adapter to a specific allocator supplied by caller.
+        // Contract: Referenced allocator must outlive this adapter; pointer is
+        //           copied by value with no ownership transfer.
+        // Notes   : Explicit to avoid implicit conversions from unrelated types.
+        explicit constexpr AllocatorAdapter(AllocatorRef ref) noexcept
             : mAllocator(ref)
         {
         }
 
-        // ---
-        // Purpose : Allow rebinding from AllocatorAdapter<U> as per STL rules.
-        // Contract: Relies on the source adapter exposing GetAllocatorRef().
-        // Notes   : Copying the raw AllocatorRef keeps ownership semantics.
-        // ---
+        // Purpose : Rebind across value_types as mandated by allocator_traits.
+        // Contract: Copies the underlying AllocatorRef so containers share the
+        //           exact same allocation context.
+        // Notes   : constexpr to keep rebinding viable in compile-time contexts.
         template <class U>
         constexpr AllocatorAdapter(const AllocatorAdapter<U>& other) noexcept
             : mAllocator(other.GetAllocatorRef())
         {
         }
 
-        // ---
-        // Purpose : Allocate storage for `count` objects of type T.
-        // Contract: Throws std::bad_alloc on failure unless FatalOnOOM is
-        //           enabled (in which case the process terminates). A count of 0
-        //           still returns a non-null sentinel pointer per the standard.
-        // Notes   : Overflow is guarded explicitly to retain deterministic
-        //           behaviour even for adversarial counts.
-        // ---
+        // Purpose : Acquire storage for `count` objects of value_type.
+        // Contract: `count` may be zero (returns sentinel); overflow checked via
+        //           max_size(); failure routes through HandleAllocationFailure.
+        // Notes   : No throws; AlignUp already validated by static checks.
         [[nodiscard]] value_type* allocate(size_type count)
         {
             if (count == 0)
@@ -109,16 +107,18 @@ namespace core
                 return ZeroSizeSentinel();
             }
 
-            constexpr size_type kElementSize = static_cast<size_type>(sizeof(value_type));
-            if (count > (std::numeric_limits<size_type>::max)() / kElementSize)
+            constexpr size_type kElementSize = StaticChecks::kValueSize;
+            const size_type maxCount = max_size();
+            if (count > maxCount)
             {
-                HandleAllocationFailure((std::numeric_limits<std::size_t>::max)(),
-                    alignof(value_type),
+                const std::size_t normalized = NormalizeAlignment(StaticChecks::kNativeAlignment);
+                HandleAllocationFailure(static_cast<std::size_t>(count) * kElementSize,
+                    normalized,
                     "AllocatorAdapter::allocate overflow");
             }
 
-            const size_type totalBytes = count * kElementSize;
-            const std::size_t alignment = NormalizeAlignment(static_cast<std::size_t>(alignof(value_type)));
+            const std::size_t totalBytes = static_cast<std::size_t>(count) * kElementSize;
+            const std::size_t alignment = NormalizeAlignment(StaticChecks::kNativeAlignment);
 
             AllocatorRef alloc = ResolveAllocator();
             if (!alloc.IsValid())
@@ -127,7 +127,7 @@ namespace core
                 HandleAllocationFailure(totalBytes, alignment, "AllocatorAdapter::allocate (unbound)");
             }
 
-            void* memory = alloc.AllocateBytes(static_cast<std::size_t>(totalBytes), static_cast<std::size_t>(alignment));
+            void* memory = alloc.AllocateBytes(totalBytes, alignment);
             if (!memory)
             {
                 HandleAllocationFailure(totalBytes, alignment, "AllocatorAdapter::allocate");
@@ -136,27 +136,18 @@ namespace core
             return static_cast<value_type*>(memory);
         }
 
-        // ---
-        // Purpose : Return storage obtained via allocate().
-        // Contract: `ptr` may be null (no-op). The `count` must be identical to
-        //           the value passed to allocate().
-        // Notes   : The adapter tolerates late binding, but we assert in debug
-        //           builds if the allocator is still null to aid debugging.
-        // ---
+        // Purpose : Release storage acquired via allocate().
+        // Contract: `ptr` may be null (no-op); `count` must match allocation.
+        // Notes   : Defensive DNG_CHECK retains diagnostics when allocator stays unbound.
         void deallocate(value_type* ptr, size_type count) noexcept
         {
-            if (!ptr)
+            if (!ptr || count == 0)
             {
                 return;
             }
 
-            if (count == 0)
-            {
-                return;
-            }
-
-            const std::size_t alignment = NormalizeAlignment(static_cast<std::size_t>(alignof(value_type)));
-            const std::size_t totalBytes = count * static_cast<size_type>(sizeof(value_type));
+            const std::size_t alignment = NormalizeAlignment(StaticChecks::kNativeAlignment);
+            const std::size_t totalBytes = static_cast<std::size_t>(count) * StaticChecks::kValueSize;
 
             AllocatorRef alloc = ResolveAllocator();
             DNG_CHECK(alloc.IsValid() && "AllocatorAdapter::deallocate called without a bound allocator");
@@ -165,38 +156,30 @@ namespace core
                 return;
             }
 
-            alloc.DeallocateBytes(static_cast<void*>(ptr), static_cast<std::size_t>(totalBytes), static_cast<std::size_t>(alignment));
+            alloc.DeallocateBytes(static_cast<void*>(ptr), totalBytes, alignment);
         }
 
-        // ---
-        // Purpose : Preserve allocator selection on container copy construction.
-        // Contract: allocator_traits uses this hook when select_on_container_copy_construction
-        //           is true. Returning *this keeps per-instance bindings consistent.
-        // Notes   : Copy-constructed containers remain attached to the same allocator.
-        // ---
-        [[nodiscard]] AllocatorAdapter select_on_container_copy_construction() const noexcept
+        // Purpose : Preserve allocator instance on copy-construction of containers.
+        // Contract: allocator_traits calls this hook per standard requirements.
+        // Notes   : constexpr copy keeps the adapter trivially copyable.
+        [[nodiscard]] constexpr AllocatorAdapter select_on_container_copy_construction() const noexcept
         {
             return *this;
         }
 
-        // ---
-        // Purpose : Report the theoretical maximum number of elements this adaptor can manage.
-        // Contract: Matches the allocator named requirements; value is conservative and safe.
-        // Notes   : Useful for legacy code that queries allocator capacity prior to operations.
-        // ---
+        // Purpose : Report conservative upper bound on element count.
+        // Contract: Uses `sizeof(value_type)`; returns 0 when sizeof==0 (defensive only).
+        // Notes   : constexpr so allocator_traits can reason at compile time.
         [[nodiscard]] constexpr size_type max_size() const noexcept
         {
-            const size_type elementSize = static_cast<size_type>(sizeof(value_type));
-            return elementSize == 0 ? size_type(0) : (std::numeric_limits<size_type>::max)() / elementSize;
+            const size_type elementSize = StaticChecks::kValueSize;
+            return elementSize == 0 ? size_type{ 0 } : (std::numeric_limits<size_type>::max)() / elementSize;
         }
 
-        // ---
-        // Purpose : Expose underlying allocator reference for diagnostics.
-        // Contract: Returned AllocatorRef is a copy; modifying it does not
-        //           mutate the adapter.
-        // Notes   : Containers internally rely on this for propagate traits.
-        // ---
-    [[nodiscard]] constexpr AllocatorRef GetAllocatorRef() const noexcept
+        // Purpose : Make underlying AllocatorRef observable for diagnostics/utilities.
+        // Contract: Returns by value; modifications of the copy never mutate the adapter.
+        // Notes   : [[nodiscard]] to surface accidental ignore sites during audits.
+        [[nodiscard]] constexpr AllocatorRef GetAllocatorRef() const noexcept
         {
             return mAllocator;
         }
@@ -208,28 +191,18 @@ namespace core
         };
 
     private:
-        // ---
-        // Purpose : Return a stable, properly aligned sentinel used when
-        //           allocate(0) is requested so containers receive a non-null
-        //           pointer while the underlying allocator remains untouched.
-        // Contract: Sentinel is never passed to DeallocateBytes because
-        //           deallocate(..., 0) short-circuits; storage is process-wide.
-        // Notes   : Using unsigned char keeps the storage trivial and avoids
-        //           depending on std::byte availability in older toolchains.
-        // ---
+        // Purpose : Deterministic sentinel for zero-sized allocations.
+        // Contract: Never passed to DeallocateBytes; alignment honours value_type.
+        // Notes   : Function-static ensures one per TU without extra headers.
         [[nodiscard]] static value_type* ZeroSizeSentinel() noexcept
         {
-            alignas(value_type) static unsigned char s_storage[sizeof(value_type) == 0 ? 1 : sizeof(value_type)]{};
-            return reinterpret_cast<value_type*>(s_storage);
+            alignas(value_type) static unsigned char storage[StaticChecks::kValueSize == 0 ? 1 : StaticChecks::kValueSize]{};
+            return reinterpret_cast<value_type*>(storage);
         }
 
-        // ---
-        // Purpose : Lazily bind to MemorySystem::GetDefaultAllocator() if no
-        //           explicit allocator was provided.
-        // Contract: Returns an invalid AllocatorRef if MemorySystem is not
-        //           initialized yet, allowing callers to diagnose the misuse.
-        // Notes   : Mutable to permit binding even for const adapters.
-        // ---
+        // Purpose : Bind to default allocator lazily when caller did not provide one.
+        // Contract: Returns invalid AllocatorRef until MemorySystem::Init().
+        // Notes   : Mutable to allow late binding inside const methods.
         [[nodiscard]] AllocatorRef ResolveAllocator() const noexcept
         {
             if (!mAllocator.IsValid() && ::dng::memory::MemorySystem::IsInitialized())
@@ -239,18 +212,9 @@ namespace core
             return mAllocator;
         }
 
-        // ---
-        // Purpose : Trigger OOM policy diagnostics and terminate execution upon
-        //           allocation failure.
-        // Contract: Never returns; noexcept; static function. Must be called with
-        //           the failed allocation size, alignment, and context string.
-        //           Terminates the process unconditionally after logging.
-        // Notes   : Uses std::terminate() rather than throw to maintain noexcept
-        //           guarantee and avoid exception overhead. The DNG_MEM_CHECK_OOM
-        //           macro logs failure details before termination, enabling
-        //           post-mortem debugging. This matches D-Engine's zero-exception
-        //           policy in Core modules.
-        // ---
+        // Purpose : Uniform failure path honouring engine-wide OOM diagnostics.
+        // Contract: Never returns; always terminates the process after logging.
+        // Notes   : Keeps adapter noexcept and avoids exception machinery.
         [[noreturn]] static void HandleAllocationFailure(std::size_t size,
             std::size_t alignment,
             const char* context) noexcept
@@ -262,12 +226,9 @@ namespace core
         mutable AllocatorRef mAllocator{};
     };
 
-    // ---
-    // Purpose : Equality compares whether two adapters reference the same
-    //           underlying allocator instance.
-    // Contract: Works across different value types thanks to the friend.
-    // Notes   : Inequality is derived automatically by the standard library.
-    // ---
+    // Purpose : Compare adapters by the allocator instance they reference.
+    // Contract: Cross-value_type compare valid; relies on GetAllocatorRef().
+    // Notes   : Inequality is provided automatically by the standard library.
     template <class T, class U>
     [[nodiscard]] constexpr bool operator==(const AllocatorAdapter<T>& lhs, const AllocatorAdapter<U>& rhs) noexcept
     {

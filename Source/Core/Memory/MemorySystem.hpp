@@ -27,6 +27,7 @@
 #include "Core/Memory/MemMacros.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/DefaultAllocator.hpp"
+#include "Core/Memory/FrameAllocator.hpp"
 #include "Core/Memory/TrackingAllocator.hpp"
 #include "Core/Memory/GuardAllocator.hpp"
 #include "Core/Memory/SmallObjectAllocator.hpp"
@@ -52,6 +53,8 @@ namespace dng { namespace core {
     class ArenaAllocator;
     struct MemoryConfig;
     class AllocatorRef;
+    class FrameAllocator;
+    struct FrameAllocatorConfig;
 } }
 
 namespace dng
@@ -72,6 +75,8 @@ namespace memory
     using ArenaAllocator      = ::dng::core::ArenaAllocator;
     using MemoryConfig        = ::dng::core::MemoryConfig;
     using AllocatorRef        = ::dng::core::AllocatorRef;
+    using FrameAllocator      = ::dng::core::FrameAllocator;
+    using FrameAllocatorConfig= ::dng::core::FrameAllocatorConfig;
     using ThreadPolicy        = ::dng::core::DefaultThreadPolicy;
         using ThreadLock = typename ThreadPolicy::Lock;
         using ThreadMutex = typename ThreadPolicy::Mutex;
@@ -104,6 +109,9 @@ namespace memory
             ArenaAllocator*         audioArena{ nullptr };
             ArenaAllocator*         gameplayArena{ nullptr };
 
+            FrameAllocatorConfig    threadFrameConfig{};
+            std::size_t             threadFrameBytes{ 0 };
+
             ThreadMutex mutex{};
             std::size_t attachedThreads{ 0 };
 
@@ -118,6 +126,7 @@ namespace memory
 
         [[nodiscard]] inline MemoryGlobals& Globals() noexcept
         {
+            // Design Note: function-local static confines the mutable singleton while keeping the header self-contained.
             static MemoryGlobals g{};
             return g;
         }
@@ -125,7 +134,11 @@ namespace memory
         struct ThreadLocalState
         {
             AllocatorRef smallObject;
+            FrameAllocator* frameAllocator{ nullptr };
+            void* frameBacking{ nullptr };
+            std::size_t frameCapacity{ 0 };
             bool attached{ false };
+            alignas(FrameAllocator) unsigned char frameStorage[sizeof(FrameAllocator)]{};
         };
 
         inline thread_local ThreadLocalState gThreadLocalState{};
@@ -461,6 +474,8 @@ namespace memory
                 globals.defaultAllocator = nullptr;
             }
 
+            globals.threadFrameConfig = FrameAllocatorConfig{};
+            globals.threadFrameBytes = 0;
             globals.activeConfig = MemoryConfig{};
             globals.initialized = false;
         }
@@ -472,7 +487,37 @@ namespace memory
                 return;
             }
 
-            gThreadLocalState.smallObject = MakeAllocatorRef(globals.smallObjectAllocator);
+            const AllocatorRef smallObjectRef = MakeAllocatorRef(globals.smallObjectAllocator);
+
+            FrameAllocator* frame = nullptr;
+            void* frameBacking = nullptr;
+            const std::size_t frameBytes = globals.threadFrameBytes;
+
+            if (frameBytes != 0u)
+            {
+                DNG_CHECK(globals.defaultAllocator != nullptr && "Default allocator required for frame backing");
+                const std::size_t alignment = ::dng::core::NormalizeAlignment(alignof(std::max_align_t));
+                frameBacking = globals.defaultAllocator->Allocate(frameBytes, alignment);
+                if (!frameBacking)
+                {
+                    DNG_MEM_CHECK_OOM(frameBytes, alignment, "MemorySystem::AttachThreadState frame backing");
+                }
+                else
+                {
+                    auto* storage = reinterpret_cast<FrameAllocator*>(gThreadLocalState.frameStorage);
+                    frame = new (storage) FrameAllocator(frameBacking, frameBytes, globals.threadFrameConfig);
+                }
+            }
+
+            if ((frameBytes != 0u) && (frame == nullptr))
+            {
+                return;
+            }
+
+            gThreadLocalState.smallObject = smallObjectRef;
+            gThreadLocalState.frameAllocator = frame;
+            gThreadLocalState.frameBacking = frameBacking;
+            gThreadLocalState.frameCapacity = frameBytes;
             gThreadLocalState.attached = true;
 
 #if DNG_MEM_THREAD_SAFE
@@ -486,6 +531,27 @@ namespace memory
             {
                 return;
             }
+
+            if (gThreadLocalState.frameAllocator)
+            {
+                gThreadLocalState.frameAllocator->Reset();
+                gThreadLocalState.frameAllocator->~FrameAllocator();
+                gThreadLocalState.frameAllocator = nullptr;
+            }
+
+            if (gThreadLocalState.frameBacking)
+            {
+                if (globals.defaultAllocator)
+                {
+                    const std::size_t alignment = ::dng::core::NormalizeAlignment(alignof(std::max_align_t));
+                    globals.defaultAllocator->Deallocate(gThreadLocalState.frameBacking,
+                        gThreadLocalState.frameCapacity,
+                        alignment);
+                }
+                gThreadLocalState.frameBacking = nullptr;
+            }
+
+            gThreadLocalState.frameCapacity = 0;
 
 #if DNG_MEM_THREAD_SAFE
             if (globals.attachedThreads > 0)
@@ -534,6 +600,24 @@ namespace memory
 
             auto& globalConfig = ::dng::core::MemoryConfig::GetGlobal();
             globalConfig = config;
+
+            const std::size_t rawFrameBytes = globalConfig.thread_frame_allocator_bytes;
+            const std::size_t normalizedFrameBytes = (rawFrameBytes == 0u)
+                ? 0u
+                : ::dng::core::AlignUp<std::size_t>(rawFrameBytes, alignof(std::max_align_t));
+            globals.threadFrameBytes = normalizedFrameBytes;
+
+            ::dng::core::FrameAllocatorConfig frameCfg{};
+            frameCfg.bReturnNullOnOOM = globalConfig.thread_frame_return_null;
+            frameCfg.bDebugPoisonOnReset = globalConfig.thread_frame_poison_on_reset;
+            frameCfg.DebugPoisonByte = globalConfig.thread_frame_poison_value;
+            globals.threadFrameConfig = frameCfg;
+
+            globalConfig.thread_frame_allocator_bytes = normalizedFrameBytes;
+            globalConfig.thread_frame_return_null = frameCfg.bReturnNullOnOOM;
+            globalConfig.thread_frame_poison_on_reset = frameCfg.bDebugPoisonOnReset;
+            globalConfig.thread_frame_poison_value = frameCfg.DebugPoisonByte;
+
             globals.activeConfig = globalConfig;
 
             const auto sampling = detail::ResolveTrackingSampling(globals.activeConfig);
@@ -729,6 +813,12 @@ namespace memory
                     static_cast<unsigned long long>(globals.activeConfig.small_object_batch),
                     detail::ToString(batch.source));
                 DNG_LOG_INFO("Memory",
+                    "Thread frame allocator bytes={} returnNull={} poisonOnReset={} poisonValue={}",
+                    static_cast<unsigned long long>(globals.threadFrameBytes),
+                    globals.threadFrameConfig.bReturnNullOnOOM ? "true" : "false",
+                    globals.threadFrameConfig.bDebugPoisonOnReset ? "true" : "false",
+                    static_cast<unsigned>(globals.threadFrameConfig.DebugPoisonByte));
+                DNG_LOG_INFO("Memory",
                     "SMALLOBJ_TLS_BINS: CT={} RT={} EFFECTIVE={}",
                     DNG_SMALLOBJ_TLS_BINS ? "1" : "0",
                     tlsBinsRequested ? "1" : "0",
@@ -749,6 +839,11 @@ namespace memory
             }
 
             detail::AttachThreadStateUnlocked(globals);
+            if (!detail::gThreadLocalState.attached && warnEnabled)
+            {
+                DNG_LOG_WARNING("Memory",
+                    "MemorySystem::Init() could not attach thread-local allocators (frame provisioning failed).");
+            }
         }
 
         // Purpose : Tear down all global allocators and detach thread-local state.
@@ -849,6 +944,25 @@ namespace memory
         [[nodiscard]] static AllocatorRef GetSmallObjectAllocator() noexcept
         {
             return detail::MakeAllocatorRef(detail::Globals().smallObjectAllocator);
+        }
+
+        // Purpose : Provide access to the per-thread frame allocator provisioned during thread attach.
+        // Contract: Requires MemorySystem initialization; thread must have been attached (OnThreadAttach) either implicitly or explicitly.
+        // Notes   : Attempts to auto-attach when the thread is not yet registered; asserts if provisioning fails.
+        [[nodiscard]] static ::dng::core::FrameAllocator& GetThreadFrameAllocator() noexcept
+        {
+            DNG_CHECK(IsInitialized() && "MemorySystem::GetThreadFrameAllocator requires Init()");
+            const auto& globals = detail::Globals();
+            DNG_CHECK(globals.threadFrameBytes != 0 && "Thread frame allocator disabled via config");
+
+            auto& state = detail::gThreadLocalState;
+            if (!state.attached)
+            {
+                OnThreadAttach();
+            }
+
+            DNG_ASSERT(state.attached && state.frameAllocator != nullptr && "Thread frame allocator unavailable");
+            return *state.frameAllocator;
         }
     };
 

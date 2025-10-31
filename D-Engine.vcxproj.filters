@@ -125,6 +125,9 @@
     <ClCompile Include="Source\Core\Memory\Allocator.cpp">
       <Filter>Source\Core\Memory</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp">
+      <Filter>Source\Core\Memory</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp">
       <Filter>Source\Core\Memory</Filter>
     </ClCompile>

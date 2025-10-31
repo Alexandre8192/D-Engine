@@ -56,7 +56,9 @@ namespace memory
     // ------------------------------------------------------------------------
     [[nodiscard]] inline size_t PageSize() noexcept
     {
-        static size_t cached = 0;
+    // Design Note: function-local static keeps this cache deterministic without exposing
+    // additional global symbols, aligning with header-first constraints while avoiding recomputation.
+    static size_t cached = 0;
         if (cached == 0)
         {
 #if defined(_WIN32)
