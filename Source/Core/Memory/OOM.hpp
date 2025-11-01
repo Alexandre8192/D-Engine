@@ -3,27 +3,23 @@
 // D-Engine - Core/Memory/OOM.hpp
 // ----------------------------------------------------------------------------
 // Purpose : Declare the engine-wide out-of-memory policy helpers invoked by
-//           allocators and wrappers after allocation failure.
+//           allocators and wrappers after allocation failure. Uses the engine
+//           logging front-end; no local fallbacks.
 // Contract: All entry points are header-only, constexpr-safe, and noexcept;
 //           they neither allocate nor throw and terminate deterministically
-//           according to configuration.
-// Notes   : Functions are inline to keep header self-contained; logging macros
-//           are stubbed if the logger subsystem is not yet initialized. The
-//           runtime policy flag is updated by MemorySystem via SetFatalOnOOMPolicy.
+//           according to configuration. This header requires the logging
+//           front-end via Logger.hpp; no macro redefinition occurs here.
+// Notes   : Functions are inline to keep header self-contained. The runtime
+//           policy flag is updated by MemorySystem via SetFatalOnOOMPolicy.
 //           No hidden allocations occur; soft OOM escalation to std::bad_alloc
-//           remains confined to the global new/delete bridge.
+//           remains confined to the global new/delete bridge. We avoid shadowing
+//           `DNG_LOG_*` to prevent silent diagnostic loss due to include order.
 // ============================================================================
+#include "Core/Logger.hpp"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
-
-// Minimal logging fallbacks (allow usage before logger is included)
-#ifndef DNG_LOG_FATAL
-#define DNG_LOG_FATAL(category, fmt, ...) ((void)0)
-#endif
-#ifndef DNG_LOG_ERROR
-#define DNG_LOG_ERROR(category, fmt, ...) ((void)0)
-#endif
 
 #ifndef DNG_MEM_LOG_CATEGORY
 #define DNG_MEM_LOG_CATEGORY "Memory" // Purpose : Default core memory logging category when callers omit an override.

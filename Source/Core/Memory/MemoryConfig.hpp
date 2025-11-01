@@ -2,34 +2,30 @@
 // D-Engine - Core/Memory/MemoryConfig.hpp
 // ----------------------------------------------------------------------------
 // Purpose : Centralize compile-time memory feature gates and lightweight runtime
-//           knobs used by the memory subsystem across the engine.
+//           knobs used by the memory subsystem across the engine. Uses the engine
+//           logging front-end; no local fallbacks.
 // Contract: Header-only, self-contained, and safe to include from any TU. No
 //           hidden dependencies or global state. Compile-time macros define the
 //           compiled feature set; runtime toggles only take effect when their
 //           feature is compiled in. When a feature is compiled out, setters are
 //           explicit no-ops that log a warning. Invariants validated via static_assert.
+//           This header requires the logging front-end via Logger.hpp; no macro
+//           redefinition occurs here.
 // Notes   : Optimized for determinism and zero hidden costs. Runtime precedence
 //           for tunables is API → environment → macros; see MemorySystem.hpp for
 //           resolution and logging. Defaults reflect Release | x64 bench sweeps
-//           (2025-10-29) with stable ns/op and unchanged bytes/allocs.
+//           (2025-10-29) with stable ns/op and unchanged bytes/allocs. We avoid
+//           shadowing `DNG_LOG_*` to prevent silent diagnostic loss due to include order.
 // ============================================================================
 
 #pragma once
+
+#include "Core/Logger.hpp"
 
 #include <cstddef>
 #include <cstdint>
 
 #include "Core/Memory/MemMacros.hpp"
-
-// -----------------------------------------------------------------------------
-// Minimal logging fallbacks (avoid dependency on Logger.hpp here)
-// -----------------------------------------------------------------------------
-#ifndef DNG_LOG_WARNING
-#   define DNG_LOG_WARNING(category, fmt, ...) ((void)0)
-#endif
-#ifndef DNG_LOG_ERROR
-#   define DNG_LOG_ERROR(category, fmt, ...) ((void)0)
-#endif
 
 #ifndef DNG_MEM_LOG_CATEGORY
 #define DNG_MEM_LOG_CATEGORY "Memory"

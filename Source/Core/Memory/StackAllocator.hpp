@@ -3,14 +3,19 @@
 // D-Engine - Core/Memory/StackAllocator.hpp
 // ----------------------------------------------------------------------------
 // Purpose : Implement a strict LIFO allocator on top of `ArenaAllocator`, using
-//           markers to guarantee constant-time pop/rewind.
+//           markers to guarantee constant-time pop/rewind. Uses the engine
+//           logging front-end; no local fallbacks.
 // Contract: All pushes normalise alignment through the arena. Callers MUST free
 //           via `Pop(marker)` (thread-affine) or `Reset()`; `Deallocate()` is a
-//           documented no-op preserved only for the `IAllocator` interface.
+//           documented no-op preserved only for the `IAllocator` interface. This
+//           header requires the logging front-end via Logger.hpp; no macro
+//           redefinition occurs here.
 // Notes   : Not thread-safe. Debug builds maintain a marker stack to validate
-//           LIFO discipline and emit diagnostics on misuse.
+//           LIFO discipline and emit diagnostics on misuse. We avoid shadowing
+//           `DNG_LOG_*` to prevent silent diagnostic loss due to include order.
 // ============================================================================
 
+#include "Core/Logger.hpp"
 #include "Core/Types.hpp"
 #include "Core/Memory/ArenaAllocator.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
@@ -39,17 +44,6 @@
  *   // stack.Deallocate(...) is a NO-OP by design; prefer Pop/Reset
  *   stack.Reset();                      // clears all (warns in Debug if markers remain)
  */
-
- // Temporary logging macros until Logger.hpp is implemented
-#ifndef DNG_LOG_ERROR
-#define DNG_LOG_ERROR(category, msg, ...)   ((void)0)
-#endif
-#ifndef DNG_LOG_WARNING
-#define DNG_LOG_WARNING(category, msg, ...) ((void)0)
-#endif
-#ifndef DNG_LOG_FATAL
-#define DNG_LOG_FATAL(category, msg, ...)   ((void)0)
-#endif
 
 namespace dng::core {
 

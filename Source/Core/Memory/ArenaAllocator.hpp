@@ -4,16 +4,20 @@
 // ----------------------------------------------------------------------------
 // Purpose : Provide a deterministic bump allocator with marker-based rewind so
 //           hot paths can reserve transient memory without per-block frees.
+//           Uses the engine logging front-end; no local fallbacks.
 // Contract: All requests normalise `alignment` through `NormalizeAlignment` and
 //           require callers to release memory via `Reset()` or `Rewind(marker)`;
 //           `Deallocate()` is intentionally a no-op and exists only to satisfy
-//           `IAllocator`. The allocator is not thread-safe.
+//           `IAllocator`. The allocator is not thread-safe. This header requires
+//           the logging front-end via Logger.hpp; no macro redefinition occurs here.
 // Notes   : Designed for frame or scope-local allocations. Markers capture the
 //           current offset so rewinding is O(1). Peak usage is tracked for
 //           diagnostics. Backing storage can be owned (parent allocator) or
-//           provided externally.
+//           provided externally. We avoid shadowing `DNG_LOG_*` to prevent silent
+//           diagnostic loss due to include order.
 // ============================================================================
 
+#include "Core/Logger.hpp"
 #include "Core/Types.hpp"
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/Alignment.hpp"
@@ -24,20 +28,6 @@
 #include <cstdint>   // std::uintptr_t
 #include <climits>   // SIZE_MAX
 #include <utility>   // std::exchange
-
-// Temporary logging macros until Logger.hpp is implemented
-#ifndef DNG_LOG_ERROR
-#define DNG_LOG_ERROR(category, msg, ...) ((void)0)
-#endif
-#ifndef DNG_LOG_WARNING
-#define DNG_LOG_WARNING(category, msg, ...) ((void)0)
-#endif
-#ifndef DNG_LOG_INFO
-#define DNG_LOG_INFO(category, msg, ...) ((void)0)
-#endif
-#ifndef DNG_LOG_FATAL
-#define DNG_LOG_FATAL(category, msg, ...) ((void)0)
-#endif
 
 // Minimal fallback for unused parameter macro (keeps this header self-contained)
 #ifndef DNG_UNUSED

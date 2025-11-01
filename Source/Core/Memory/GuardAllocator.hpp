@@ -5,22 +5,27 @@
 // Purpose : Debug-only allocator that surrounds every allocation with software
 //           redzones and operating-system guard pages. By reserving a dedicated
 //           virtual-memory island per allocation we can detect buffer overruns,
-//           underruns, and use-after-free scenarios deterministically.
+//           underruns, and use-after-free scenarios deterministically. Relies
+//           exclusively on the canonical alignment helpers for padding/offset
+//           computations.
 // Contract: Header-only, dependency-free (beyond CoreMinimal.hpp). All public
 //           functions honour the IAllocator contract: callers must provide the
 //           same (size, alignment) pair on Deallocate. Construction requires a
 //           non-null parent allocator that handles bookkeeping when guards are
 //           compiled out. Thread safety is delegated to the parent allocator.
+//           All alignment values are normalized and power-of-two checked before
+//           use.
 // Notes   : The allocator is typically enabled only when DNG_MEM_GUARDS != 0.
 //           When guards are disabled, GuardAllocator degrades to a thin pass-
 //           through wrapper over the parent allocator so production builds pay
-//           no extra cost.
+//           no extra cost. No local alignment helpers are used, eliminating
+//           drift from the engine's canonical semantics.
 // ============================================================================
 
 #include "Core/CoreMinimal.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/PageAllocator.hpp"
-#include "Core/Memory/Alignment.hpp"
+#include "Core/Memory/Alignment.hpp" // AlignUp / NormalizeAlignment / IsPowerOfTwo
 #include "Core/Memory/Allocator.hpp"
 
 #include <cstddef>
@@ -82,19 +87,8 @@ namespace memory
         static constexpr usize        kRedzoneBytes    = 32;
         static constexpr std::uint8_t kRedzonePattern  = 0xCD;
         static constexpr usize        kHeaderAlignment = alignof(std::max_align_t);
-        // ---
-        // Purpose : Align a compile-time value without depending on the global
-        //           alignment helpers (keeps this header usable in isolation).
-        // Contract: Expects alignment to be a power-of-two. Invoked at compile
-        //           time for header storage sizing.
-        // Notes   : Runtime alignment uses ::dng::core::AlignUp for consistency.
-        // ---
-        [[nodiscard]] constexpr usize AlignUpLocal(usize value, usize alignment) noexcept
-        {
-            return (value + (alignment - 1)) & ~(alignment - 1);
-        }
 
-        static constexpr usize kHeaderStorage = AlignUpLocal(sizeof(GuardHeader), kHeaderAlignment);
+        static constexpr usize kHeaderStorage = ::dng::core::AlignUp<usize>(sizeof(GuardHeader), kHeaderAlignment);
 
         static_assert(kHeaderStorage >= sizeof(GuardHeader),
             "Header storage must at least fit GuardHeader");
@@ -151,12 +145,16 @@ namespace memory
     // GuardAllocator
     // ------------------------------------------------------------------------
     // Purpose : Augment an existing allocator with redzones and guard pages to
-    //           trap memory corruption bugs deterministically.
+    //           trap memory corruption bugs deterministically while routing all
+    //           padding math through the canonical alignment utilities.
     // Contract: Parent allocator must outlive this wrapper. All allocations must
     //           be freed with the same size/alignment pair. Thread safety relies
-    //           entirely on the parent allocator (this wrapper adds no locking).
+    //           entirely on the parent allocator (this wrapper adds no locking),
+    //           and every caller-visible alignment is normalized/power-of-two
+    //           checked before use.
     // Notes   : When DNG_MEM_GUARDS == 0, Allocate/Deallocate simply delegate to
-    //           the parent to keep production builds lean.
+    //           the parent to keep production builds lean. No local alignment
+    //           replicas exist so semantics stay in lockstep with Core/Alignment.hpp.
     // ------------------------------------------------------------------------
     class GuardAllocator final : public ::dng::core::IAllocator
     {
@@ -216,7 +214,7 @@ namespace memory
                 return;
             }
 
-            alignment = ::dng::core::NormalizeAlignment(alignment);
+            alignment = NormalizeAlignmentChecked(alignment, "GuardAllocator::Deallocate");
 
 #if !DNG_MEM_GUARDS
             if (parent_)
@@ -339,7 +337,7 @@ namespace memory
                 return nullptr;
             }
 
-            alignment = ::dng::core::NormalizeAlignment(alignment);
+            alignment = NormalizeAlignmentChecked(alignment, tag);
             if (alignment > static_cast<std::size_t>(DNG_MAX_REASONABLE_ALIGNMENT))
             {
                 DNG_LOG_ERROR(DNG_PAGE_ALLOCATOR_LOG_CATEGORY,
@@ -461,6 +459,19 @@ namespace memory
         }
 
     ::dng::core::IAllocator* parent_;
+
+        [[nodiscard]] static ::dng::core::usize NormalizeAlignmentChecked(::dng::core::usize alignment, const char* context) noexcept
+        {
+            if ((alignment != 0) && !::dng::core::IsPowerOfTwo(alignment))
+            {
+                DNG_LOG_ERROR(DNG_PAGE_ALLOCATOR_LOG_CATEGORY,
+                    "{} received non power-of-two alignment {}",
+                    context ? context : "GuardAllocator",
+                    static_cast<unsigned long long>(alignment));
+                DNG_CHECK(false);
+            }
+            return ::dng::core::NormalizeAlignment(alignment);
+        }
     };
 
 } // namespace memory

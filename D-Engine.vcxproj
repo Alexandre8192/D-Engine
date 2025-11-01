@@ -55,6 +55,14 @@
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
     <ClCompile Include="tests\Test_GlobalNewDelete_BuildOnly.cpp" />
     <ClCompile Include="tests\Test_StdAliases_BuildOnly.cpp" />
+    <ClCompile Include="tests\SelfContain\ArenaAllocator_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\StackAllocator_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\MemoryConfig_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\OOM_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\MemoryHeaders_LoggerFirst.cpp" />
+    <ClCompile Include="tests\SelfContain\MemoryHeaders_HeaderFirst.cpp" />
+    <ClCompile Include="tests\SelfContain\GuardAllocator_header_only.cpp" />
+    <ClCompile Include="tests\smoke\guard_allocator_alignment_smoke.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
