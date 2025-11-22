@@ -31,6 +31,10 @@
 - The **only** sanctioned emission of `std::bad_alloc` inside Core is the
   global `operator new/new[]` overrides in `Core/Memory/GlobalNewDelete.cpp`; all
   other code must remain exception-free.
+- Global OOM behavior is configured via `SetFatalOnOOMPolicy` (wired through
+  `MemorySystem`). **Hard** mode aborts immediately inside the failing allocator;
+  **Soft** mode bubbles a `nullptr` back to Core and only the global new/delete
+  bridge translates it to `std::bad_alloc`.
 
 ### Rationale
 - Determinism and performance (no unwinding tables, no surprise slow paths).
