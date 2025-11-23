@@ -47,12 +47,17 @@
     <ClInclude Include="Source\Core\Containers\StdAliases.hpp" />
     <ClInclude Include="Source\Core\Timer.hpp" />
     <ClInclude Include="Source\Core\Types.hpp" />
+    <ClInclude Include="Source\Core\Math\Math.hpp" />
+    <ClInclude Include="Source\Core\Math\Vector.hpp" />
+    <ClInclude Include="Source\Core\Math\Matrix.hpp" />
+    <ClInclude Include="Source\Core\Math\Quaternion.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp" />
     <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp" />
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp" />
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
+    <ClCompile Include="Source\Core\Math\Math.cpp" />
     <ClCompile Include="tests\Test_GlobalNewDelete_BuildOnly.cpp" />
     <ClCompile Include="tests\Test_StdAliases_BuildOnly.cpp" />
     <ClCompile Include="tests\SelfContain\ArenaAllocator_header_only.cpp" />
@@ -63,6 +68,7 @@
     <ClCompile Include="tests\SelfContain\MemoryHeaders_HeaderFirst.cpp" />
     <ClCompile Include="tests\SelfContain\GuardAllocator_header_only.cpp" />
     <ClCompile Include="tests\smoke\guard_allocator_alignment_smoke.cpp" />
+    <ClCompile Include="tests\smoke\Math_smoke.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

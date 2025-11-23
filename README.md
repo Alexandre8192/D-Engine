@@ -39,6 +39,7 @@ It prioritizes **transparency, determinism, and auditable code**: every public A
 * No hidden heap work in hot paths (opt-in only).
 * Data layout decisions (AoS/SoA) are explicit and documented.
 * Prefer compile-time validation to runtime fallbacks.
+* **Header-First Strategy**: Follow `Docs/HeaderFirstStrategy.md` to keep builds fast (thin facades, explicit instantiation).
 
 4. **Documentation & Tests**
 

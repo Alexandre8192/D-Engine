@@ -35,10 +35,10 @@ namespace dng
     // Purpose : Quick reference when choosing an allocation strategy.
     // Notes   : Not compiled; purely informative.
     //
-    //   • Transient, scope-tied data .......... -> ArenaAllocator / StackAllocator
-    //   • Many sub-1 KiB small objects ........ -> SmallObjectAllocator (via these aliases)
-    //   • Long-lived / irregular sizes ........ -> DefaultAllocator (via these aliases)
-    //   • External/STL-heavy codebases ........ -> Consider DNG_ROUTE_GLOBAL_NEW=1
+    //   - Transient, scope-tied data .......... -> ArenaAllocator / StackAllocator
+    //   - Many sub-1 KiB small objects ........ -> SmallObjectAllocator (via these aliases)
+    //   - Long-lived / irregular sizes ........ -> DefaultAllocator (via these aliases)
+    //   - External/STL-heavy codebases ........ -> Consider DNG_ROUTE_GLOBAL_NEW=1
     // -------------------------------------------------------------------------
 
     // ---
