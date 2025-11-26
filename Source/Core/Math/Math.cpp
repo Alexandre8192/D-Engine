@@ -208,9 +208,10 @@ namespace dng
         const float32 axisLengthSq = LengthSquared(axis);
         DNG_ASSERT(axisLengthSq > Epsilon * Epsilon && "FromAxisAngle called with near-zero axis.");
 #endif
+        const Vec3f unitAxis = Normalize(axis);
         float32 halfAngle = angleRadians * 0.5f;
         float32 s = Sin(halfAngle);
-        return Quatf(axis.x * s, axis.y * s, axis.z * s, Cos(halfAngle));
+        return Quatf(unitAxis.x * s, unitAxis.y * s, unitAxis.z * s, Cos(halfAngle));
     }
 
     Quatf FromEuler(float32 pitch, float32 yaw, float32 roll) noexcept

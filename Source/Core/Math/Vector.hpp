@@ -14,6 +14,11 @@ namespace dng
     // ------------------------------------------------------------------------
     // Vec2f
     // ------------------------------------------------------------------------
+    // ---
+    // Purpose : POD 2D float vector for math/geometry hot paths.
+    // Contract: Trivially copyable, no hidden allocations, layout {x,y} with no padding requirements beyond float32 alignment.
+    // Notes   : Constructors constexpr/noexcept to support static initialization and SIMD-friendly aggregates.
+    // ---
     struct Vec2f
     {
         float32 x, y;
@@ -30,6 +35,11 @@ namespace dng
         constexpr Vec2f& operator/=(float32 s) noexcept { float32 inv = 1.0f / s; x *= inv; y *= inv; return *this; }
     };
 
+    // ---
+    // Purpose : Standard arithmetic helpers keep Vec2f ergonomics inline.
+    // Contract: Operators are component-wise, constexpr/noexcept, and avoid hidden temporaries beyond pass-by-value copies.
+    // Notes   : Overloads mirror GLSL semantics for familiarity.
+    // ---
     [[nodiscard]] constexpr Vec2f operator+(Vec2f lhs, const Vec2f& rhs) noexcept { return lhs += rhs; }
     [[nodiscard]] constexpr Vec2f operator-(Vec2f lhs, const Vec2f& rhs) noexcept { return lhs -= rhs; }
     [[nodiscard]] constexpr Vec2f operator*(Vec2f lhs, float32 s) noexcept { return lhs *= s; }
@@ -40,6 +50,11 @@ namespace dng
     [[nodiscard]] constexpr bool operator==(const Vec2f& lhs, const Vec2f& rhs) noexcept { return lhs.x == rhs.x && lhs.y == rhs.y; }
     [[nodiscard]] constexpr bool operator!=(const Vec2f& lhs, const Vec2f& rhs) noexcept { return !(lhs == rhs); }
 
+    // ---
+    // Purpose : Core analytic operations (dot/length/normalize) for Vec2f.
+    // Contract: Dot/Length variants are constexpr where possible; Normalize guards against denormals by returning zero vector when input degenerate.
+    // Notes   : Callers targeting unit-length expectations should assert via IsUnitLength when needed.
+    // ---
     [[nodiscard]] constexpr float32 Dot(const Vec2f& a, const Vec2f& b) noexcept { return a.x * b.x + a.y * b.y; }
     [[nodiscard]] inline float32 LengthSquared(const Vec2f& v) noexcept { return Dot(v, v); }
     [[nodiscard]] inline float32 Length(const Vec2f& v) noexcept { return Sqrt(LengthSquared(v)); }
@@ -54,6 +69,11 @@ namespace dng
     // ------------------------------------------------------------------------
     // Vec3f
     // ------------------------------------------------------------------------
+    // ---
+    // Purpose : POD 3D float vector used for positions, directions, and colors.
+    // Contract: Layout {x,y,z}; trivially copyable; constructors constexpr/noexcept.
+    // Notes   : Provides Vec2f-to-Vec3f bridge constructor for convenience without implicit casts.
+    // ---
     struct Vec3f
     {
         float32 x, y, z;
@@ -81,6 +101,11 @@ namespace dng
     [[nodiscard]] constexpr bool operator==(const Vec3f& lhs, const Vec3f& rhs) noexcept { return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z; }
     [[nodiscard]] constexpr bool operator!=(const Vec3f& lhs, const Vec3f& rhs) noexcept { return !(lhs == rhs); }
 
+    // ---
+    // Purpose : Dot/Cross/Length helpers underpin geometry math.
+    // Contract: Cross assumes right-handed coordinate system; Normalize shares Vec2f safeguards.
+    // Notes   : Keep inline for hot loops; no hidden allocations.
+    // ---
     [[nodiscard]] constexpr float32 Dot(const Vec3f& a, const Vec3f& b) noexcept { return a.x * b.x + a.y * b.y + a.z * b.z; }
     [[nodiscard]] constexpr Vec3f Cross(const Vec3f& a, const Vec3f& b) noexcept
     {
@@ -103,6 +128,11 @@ namespace dng
     // ------------------------------------------------------------------------
     // Vec4f
     // ------------------------------------------------------------------------
+    // ---
+    // Purpose : POD 4D float vector for homogeneous coordinates and SIMD-aligned math.
+    // Contract: Layout {x,y,z,w}; trivially copyable; no implicit normalization.
+    // Notes   : Supports Vec3f promotion with explicit w component.
+    // ---
     struct Vec4f
     {
         float32 x, y, z, w;
@@ -130,6 +160,11 @@ namespace dng
     [[nodiscard]] constexpr bool operator==(const Vec4f& lhs, const Vec4f& rhs) noexcept { return lhs.x == rhs.x && lhs.y == rhs.y && lhs.z == rhs.z && lhs.w == rhs.w; }
     [[nodiscard]] constexpr bool operator!=(const Vec4f& lhs, const Vec4f& rhs) noexcept { return !(lhs == rhs); }
 
+    // ---
+    // Purpose : Dot/Length helpers for Vec4f to support homogeneous transforms.
+    // Contract: Normalize returns zero vector when length is sub-epsilon.
+    // Notes   : `w` is preserved in Normalize to allow perspective divide semantics.
+    // ---
     [[nodiscard]] constexpr float32 Dot(const Vec4f& a, const Vec4f& b) noexcept { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
     [[nodiscard]] inline float32 LengthSquared(const Vec4f& v) noexcept { return Dot(v, v); }
     [[nodiscard]] inline float32 Length(const Vec4f& v) noexcept { return Sqrt(LengthSquared(v)); }

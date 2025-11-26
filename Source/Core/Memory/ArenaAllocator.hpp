@@ -138,7 +138,11 @@ public:
             ArenaMarker     m_marker;
         };
 
-        // Owns its backing store (allocated via parentAllocator)
+        // ---
+        // Purpose : Construct an arena that acquires its backing buffer from a parent allocator.
+        // Contract: `parentAllocator` must outlive the arena; `capacity` > 0; allocation happens immediately and honours NormalizeAlignment.
+        // Notes   : Ownership flag tracks whether destruction should return memory to the parent allocator.
+        // ---
         ArenaAllocator(IAllocator* parentAllocator, usize capacity) noexcept
             : m_base(nullptr)
             , m_current(nullptr)
@@ -169,7 +173,11 @@ public:
             }
         }
 
-        // Wrap an external buffer (does not own memory)
+        // ---
+        // Purpose : Bind the arena to caller-supplied storage without taking ownership.
+        // Contract: `buffer` must remain valid for the allocator lifetime; `size` > 0; no allocation occurs inside the constructor.
+        // Notes   : Subsequent Reset/Rewind operations never touch the parent allocator because memory is external.
+        // ---
         ArenaAllocator(void* buffer, usize size) noexcept
             : m_base(static_cast<uint8_t*>(buffer))
             , m_current(static_cast<uint8_t*>(buffer))
@@ -187,10 +195,12 @@ public:
             }
         }
 
+        // ---
+        // Purpose : Emit diagnostics and release owned backing storage when the arena goes out of scope.
+        // Contract: Noexcept; only returns memory when `m_ownsMemory` is true and the parent allocator is still available.
+        // Notes   : External buffers remain untouched; logging helps correlate shutdown ordering.
+        // ---
         ~ArenaAllocator() noexcept override {
-            // Purpose: emit a lifecycle trace before releasing owned storage so
-            // teardown sequences (e.g. MemorySystem shutdown) can pinpoint the
-            // allocator responsible for a crash or guard-trigger.
             if (m_ownsMemory && m_parentAllocator && m_base) {
                 DNG_LOG_INFO("Memory.Arena", "~ArenaAllocator releasing {} bytes (base={}, ownsMemory=1)",
                     static_cast<unsigned long long>(m_capacity),
@@ -205,6 +215,11 @@ public:
         ArenaAllocator(ArenaAllocator&&) = delete;
         ArenaAllocator& operator=(ArenaAllocator&&) = delete;
 
+        // ---
+        // Purpose : Hand out contiguous slices from the bump pointer while honouring alignment.
+        // Contract: `size` > 0; alignment normalised before use; returns nullptr and triggers OOM policy when exhausted.
+        // Notes   : Single-threaded; does not grow beyond the initial buffer and never returns memory to the parent until destruction.
+        // ---
         [[nodiscard]] void* Allocate(usize size, usize alignment = alignof(std::max_align_t)) noexcept override {
             if (size == 0) return nullptr;
 
@@ -248,6 +263,11 @@ public:
         // Note: Individual deallocation is not supported for Arena/Stack.
         // Deallocate is a no-op kept for IAllocator compatibility.
         // Use Reset()/Rewind(marker) [Arena] or Pop(marker) [Stack].
+        // ---
+        // Purpose : Satisfy the IAllocator interface; arenas do not support per-block frees.
+        // Contract: Safe to call with any pointer; parameters are ignored; no ownership transfer occurs.
+        // Notes   : Callers must use Reset/Rewind for reclamation; consider enabling strict asserts if accidental usage is common.
+        // ---
         void Deallocate(void* ptr, usize size = 0, usize alignment = alignof(std::max_align_t)) noexcept override {
             DNG_UNUSED(ptr);
             DNG_UNUSED(size);
@@ -256,6 +276,11 @@ public:
         }
 
         // Utility (not part of IAllocator); keep without 'override'
+        // ---
+        // Purpose : Check whether a pointer resides within the arena's backing buffer.
+        // Contract: Null pointers return false; result is valid only for this allocator instance.
+        // Notes   : Helpful for assertions when layering allocators or debugging stray frees.
+        // ---
         [[nodiscard]] bool Owns(void* ptr) const noexcept {
             if (!ptr || !m_base || !m_end) return false;
             const uint8_t* bytePtr = static_cast<const uint8_t*>(ptr);
@@ -266,23 +291,54 @@ public:
         // Arena-specific API
         // =============================
 
+        // ---
+        // Purpose : Report the number of bytes consumed since the last Reset.
+        // Contract: No synchronization; returns 0 when the arena is invalid.
+        // Notes   : Includes alignment padding because the bump pointer monotonically increases.
+        // ---
         [[nodiscard]] usize GetUsed() const noexcept {
             if (!m_base || !m_current) return 0;
             return static_cast<usize>(m_current - m_base);
         }
 
+        // ---
+        // Purpose : Expose the total byte capacity of the arena's backing buffer.
+        // Contract: Constant after construction; zero when constructed with invalid input.
+        // Notes   : Useful for instrumentation and guardrails around high-water usage.
+        // ---
         [[nodiscard]] usize GetCapacity() const noexcept { return m_capacity; }
+
+        // ---
+        // Purpose : Observe the historical peak usage tracked opportunistically during allocations.
+        // Contract: Single-threaded; peak resets when Reset() is called.
+        // Notes   : May lag by one allocation if the allocator is not valid.
+        // ---
         [[nodiscard]] usize GetPeak() const noexcept { return m_peakUsed; }
 
+        // ---
+        // Purpose : Return the number of bytes still available before the arena exhausts.
+        // Contract: No synchronization; returns 0 when the arena is invalid.
+        // Notes   : Equivalent to `capacity - used` but cheaper than recomputing externally.
+        // ---
         [[nodiscard]] usize GetFree() const noexcept {
             if (!m_current || !m_end) return 0;
             return static_cast<usize>(m_end - m_current);
         }
 
+        // ---
+        // Purpose : Determine whether the arena has a usable backing buffer.
+        // Contract: Returns true only when base/current/end pointers are initialised.
+        // Notes   : Helpful before calling Reset/Rewind from defensive code paths.
+        // ---
         [[nodiscard]] bool IsValid() const noexcept {
             return m_base && m_current && m_end;
         }
 
+        // ---
+        // Purpose : Rewind the bump pointer to the beginning and clear peak diagnostics.
+        // Contract: Noexcept; safe to call repeatedly; only acts when the arena owns valid storage.
+        // Notes   : Does not zero memory; callers should poison manually if required.
+        // ---
         void Reset() noexcept {
             if (m_base) {
                 m_current = m_base;
@@ -290,11 +346,21 @@ public:
             }
         }
 
+        // ---
+        // Purpose : Capture the current bump offset for later rewinds.
+        // Contract: Returns an invalid marker when the arena lacks storage.
+        // Notes   : Markers are cheap value types; callers are responsible for LIFO discipline.
+        // ---
         [[nodiscard]] ArenaMarker GetMarker() const noexcept {
             if (!IsValid()) return ArenaMarker();
             return ArenaMarker(static_cast<usize>(m_current - m_base));
         }
 
+        // ---
+        // Purpose : Restore the bump pointer to a previously captured marker.
+        // Contract: Ignores invalid allocators or markers; logs when offsets exceed capacity or move forward in time.
+        // Notes   : Does not zero memory or adjust peak usage; intended for stack-like scopes on a single thread.
+        // ---
         void Rewind(const ArenaMarker& marker) noexcept {
             if (!IsValid() || !marker.IsValid()) return;
             if (marker.GetOffset() > m_capacity) {

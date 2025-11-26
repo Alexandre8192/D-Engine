@@ -1,4 +1,16 @@
 #pragma once
+// ============================================================================
+// D-Engine - Core/Memory/ThreadSafety.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Provide thread-safe allocator wrappers and counters that compose
+//           with existing D-Engine allocators.
+// Contract: Header-only, self-contained, and noexcept where possible. No
+//           exceptions or RTTI. Wrappers forward allocation requests to the
+//           underlying allocator while adding synchronization and optional
+//           statistics.
+// Notes   : Intended for cases where explicit locking is acceptable. For
+//           lock-free or sharded designs, prefer dedicated allocators.
+// ============================================================================
 
 #include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
@@ -74,6 +86,11 @@ namespace dng::core {
     // --------------------------------------------------------------
     // Policies
     // --------------------------------------------------------------
+    // ---
+    // Purpose : Provide a zero-cost policy that assumes single-threaded access.
+    // Contract: No locking is performed; counters remain plain integrals; caller must enforce exclusivity.
+    // Notes   : Useful for debug builds where determinism matters more than concurrency.
+    // ---
     struct SingleThreadedPolicy {
         struct Mutex { /* empty */ };
         struct Lock { explicit Lock(Mutex&) noexcept {} };
@@ -84,6 +101,11 @@ namespace dng::core {
         static constexpr bool kIsThreadSafe = false;
     };
 
+    // ---
+    // Purpose : Wrap allocator operations with a std::mutex-based critical section.
+    // Contract: Suitable for coarse-grained synchronization; incurs std::mutex overhead on every call.
+    // Notes   : Counter implementation switches to atomics to maintain thread-safe stats.
+    // ---
     struct MutexPolicy {
         using Mutex = std::mutex;
         using Lock = std::lock_guard<Mutex>;
@@ -109,13 +131,11 @@ namespace dng::core {
     using DefaultThreadPolicy = SingleThreadedPolicy;
 #endif
 
-    // --------------------------------------------------------------
-    // ThreadSafeAllocator wrapper
-    // - Wraps any Underlying allocator type (must model IAllocator)
-    // - Adds coarse-grained locking on public Allocate/Deallocate/Reallocate
-    // - Provides thread-safe stats
-    // - Exposes Reset() iff underlying has Reset()
-    // --------------------------------------------------------------
+    // ---
+    // Purpose : Wrap an existing allocator with thread-safe access and optional statistics.
+    // Contract: Forwards all calls to `Underlying` while serialising via `Policy`; ownership semantics match the embedded allocator instance.
+    // Notes   : Compile-time policy toggle keeps the wrapper usable in both single-threaded and multithreaded deployments without code changes.
+    // ---
     template <typename Underlying, typename Policy = DefaultThreadPolicy>
     class ThreadSafeAllocator final : public IAllocator {
     public:
@@ -123,15 +143,28 @@ namespace dng::core {
         using Mutex = typename Policy::Mutex;
         using Lock = typename Policy::Lock;
 
+        // ---
+        // Purpose : Surface whether the chosen policy actually performs locking.
+        // Contract: constexpr and noexcept; callers may branch on the result for diagnostics.
+        // Notes   : Mirrors Policy::kIsThreadSafe for convenience.
+        // ---
         static constexpr bool IsThreadSafe() noexcept { return Policy::kIsThreadSafe; }
 
-        // Convenience: forward-construct underlying allocator
+        // ---
+        // Purpose : Construct the wrapper by forwarding arguments to the underlying allocator.
+        // Contract: Perfect-forwards `Args...` to `Underlying`; caller controls ownership semantics.
+        // Notes   : No locking occurs during construction; statistics are zero-initialised.
+        // ---
         template <typename... Args>
         explicit ThreadSafeAllocator(Args&&... args)
             : m_underlying(std::forward<Args>(args)...) {
         }
 
-        // IAllocator API
+        // ---
+        // Purpose : Serialize allocation requests and record high-level statistics.
+        // Contract: Normalizes alignment before delegating; locks for the duration of the call; stats updated only when allocation succeeds.
+        // Notes   : Does not change allocator behaviour beyond locking and counters.
+        // ---
         void* Allocate(usize size, usize alignment = alignof(std::max_align_t)) noexcept override {
             alignment = NormalizeAlignment(alignment);
             Lock guard(m_mutex);
@@ -142,6 +175,11 @@ namespace dng::core {
             return p;
         }
 
+        // ---
+        // Purpose : Serialize deallocation requests and keep live-allocation counters in sync.
+        // Contract: Ignores null pointers; normalizes alignment; lock spans the entire call into the underlying allocator.
+        // Notes   : Counters assume callers pass the original `size` tuple as mandated by the allocator contract.
+        // ---
         void  Deallocate(void* ptr, usize size, usize alignment = alignof(std::max_align_t)) noexcept override {
             if (!ptr) return;
             alignment = NormalizeAlignment(alignment);
@@ -150,6 +188,11 @@ namespace dng::core {
             stats_on_free(size);
         }
 
+        // ---
+        // Purpose : Provide a thread-safe bridge for reallocation while tracking size deltas.
+        // Contract: Locks around the entire operation; forwards directly to the underlying allocator; updates stats based on the outcome.
+        // Notes   : Does not attempt to optimise for the in-place case beyond relaying `wasInPlace`.
+        // ---
         void* Reallocate(void* ptr,
             usize oldSize,
             usize newSize,
@@ -182,12 +225,24 @@ namespace dng::core {
             return newPtr;
         }
 
-        // Access to the underlying allocator (NOT thread-safe).
-        // Use with care - typically only for diagnostics or one-off configuration.
+        // ---
+        // Purpose : Expose mutable access to the wrapped allocator when callers need advanced configuration.
+        // Contract: Not thread-safe; callers must synchronize externally before invoking methods on the returned reference.
+        // Notes   : Primarily for diagnostics or out-of-band setup.
+        // ---
         Underlying& GetUnderlying()       noexcept { return m_underlying; }
+        // ---
+        // Purpose : Provide read-only access to the wrapped allocator for inspection.
+        // Contract: Mirrors the non-const overload; no synchronization is performed.
+        // Notes   : Use sparingly in multithreaded contexts.
+        // ---
         const Underlying& GetUnderlying() const noexcept { return m_underlying; }
 
-        // Thread-safe Reset() only if Underlying provides Reset()
+        // ---
+        // Purpose : Reset the underlying allocator when it supports that API while clearing live-stat counters.
+        // Contract: Available only when `Underlying` models `HasReset`; acquires the policy lock before invoking `Reset`.
+        // Notes   : Peak/total counters remain for post-mortem analysis; only current metrics are reset.
+        // ---
         template <typename U = Underlying>
             requires HasReset<U>
         void Reset() {
@@ -199,7 +254,11 @@ namespace dng::core {
             // Keep total/peak for post-mortem stats
         }
 
-        // Statistics (thread-safe to read)
+        // ---
+        // Purpose : Report aggregate statistics gathered since construction.
+        // Contract: Lock-free loads; values are approximate when other threads update concurrently but never undefined.
+        // Notes   : Useful for diagnostics dashboards or leak detectors.
+        // ---
         usize GetTotalAllocations()  const noexcept { return m_totalAllocations.load(); }
         usize GetCurrentAllocations()const noexcept { return m_currentAllocations.load(); }
         usize GetTotalBytes()        const noexcept { return m_totalBytes.load(); }

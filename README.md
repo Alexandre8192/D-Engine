@@ -8,6 +8,29 @@ It prioritizes **transparency, determinism, and auditable code**: every public A
 
 ---
 
+## Getting Started
+
+### Prerequisites
+*   **Visual Studio 2022** (Community or Pro) with "Desktop development with C++".
+*   **Git** (for cloning).
+
+### Building
+1.  Clone the repository:
+    ```powershell
+    git clone https://github.com/Alexandre8192/D-Engine.git
+    cd D-Engine
+    ```
+2.  Open `D-Engine.sln` in Visual Studio 2022.
+3.  Select **Debug** or **Release** configuration (x64).
+4.  Build Solution (`Ctrl+Shift+B`).
+
+### Running Tests
+Tests are located in the `tests/` directory. They are currently compile-only smoke tests or simple runners.
+*   Run `tests/smoke/Math_smoke.cpp` (via the solution) to verify math logic.
+
+
+---
+
 ## Why D-Engine?
 
 * **Header-first**: minimal translation units; include-safe headers that compile in isolation.

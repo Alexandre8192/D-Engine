@@ -1,6 +1,6 @@
 #pragma once
 // ============================================================================
-// D-Engine - MemorySystem.hpp
+// D-Engine - Core/Memory/MemorySystem.hpp
 // ----------------------------------------------------------------------------
 // Purpose : Publish the lifecycle façade for the engine-wide memory subsystem.
 //           MemorySystem exposes a concise static API that bootstraps all global

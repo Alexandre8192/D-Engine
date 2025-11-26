@@ -1,4 +1,4 @@
-# Validation PR: Bench Stability & Runtime Defaults
+ # Validation PR: Bench Stability & Runtime Defaults
 
 ## Objectif
 Verrouiller les contrôles de stabilité BenchRunner et valider la variance ≤ ±3% sur deux runs consécutifs en CI, avec zéro hausse bytes/allocs.
@@ -8,7 +8,7 @@ Verrouiller les contrôles de stabilité BenchRunner et valider la variance ≤ 
   - Console affiche: `[CPU] logical=8 affinity=0x1 priority=HIGH`
   - RSD early-stop avec `--target-rsd 3 --max-repeat 7`
   - Stability summaries: `n=X median=Y mean=Z RSD=W% min=A max=B`
-- **Runtime defaults (API → env → macros)**: sampling=1, shards=8, batch=64
+- **Runtime defaults (API -> env -> macros)**: sampling=1, shards=8, batch=64
   - MemorySystem logs effective values + source at init
   - Sampling >1 clamped to 1 avec warning (prévu vNext)
 - **Bench CI workflow** (`.github/workflows/bench-ci.yml`):
@@ -54,8 +54,8 @@ Si les métriques Release sont meilleures que v1, promouvoir le dernier JSON :
 ```powershell
 # Comparer avec baseline actuelle
 $latest = Get-Content artifacts/bench/current-default/bench-runner-*.bench.json | ConvertFrom-Json
-# Si ns/op ↓ et bytes/allocs stable → copier comme bench/baselines/v2-release.bench.json
+# Si ns/op ↓ et bytes/allocs stable -> copier comme bench/baselines/v2-release.bench.json
 ```
 
 ---
-**NOTICE** : Effective defaults applied at runtime (API → env → macros). Sampling>1 is currently clamped to 1.
+**NOTICE** : Effective defaults applied at runtime (API -> env -> macros). Sampling>1 is currently clamped to 1.

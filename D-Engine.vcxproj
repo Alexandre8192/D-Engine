@@ -45,6 +45,7 @@
     <ClInclude Include="Source\Core\Platform\PlatformMacros.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformTypes.hpp" />
     <ClInclude Include="Source\Core\Containers\StdAliases.hpp" />
+    <ClInclude Include="Source\Core\Simd\Vec4.hpp" />
     <ClInclude Include="Source\Core\Timer.hpp" />
     <ClInclude Include="Source\Core\Types.hpp" />
     <ClInclude Include="Source\Core\Math\Math.hpp" />
@@ -67,7 +68,13 @@
     <ClCompile Include="tests\SelfContain\MemoryHeaders_LoggerFirst.cpp" />
     <ClCompile Include="tests\SelfContain\MemoryHeaders_HeaderFirst.cpp" />
     <ClCompile Include="tests\SelfContain\GuardAllocator_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\Math_Math_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\Math_Vector_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\Math_Matrix_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\Math_Quaternion_header_only.cpp" />
     <ClCompile Include="tests\smoke\guard_allocator_alignment_smoke.cpp" />
+    <ClCompile Include="tests\Math\Mat4_Convention_tests.cpp" />
+    <ClCompile Include="tests\Math\Math_core_tests.cpp" />
     <ClCompile Include="tests\smoke\Math_smoke.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

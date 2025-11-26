@@ -3,25 +3,34 @@
 // D-Engine - Source/Core/Math/Matrix.hpp
 // ----------------------------------------------------------------------------
 // Purpose : Concrete matrix types (Mat3f, Mat4f) and operations.
-// Contract: Column-major storage.
-//           Multiplication order: M * v (Vector on the right).
+// Contract: Column-major storage addressed via m[column][row]; vectors are treated as column vectors multiplied on the right.
 // Notes   : Float-first implementation. Heavy ops are out-of-line.
 // ============================================================================
 
 #include "Core/Math/Vector.hpp"
-#include <cstring> // std::memcpy
+#include <type_traits>
 
 namespace dng
 {
     // ------------------------------------------------------------------------
     // Mat3f (3x3 Matrix)
     // ------------------------------------------------------------------------
+    // ---
+    // Purpose : Compact 3x3 float matrix for linear (non-homogeneous) transforms.
+    // Contract: Stored column-major via `m[col][row]`; trivially copyable; default ctor zero-inits for safety.
+    // Notes   : Heavy operations (inverse/determinant) live in Math.cpp to keep header-only cost low.
+    // ---
     struct Mat3f
     {
         float32 m[3][3]; // [col][row]
 
         constexpr Mat3f() noexcept : m{ {0} } {}
 
+        // ---
+        // Purpose : Build identity or scale matrices inline.
+        // Contract: constexpr/noexcept; no hidden normalization; column ordering follows column-major contract.
+        // Notes   : Use Mat4f variants for affine transforms requiring translation.
+        // ---
         static constexpr Mat3f Identity() noexcept
         {
             Mat3f res;
@@ -44,6 +53,11 @@ namespace dng
         }
     };
 
+    // ---
+    // Purpose : Apply Mat3f to column-vectors (Vec3f) on the right.
+    // Contract: Assumes column-vector convention for transforms; no perspective divide.
+    // Notes   : Keeps deterministic cost (9 muls + 6 adds) inline for hot loops.
+    // ---
     [[nodiscard]] constexpr Vec3f operator*(const Mat3f& m, const Vec3f& v) noexcept
     {
         return Vec3f(
@@ -53,6 +67,11 @@ namespace dng
         );
     }
 
+    // ---
+    // Purpose : Compose two 3x3 matrices using column-major semantics.
+    // Contract: Deterministic triple-loop (no allocations); safe for constexpr use.
+    // Notes   : Outer loop iterates over destination columns to improve cache friendliness.
+    // ---
     [[nodiscard]] constexpr Mat3f operator*(const Mat3f& a, const Mat3f& b) noexcept
     {
         Mat3f res;
@@ -71,12 +90,23 @@ namespace dng
     // ------------------------------------------------------------------------
     // Mat4f (4x4 Matrix)
     // ------------------------------------------------------------------------
+    // ---
+    // Purpose : 4x4 float matrix for homogeneous transforms across renderer/geometry subsystems.
+    // Contract: Column-major storage accessed via `m[col][row]`; vectors are column vectors multiplied on the right (v' = M * v);
+    //           trivially copyable; deterministic operations (no heap).
+    // Notes   : Conventions are enforced by Math.cpp's Transpose/TransformPoint/LookAt/Perspective helpers and place translation in column 3.
+    // ---
     struct Mat4f
     {
         float32 m[4][4]; // [col][row]
 
         constexpr Mat4f() noexcept : m{ {0} } {}
 
+        // ---
+        // Purpose : Inline constructors for canonical transforms (identity, translation, scale).
+        // Contract: constexpr/noexcept; translation assumes column-vector * matrix ordering (translation stored in column 3).
+        // Notes   : `Translation` writes into the last column to match column-major contract.
+        // ---
         static constexpr Mat4f Identity() noexcept
         {
             Mat4f res;
@@ -104,6 +134,11 @@ namespace dng
         }
     };
 
+    // ---
+    // Purpose : Multiply Mat4f with Vec4f under column-vector semantics.
+    // Contract: Deterministic set of 16 FMA-equivalent operations; no perspective divide baked in.
+    // Notes   : Aligns with TransformPoint/TransformVector helpers for consistent behavior.
+    // ---
     [[nodiscard]] constexpr Vec4f operator*(const Mat4f& m, const Vec4f& v) noexcept
     {
         return Vec4f(
@@ -114,6 +149,11 @@ namespace dng
         );
     }
 
+    // ---
+    // Purpose : Compose affine transforms (column-major).
+    // Contract: Deterministic 4x4 triple loop; no hidden allocations; safe for constexpr.
+    // Notes   : Equivalent to composing column-major transforms while treating Vec4f inputs as column vectors.
+    // ---
     [[nodiscard]] constexpr Mat4f operator*(const Mat4f& a, const Mat4f& b) noexcept
     {
         Mat4f res;
@@ -134,6 +174,11 @@ namespace dng
     // Helpers
     // ------------------------------------------------------------------------
 
+    // ---
+    // Purpose : Transform a point (implicit w=1) using Mat4f under column-vector convention.
+    // Contract: Performs perspective divide when w deviates from 1; tolerates near-singular w via epsilon guard.
+    // Notes   : Translation lives in `m[3][0..2]` given column-major layout.
+    // ---
     [[nodiscard]] constexpr Vec3f TransformPoint(const Mat4f& m, const Vec3f& p) noexcept
     {
         // Assumes w=1
@@ -150,6 +195,11 @@ namespace dng
         return Vec3f(x, y, z);
     }
 
+    // ---
+    // Purpose : Transform a direction vector (w=0) without translation.
+    // Contract: Deterministic multiply; assumes column-vector semantics; no normalization performed.
+    // Notes   : Use Normalize afterward when unit vectors are required.
+    // ---
     [[nodiscard]] constexpr Vec3f TransformVector(const Mat4f& m, const Vec3f& v) noexcept
     {
         // Assumes w=0
@@ -165,16 +215,42 @@ namespace dng
     // ------------------------------------------------------------------------
 
     // Returns Identity if matrix is singular (determinant ~ 0).
+    // ---
+    // Purpose : Compute the inverse of a general 4x4 column-major matrix.
+    // Contract: Returns Identity when matrix is singular; noexcept; asserts on non-finite inputs when enabled.
+    // Notes   : Suitable for affine transforms; cost ~200 FLOPs.
+    // ---
     [[nodiscard]] Mat4f Inverse(const Mat4f& m) noexcept;
+
+    // ---
+    // Purpose : Transpose helper for Mat4f.
+    // Contract: Pure register shuffle; noexcept; preserves column-major semantics.
+    // Notes   : Provided inline in Math.cpp to keep header lean.
+    // ---
     [[nodiscard]] Mat4f Transpose(const Mat4f& m) noexcept;
     
-    // Precondition: 'up' must not be parallel to (target - eye).
+    // ---
+    // Purpose : Build a right-handed view matrix.
+    // Contract: `up` must not be parallel to (target - eye); returns column-major matrix expecting column-vector inputs.
+    // Notes   : Depth range [0,1]; translation occupies column 3.
+    // ---
     [[nodiscard]] Mat4f LookAt(const Vec3f& eye, const Vec3f& target, const Vec3f& up) noexcept;
     
-    // Precondition: zNear != zFar.
+    // ---
+    // Purpose : Perspective projection builder (right-handed, depth in [0,1]).
+    // Contract: Requires `0 < fovY < Pi`, `aspect > 0`, and `0 < zNear < zFar`; returns column-major matrix.
+    // Notes   : Matches D3D-style clip range with -w in row 2 column 3.
+    // ---
     [[nodiscard]] Mat4f Perspective(float32 fovY, float32 aspect, float32 zNear, float32 zFar) noexcept;
     
-    // Precondition: left != right, bottom != top, zNear != zFar.
+    // ---
+    // Purpose : Orthographic projection builder (right-handed, depth in [0,1]).
+    // Contract: Requires non-degenerate volume: left != right, bottom != top, zNear != zFar.
+    // Notes   : Translation stored in column 3 similar to Perspective.
+    // ---
     [[nodiscard]] Mat4f Orthographic(float32 left, float32 right, float32 bottom, float32 top, float32 zNear, float32 zFar) noexcept;
 
 } // namespace dng
+
+static_assert(std::is_trivially_copyable_v<dng::Mat4f>, "Mat4f must stay POD for SIMD interop");
+static_assert(sizeof(dng::Mat4f) == 16u * sizeof(dng::float32), "Mat4f layout drifted from 16 floats");

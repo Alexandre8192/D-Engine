@@ -20,7 +20,6 @@
 #include "Core/Memory/ArenaAllocator.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/OOM.hpp"   // Not used directly here if Arena handles OOM, but safe to include
-#include <new>      // std::nothrow
 #include <cstddef>  // std::max_align_t
 #include <climits>  // SIZE_MAX
 #include <cassert>  // assert
@@ -77,47 +76,53 @@ namespace dng::core {
 
     class StackAllocator : public ArenaAllocator {
     private:
-        // Minimal dynamic array to keep markers in Debug builds (LRU of markers)
-        struct MarkerStack {
-            StackMarker* markers{ nullptr };
-            usize        capacity{ 0 };
-            usize        size{ 0 };
+        // Minimal marker stack used only in debug builds to validate LIFO discipline.
+        // Purpose : Track the sequence of push markers to assert LIFO order on Pop.
+        // Contract: Fixed-capacity buffer. On overflow, markers are no longer tracked
+        //           but allocations still work; a warning is logged once.
+        struct MarkerStack
+        {
+            static constexpr usize kMaxMarkers = 1024; // TODO: consider exposing via MemoryConfig
 
-            MarkerStack() = default;
+            StackMarker markers[kMaxMarkers]{};
+            usize       size{ 0 };
+            bool        overflowed{ false };
 
-            ~MarkerStack() noexcept {
-                delete[] markers;
-            }
-
-            bool  empty()     const noexcept { return size == 0; }
-            usize get_size()  const noexcept { return size; }
+            bool empty() const noexcept { return size == 0; }
+            usize get_size() const noexcept { return size; }
             const StackMarker& back() const noexcept { return markers[size - 1]; }
 
-            void push_back(const StackMarker& marker) noexcept {
-                if (size == capacity) {
-                    reserve(capacity ? capacity * 2 : 64);
-                    if (size == capacity) return; // allocation failed
+            void push_back(const StackMarker& marker) noexcept
+            {
+                if (size >= kMaxMarkers)
+                {
+                    if (!overflowed)
+                    {
+                        overflowed = true;
+                        DNG_LOG_WARNING(
+                            "Memory",
+                            "StackAllocator: MarkerStack capacity reached ({}); "
+                            "further markers will not be tracked.",
+                            kMaxMarkers);
+                    }
+                    return;
                 }
+
                 markers[size++] = marker;
             }
 
-            void pop_back() noexcept {
-                if (size > 0) --size;
-            }
-
-            void clear() noexcept {
-                size = 0;
-            }
-
-            void reserve(usize newCapacity) noexcept {
-                if (newCapacity > capacity) {
-                    StackMarker* newMarkers = new (std::nothrow) StackMarker[newCapacity];
-                    if (!newMarkers) return;
-                    for (usize i = 0; i < size; ++i) newMarkers[i] = markers[i];
-                    delete[] markers;
-                    markers = newMarkers;
-                    capacity = newCapacity;
+            void pop_back() noexcept
+            {
+                if (size > 0)
+                {
+                    --size;
                 }
+            }
+
+            void clear() noexcept
+            {
+                size = 0;
+                overflowed = false;
             }
         };
 
@@ -153,20 +158,12 @@ namespace dng::core {
         // Construct with a parent allocator (for arena backing) and capacity (in bytes)
         StackAllocator(IAllocator* parentAllocator, usize capacity) noexcept
             : ArenaAllocator(parentAllocator, capacity)
-        {
-#ifndef NDEBUG
-            m_markerStack.reserve(64);
-#endif
-        }
+        {}
 
         // Construct on a fixed external buffer
         StackAllocator(void* buffer, usize size) noexcept
             : ArenaAllocator(buffer, size)
-        {
-#ifndef NDEBUG
-            m_markerStack.reserve(64);
-#endif
-        }
+        {}
 
         ~StackAllocator() noexcept override {
 #ifndef NDEBUG

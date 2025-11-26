@@ -116,6 +116,21 @@ class SmallObjectAllocator final : public IAllocator
             }
 #endif
             mAlive.store(false, std::memory_order_release);
+
+            if (mShards != nullptr)
+            {
+                for (usize i = 0; i < mShardCount; ++i)
+                {
+                    mShards[i].~Shard();
+                }
+
+                const usize bytes = mShardCount * sizeof(Shard);
+                const usize alignment = alignof(Shard);
+                mParent->Deallocate(mShards, bytes, alignment);
+
+                mShards = nullptr;
+                mShardCount = 0;
+            }
         }
 
         // ---
@@ -430,13 +445,22 @@ class SmallObjectAllocator final : public IAllocator
             std::atomic<usize> CachedCount{ 0 };
         };
 
-        void InitShards(usize requestedCount) noexcept
+        void InitShards(usize requestedCount)
         {
             const usize normalized = NormalizeShardCount(requestedCount);
-            auto* storage = new (std::nothrow) Shard[normalized];
-            DNG_CHECK(storage != nullptr && "SmallObjectAllocator::InitShards allocation failed");
+            const usize bytes = normalized * sizeof(Shard);
+            const usize alignment = alignof(Shard);
+
+            void* mem = mParent->Allocate(bytes, alignment);
+            DNG_CHECK(mem != nullptr && "SmallObjectAllocator::InitShards allocation failed");
+
             mShardCount = normalized;
-            mShards.reset(storage);
+            mShards = static_cast<Shard*>(mem);
+
+            for (usize i = 0; i < mShardCount; ++i)
+            {
+                new (&mShards[i]) Shard{};
+            }
         }
 
         [[nodiscard]] constexpr usize ShardMask() const noexcept
@@ -482,8 +506,8 @@ class SmallObjectAllocator final : public IAllocator
         bool              mTLSBinsEnabled{ false };
 #endif
         usize             mBaseBatch{ kDefaultBatch };
-    usize             mShardCount{ 1 };
-    std::unique_ptr<Shard[]> mShards;
+        usize             mShardCount{ 1 };
+        Shard*            mShards{ nullptr };
         Class             mClasses[kNumClasses]{};
         std::atomic<bool> mAlive{ true };
 
@@ -1018,7 +1042,7 @@ class SmallObjectAllocator final : public IAllocator
             SmallObjectConfig Config;
             usize             BaseBatch;
             usize             ShardCount;
-            std::unique_ptr<Shard[]> Shards;
+            Shard*            Shards;
             Class             Classes[kNumClasses];
             std::atomic<bool> Alive;
         };
