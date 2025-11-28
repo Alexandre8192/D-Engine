@@ -1,14 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36511.14 d17.14
+VisualStudioVersion = 17.14.36511.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "D-Engine", "D-Engine.vcxproj", "{F0B4BB1D-E72F-43AA-834C-0668A82907DC}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "D-Engine-BenchRunner", "D-Engine-BenchRunner.vcxproj", "{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}"
-	ProjectSection(ProjectDependencies) = postProject
-		{F0B4BB1D-E72F-43AA-834C-0668A82907DC} = {F0B4BB1D-E72F-43AA-834C-0668A82907DC}
-	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -26,20 +21,12 @@ Global
 		{F0B4BB1D-E72F-43AA-834C-0668A82907DC}.Release|x64.Build.0 = Release|x64
 		{F0B4BB1D-E72F-43AA-834C-0668A82907DC}.Release|x86.ActiveCfg = Release|Win32
 		{F0B4BB1D-E72F-43AA-834C-0668A82907DC}.Release|x86.Build.0 = Release|Win32
-		{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}.Debug|x64.ActiveCfg = Debug|x64
-		{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}.Debug|x64.Build.0 = Debug|x64
-		{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}.Debug|x86.ActiveCfg = Debug|x64
-		{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}.Debug|x86.Build.0 = Debug|x64
-		{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}.Release|x64.ActiveCfg = Release|x64
-		{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}.Release|x64.Build.0 = Release|x64
-		{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}.Release|x86.ActiveCfg = Release|x64
-		{62E9ACFA-9F0A-4B9A-9A2D-3B0D76F8850F}.Release|x86.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		StartupProject = D-Engine-BenchRunner
 		SolutionGuid = {A8A02746-FC9F-48AC-BA40-5455F3960FA2}
+		StartupProject = D-Engine-BenchRunner
 	EndGlobalSection
 EndGlobal

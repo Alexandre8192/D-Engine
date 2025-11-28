@@ -9,9 +9,11 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace dng::tests
+{
 namespace
 {
-    void ValidateAligned(void* ptr, std::size_t requestedAlignment, std::size_t size, ::dng::memory::GuardAllocator& alloc) noexcept
+    void ValidateAligned(void* ptr, std::size_t requestedAlignment, std::size_t size, memory::GuardAllocator& alloc) noexcept
     {
         if (!ptr)
         {
@@ -20,17 +22,17 @@ namespace
         }
 
         const std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(ptr);
-        const ::dng::core::usize normalized = ::dng::core::NormalizeAlignment(requestedAlignment);
+        const core::usize normalized = core::NormalizeAlignment(requestedAlignment);
         DNG_CHECK(addr % normalized == 0 && "GuardAllocator pointer is not aligned to normalized boundary");
 
         alloc.Deallocate(ptr, size, requestedAlignment);
     }
 }
 
-int main()
+[[maybe_unused]] void RunGuardAllocatorAlignmentSmoke() noexcept
 {
-    ::dng::core::DefaultAllocator parent{};
-    ::dng::memory::GuardAllocator guard(&parent);
+    core::DefaultAllocator parent{};
+    memory::GuardAllocator guard(&parent);
 
     constexpr std::array<std::size_t, 4> alignments{ 8u, 16u, 32u, 64u };
     constexpr std::size_t payloadSize = 128u;
@@ -44,6 +46,6 @@ int main()
     // Zero alignment should use NormalizeAlignment fallback.
     void* defaultAligned = guard.Allocate(payloadSize, 0u);
     ValidateAligned(defaultAligned, 0u, payloadSize, guard);
-
-    return 0;
 }
+
+} // namespace dng::tests

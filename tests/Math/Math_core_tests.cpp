@@ -15,10 +15,8 @@
 #include "Core/Math/Quaternion.hpp"
 #include "Core/Diagnostics/Check.hpp"
 
-#include <cstdio>
-
-using namespace dng;
-
+namespace dng::tests
+{
 namespace
 {
     constexpr float32 kEpsilon = 1e-4f;
@@ -32,8 +30,6 @@ namespace
 
     void RunMat4InverseTest() noexcept
     {
-        std::printf("Running Mat4 inverse convention test...\n");
-
         // Column-major matrices composed with column vectors: final matrix is T * S
         const Mat4f scale = Mat4f::Scale(Vec3f(2.0f));
         const Mat4f translate = Mat4f::Translation(Vec3f(3.0f, -1.0f, 5.0f));
@@ -49,8 +45,6 @@ namespace
 
     void RunQuaternionRotationTest() noexcept
     {
-        std::printf("Running quaternion axis-angle convention test...\n");
-
         // Positive +Y rotation (Pi/2) moves +X toward +Z using the right-hand rule,
         // which under the engine's convention yields (0, 0, -1).
         const Vec3f axis(0.0f, 1.0f, 0.0f);
@@ -66,11 +60,10 @@ namespace
     }
 }
 
-int main()
+[[maybe_unused]] void RunMathCoreTests() noexcept
 {
     RunMat4InverseTest();
     RunQuaternionRotationTest();
-
-    std::printf("Math_core_tests passed.\n");
-    return 0;
 }
+
+} // namespace dng::tests

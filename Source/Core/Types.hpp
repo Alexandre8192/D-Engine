@@ -11,6 +11,8 @@
 // instead of raw native types like 'int' or 'long'.
 // =============================
 
+namespace dng
+{
 // ---- Integer types ----
 using int8 = std::int8_t;
 using int16 = std::int16_t;
@@ -51,6 +53,7 @@ using bool8 = uint8; // Optional compact bool
 
 // ---- Aliases for readability (optional) ----
 using byte = uint8;
+} // namespace dng
 
 // =============================
 // Internal macros (use only in engine internals)
