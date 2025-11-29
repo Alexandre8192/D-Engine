@@ -25,7 +25,7 @@
 
 #include <cstdint>
 
-int main()
+int RunStackAllocatorSmoke()
 {
     ::dng::core::DefaultAllocator parent{};
     constexpr ::dng::core::usize kCapacity = 256;

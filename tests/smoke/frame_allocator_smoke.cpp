@@ -20,7 +20,7 @@
 #include <array>
 #include <cstdint>
 
-int main()
+int RunFrameAllocatorSmoke()
 {
     alignas(64) std::array<std::uint8_t, 512> backing{};
     ::dng::core::FrameAllocator allocator(backing.data(), backing.size());

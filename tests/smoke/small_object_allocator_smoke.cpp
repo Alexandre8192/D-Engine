@@ -25,7 +25,7 @@
 
 #include <cstdint>
 
-int main()
+int RunSmallObjectAllocatorSmoke()
 {
     ::dng::core::DefaultAllocator parent{};
 

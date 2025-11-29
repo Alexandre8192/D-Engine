@@ -161,6 +161,30 @@
     <ClCompile Include="tests\SelfContain\GuardAllocator_header_only.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
+    <ClCompile Include="tests\SelfContain\Renderer_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\SelfContain\Renderer_NullRenderer_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\SelfContain\Renderer_BasicForwardRenderer_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\SelfContain\Renderer_RendererSystem_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\BasicForwardRenderer_smoke.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\RendererSystem_smoke.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\RendererSystem_BasicForwardRenderer_smoke.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Renderer_BasicForwardRenderer_demo.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
     <ClCompile Include="tests\smoke\guard_allocator_alignment_smoke.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>

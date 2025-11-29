@@ -15,7 +15,7 @@
 
 using namespace dng;
 
-int main()
+int RunMathSmoke()
 {
     std::printf("Running Math_smoke...\n");
 

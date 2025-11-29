@@ -31,7 +31,7 @@
 
 #include <cstdint>
 
-int main()
+int RunArenaAllocatorSmoke()
 {
     ::dng::core::DefaultAllocator parent{};
     constexpr ::dng::core::usize kCapacity = 512;

@@ -1,6 +1,6 @@
 #include "Core/Logger.hpp"
 
-int main()
+int RunLoggerOnlySmoke()
 {
     dng::core::Logger::Info("Test", "Hello Logger");
     return 0;
