@@ -21,6 +21,7 @@
 
 #include <concepts>
 #include <type_traits>
+#include <cassert>
 
 namespace dng::render
 {
@@ -240,16 +241,31 @@ namespace dng::render
 
     // Purpose : Submit render instances to the backend.
     // Contract: instances pointer/count follow the same lifetime rules as the
-    //           FrameSubmission that introduced them.
+    //           FrameSubmission that introduced them. Null instances or zero
+    //           count are ignored; debug builds assert when count>0 but
+    //           instances is null.
     // Notes   : Null renderer typically ignores the call.
     inline void SubmitInstances(RendererInterface& renderer,
                                 const RenderInstance* instances,
                                 dng::u32 instanceCount) noexcept
     {
-        if (renderer.vtable.submitInstances && renderer.userData && instances && instanceCount > 0)
+        if (!renderer.vtable.submitInstances || !renderer.userData)
         {
-            renderer.vtable.submitInstances(renderer.userData, instances, instanceCount);
+            return;
         }
+
+        if (instanceCount == 0U)
+        {
+            return;
+        }
+
+        assert(instances != nullptr && "SubmitInstances requires non-null instances when count > 0");
+        if (instances == nullptr)
+        {
+            return;
+        }
+
+        renderer.vtable.submitInstances(renderer.userData, instances, instanceCount);
     }
 
     // Purpose : End the frame for the dynamic interface.

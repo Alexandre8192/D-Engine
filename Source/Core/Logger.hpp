@@ -6,7 +6,8 @@
 // =============================
 // Goals
 //  - Always-safe to include (no heavy deps, header-only)
-//  - C++23 std::print/std::println backend (no third-party)
+//  - C++23 std::print/std::println backend (no third-party); falls back to
+//    std::format + fprintf when std::print is unavailable (e.g., /std:c++20)
 //  - Zero/low overhead when disabled (compile-time switches)
 //  - Simple runtime min-level filter and optional category filter
 //  - Thread-safe emission (coarse-grained mutex around a single print)
@@ -24,10 +25,13 @@
 #include <atomic>
 #include <mutex>
 #include <string_view>
-#include <print>        // C++23 std::print / std::println
+#if __has_include(<print>)
+#  include <print>      // C++23 std::print / std::println when available
+#endif
 #include <format>       // std::format_string
 #include <cstdio>       // std::FILE, stdout/stderr
 #include <cstdlib>      // std::abort
+#include <string>       // fallback formatting buffer
 
 #ifndef DNG_ENABLE_LOGGING
 #  define DNG_ENABLE_LOGGING 1
@@ -37,6 +41,12 @@
 #endif
 
 namespace dng::core {
+
+#if defined(__cpp_lib_print) && (__cpp_lib_print >= 202207L)
+constexpr bool kHasStdPrint = true;
+#else
+constexpr bool kHasStdPrint = false;
+#endif
 
     enum class LogLevel : std::uint8_t {
         Disabled = 0,
@@ -142,13 +152,26 @@ namespace dng::core {
             const char* lvlStr = ToShortLevel(lvl);
             std::scoped_lock lock(self.mMutex);
             try {
-                if (category) {
-                    std::print(stream, "[{}][{}] ", lvlStr, category);
+                if constexpr (kHasStdPrint)
+                {
+                    if (category) {
+                        std::print(stream, "[{}][{}] ", lvlStr, category);
+                    }
+                    else {
+                        std::print(stream, "[{}] ", lvlStr);
+                    }
+                    std::println(stream, fmt, static_cast<Args&&>(args)...);
                 }
-                else {
-                    std::print(stream, "[{}] ", lvlStr);
+                else
+                {
+                    const std::string formatted = std::format(fmt, static_cast<Args&&>(args)...);
+                    if (category) {
+                        std::fprintf(stream, "[%s][%s] %s\n", lvlStr, category, formatted.c_str());
+                    }
+                    else {
+                        std::fprintf(stream, "[%s] %s\n", lvlStr, formatted.c_str());
+                    }
                 }
-                std::println(stream, fmt, static_cast<Args&&>(args)...);
             }
             catch (...) {
                 // swallow
@@ -161,11 +184,25 @@ namespace dng::core {
             const char* lvlStr = ToShortLevel(lvl);
             std::scoped_lock lock(self.mMutex);
             try {
-                if (category) {
-                    std::println(stream, "[{}][{}] {}", lvlStr, category, msg);
+                if constexpr (kHasStdPrint)
+                {
+                    if (category) {
+                        std::println(stream, "[{}][{}] {}", lvlStr, category, msg);
+                    }
+                    else {
+                        std::println(stream, "[{}] {}", lvlStr, msg);
+                    }
                 }
-                else {
-                    std::println(stream, "[{}] {}", lvlStr, msg);
+                else
+                {
+                    if (category) {
+                        std::fprintf(stream, "[%s][%s] %.*s\n", lvlStr, category,
+                                     static_cast<int>(msg.size()), msg.data());
+                    }
+                    else {
+                        std::fprintf(stream, "[%s] %.*s\n", lvlStr,
+                                     static_cast<int>(msg.size()), msg.data());
+                    }
                 }
             }
             catch (...) {

@@ -22,6 +22,7 @@ int RunBasicForwardRendererSmoke()
 
     FrameSubmission submission{};
     RenderView views[1]{};
+    RenderInstance instances[3]{};
     views[0].width  = 800U;
     views[0].height = 600U;
     submission.views     = views;
@@ -29,7 +30,7 @@ int RunBasicForwardRendererSmoke()
 
     auto iface = MakeBasicForwardRendererInterface(backend);
     BeginFrame(iface, submission);
-    SubmitInstances(iface, nullptr, 3U);
+    SubmitInstances(iface, instances, 3U);
     EndFrame(iface);
 
     const auto& stats = backend.GetStats();

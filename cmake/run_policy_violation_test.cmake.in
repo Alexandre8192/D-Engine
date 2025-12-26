@@ -1,0 +1,78 @@
+cmake_minimum_required(VERSION 3.20)
+
+set(DNG_POLICY_VIOLATION_SOURCES "@DNG_POLICY_VIOLATION_SOURCES@")
+set(DNG_POLICY_VIOLATION_EXPECT_FAILS "@DNG_POLICY_VIOLATION_EXPECT_FAILS@")
+set(DNG_POLICY_VIOLATION_BINARY_ROOT "@DNG_POLICY_VIOLATION_BINARY_ROOT@")
+set(DNG_POLICY_INCLUDE_DIRS "@DNG_POLICY_INCLUDE_DIRS@")
+set(DNG_POLICY_COMPILE_OPTIONS "@DNG_POLICY_COMPILE_OPTIONS@")
+set(DNG_GENERATOR "@CMAKE_GENERATOR@")
+set(DNG_TOOLCHAIN_FILE "@CMAKE_TOOLCHAIN_FILE@")
+
+list(LENGTH DNG_POLICY_VIOLATION_SOURCES DNG_POLICY_VIOLATION_SOURCES_LEN)
+list(LENGTH DNG_POLICY_VIOLATION_EXPECT_FAILS DNG_POLICY_VIOLATION_EXPECT_FAILS_LEN)
+if(NOT DNG_POLICY_VIOLATION_SOURCES_LEN EQUAL DNG_POLICY_VIOLATION_EXPECT_FAILS_LEN)
+    message(FATAL_ERROR "Mismatch between violation sources and expected-fail flags")
+endif()
+
+if(DNG_POLICY_VIOLATION_SOURCES_LEN EQUAL 0)
+    message(FATAL_ERROR "No policy violation sources provided")
+endif()
+
+math(EXPR DNG_POLICY_VIOLATION_LAST_INDEX "${DNG_POLICY_VIOLATION_SOURCES_LEN} - 1")
+
+foreach(idx RANGE 0 ${DNG_POLICY_VIOLATION_LAST_INDEX})
+    list(GET DNG_POLICY_VIOLATION_SOURCES ${idx} violation_src)
+    list(GET DNG_POLICY_VIOLATION_EXPECT_FAILS ${idx} expect_fail)
+
+    get_filename_component(violation_name "${violation_src}" NAME_WE)
+    set(violation_bin_dir "${DNG_POLICY_VIOLATION_BINARY_ROOT}/${violation_name}")
+
+    file(MAKE_DIRECTORY "${violation_bin_dir}")
+
+    file(WRITE "${violation_bin_dir}/CMakeLists.txt" "\
+cmake_minimum_required(VERSION 3.20)\n\
+project(DngPolicyViolation_${violation_name} LANGUAGES CXX)\n\
+add_executable(${violation_name} \"${violation_src}\")\n\
+target_compile_features(${violation_name} PRIVATE cxx_std_23)\n\
+target_include_directories(${violation_name} PRIVATE ${DNG_POLICY_INCLUDE_DIRS})\n\
+target_compile_options(${violation_name} PRIVATE ${DNG_POLICY_COMPILE_OPTIONS})\n\
+")
+
+    set(configure_cmd "${CMAKE_COMMAND}" -G "${DNG_GENERATOR}" "${violation_bin_dir}")
+    if(DNG_TOOLCHAIN_FILE)
+        list(APPEND configure_cmd -DCMAKE_TOOLCHAIN_FILE="${DNG_TOOLCHAIN_FILE}")
+    endif()
+
+    execute_process(
+        COMMAND ${configure_cmd}
+        RESULT_VARIABLE cfg_result
+        OUTPUT_VARIABLE cfg_out
+        ERROR_VARIABLE cfg_err
+        WORKING_DIRECTORY "${violation_bin_dir}"
+    )
+
+    if(NOT cfg_result EQUAL 0)
+        message(FATAL_ERROR "Configuring policy violation test '${violation_name}' failed.\n${cfg_out}${cfg_err}")
+    endif()
+
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" --build "${violation_bin_dir}"
+        RESULT_VARIABLE build_result
+        OUTPUT_VARIABLE build_out
+        ERROR_VARIABLE build_err
+    )
+
+    if(expect_fail)
+        if(build_result EQUAL 0)
+            message(FATAL_ERROR "Policy violation '${violation_name}' compiled successfully; expected failure.\n${build_out}${build_err}")
+        else()
+            message(STATUS "Policy violation '${violation_name}' correctly failed to compile")
+        endif()
+    else()
+        if(build_result EQUAL 0)
+            message(STATUS "Policy violation guard '${violation_name}' compiled successfully (force-include validated)")
+        else()
+            message(FATAL_ERROR "Policy violation guard '${violation_name}' failed to compile unexpectedly.\n${build_out}${build_err}")
+        endif()
+    endif()
+endforeach()

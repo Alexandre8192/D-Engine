@@ -1,76 +1,72 @@
-# `docs/LanguagePolicy.md`
+# D-Engine — Language Policy (Repository)
 
-````markdown
-# D-Engine — Language Policy (Core)
+> Goal: Deterministic, auditable, portable C++23/26 with zero hidden costs.
+> This document defines what D-Engine code allows and why.
+> The policy applies to the entire repository:
+> Source/, Backends/, Tests/, Examples/, Tools/.
 
-> **Goal:** Deterministic, auditable, portable C++23/26 with zero hidden costs.
-> This document defines **what the Core allows** and **why**. Subsystems and
-> backends must conform.
+---
 
 ## TL;DR
 
-- **No exceptions in Core.** No `throw`, no `try/catch`. Use explicit status.
-- **No RTTI in Core.** No `dynamic_cast`, no `typeid`.
-- **STL allowed with constraints.** Public APIs expose views/POD; if a standard
-  container is used internally, wire it to the engine allocator and avoid hidden
-  allocations in hot paths.
-- **Namespaces are fine.** Everything under `dng::`; no anonymous namespaces in
-  public headers.
-- **Assert-first.** Use `DNG_CHECK` / `DNG_ASSERT`; guard costly logs behind
-  `Logger::IsEnabled()`.
+- No C++ exceptions anywhere. No throw, no try/catch.
+- No RTTI anywhere. No dynamic_cast, no typeid.
+- Explicit error handling only: status-based APIs.
+- Public APIs expose POD and views, never owning STL containers.
+- No hidden allocations in hot paths.
+- Determinism by design: time, randomness, IO go through engine services only.
+- Enforcement is automatic: compiler flags + CI scans.
 
 ---
 
 ## 1) Exceptions
 
 ### Policy
-- **Forbidden in `Source/Core/**`** (engine core): **no `throw`, no `try/catch`**.
-- Allowed **only at interop boundaries** (separate module) to **catch and
-  translate** third-party exceptions into explicit status for the Core.
-  Exceptions must never cross into Core code.
-- The **only** sanctioned emission of `std::bad_alloc` inside Core is the
-  global `operator new/new[]` overrides in `Core/Memory/GlobalNewDelete.cpp`; all
-  other code must remain exception-free.
-- Global OOM behavior is configured via `SetFatalOnOOMPolicy` (wired through
-  `MemorySystem`). **Hard** mode aborts immediately inside the failing allocator;
-  **Soft** mode bubbles a `nullptr` back to Core and only the global new/delete
-  bridge translates it to `std::bad_alloc`.
+
+C++ exceptions are forbidden across the entire D-Engine repository.
+
+This includes:
+- Source/
+- Backends/
+- Tests/
+- Examples/
+- Tools/
+
+Forbidden constructs:
+- throw
+- try / catch
+- deprecated dynamic exception specifications (noexcept is allowed)
+- APIs that require exceptions to function correctly
+
+No code in this repository is allowed to rely on exception-based control flow.
+APIs whose normal operation relies on stack unwinding or exception propagation are forbidden.
 
 ### Rationale
-- Determinism and performance (no unwinding tables, no surprise slow paths).
-- Portability across toolchains/platforms.
-- Error contracts are visible at the call site.
 
-### Patterns
+- Determinism: no hidden control flow or stack unwinding.
+- Portability: not all platforms/toolchains support exceptions uniformly.
+- Performance predictability: no hidden tables, no surprise slow paths.
+- Auditability: all failure paths are explicit at the call site.
+- Teaching value: users learn to reason about failure explicitly.
+
+### Required Pattern
+
+All fallible operations must return an explicit status.
 
 ```cpp
-// Core API (status-based)
 struct [[nodiscard]] Status {
   bool ok;
   const char* msg; // optional, static or caller-managed
 };
 
-[[nodiscard]] inline Status LoadFoo(BufferView src, Foo& out) noexcept;
-
-// Interop boundary (exceptions ON only here)
-[[nodiscard]] inline Status LoadVia3rdPartyNoThrow(const char* path) noexcept {
-  try {
-    ThirdParty::Load(path); // may throw
-    return {true, nullptr};
-  } catch (const std::exception& e) {
-    DNG_LOG_ERROR("Interop", "3rd-party exception: {}", e.what());
-    return {false, "3rd-party exception"};
-  } catch (...) {
-    DNG_LOG_ERROR("Interop", "3rd-party exception: <unknown>");
-    return {false, "3rd-party exception"};
-  }
-}
+[[nodiscard]] Status LoadFoo(BufferView src, Foo& out) noexcept;
 ```
 
-**Build flags (Core targets):**
+Fatal conditions are handled explicitly via:
 
-* MSVC: `/EHs-` (no C++ EH), keep SEH as needed; do **not** use `/EHsc` in Core.
-* Clang/GCC: `-fno-exceptions`.
+* DNG_ASSERT (programmer error)
+* DNG_CHECK + Status return (recoverable error)
+* Engine-defined abort paths (OOM, contract violation)
 
 ---
 
@@ -78,81 +74,133 @@ struct [[nodiscard]] Status {
 
 ### Policy
 
-* **Forbidden in Core:** no `dynamic_cast`, no `typeid`.
+RTTI is forbidden across the entire repository.
 
-### Alternatives
+Forbidden constructs:
 
-* **Static polymorphism:** concepts/CRTP/templates.
-* **Tiny dynamic facades:** explicit V-tables (structs of function pointers).
-* Optional lightweight `TypeId` (integral/UUID) when you need tagged unions.
+* dynamic_cast
+* typeid
+* std::type_info
 
-**Build flags (Core targets):**
+### Rationale
 
-* MSVC: `/GR-`
-* Clang/GCC: `-fno-rtti`
+* Predictable binary layout and ABI.
+* No hidden runtime metadata.
+* Encourages explicit, intentional polymorphism.
+
+### Allowed Alternatives
+
+* Static polymorphism (templates, concepts, CRTP).
+* Explicit v-tables (structs of function pointers).
+* Tagged unions (enum + union / variant-like POD).
+* Engine-defined TypeId (integral or hashed), if needed.
 
 ---
 
 ## 3) STL Usage
 
-### Allowed with constraints
+### General Rule
 
-* Public headers **prefer views and POD** (`std::span`, pointers+sizes, simple
-  structs). Avoid exposing owning standard containers in public ABI.
-* Internal implementation can use a **curated subset**:
+The STL is allowed, but never implicitly.
 
-* Fundamentals: `<array> <span> <bit> <type_traits> <limits> <utility> <tuple> <optional> <variant> <string_view>`
-* Containers if needed **and** wired to the engine allocator via an
-  `AllocatorAdapter`: `<vector> <deque> <string> <unordered_map> <unordered_set>`
-* Avoid heavy/locale/IO subsystems unless justified:
-  **no** `<regex>`, `<filesystem>`, `<iostream>`, `<locale>`, `<future>`,
-  `<thread>` in Core by default.
+### Public APIs
 
-### Rules
+Public headers must expose:
 
-* **No hidden allocations** on hot paths. Pre-reserve or use caller-provided
-  buffers. Document complexity and allocation behavior in **Contract**.
-* Do not introduce ABI that implicitly requires exceptions/RTTI (e.g.
-  `std::function` with owning semantics) in Core public APIs.
-* Prefer engine aliases/adapters when available.
+* POD types
+* views (pointer + size, Span, StringView)
+* engine-defined lightweight abstractions
 
----
+Public APIs must not expose:
 
-## 4) Namespaces & Globals
+* owning STL containers
+* types that require exceptions or RTTI
+* allocator-opaque abstractions
 
-* Everything lives under `namespace dng { ... }`.
-* **No anonymous namespaces in public headers** (OK in `.inl` or private TU).
-* No mutable global state in headers. Prefer `constexpr` data or explicit
-  initialization functions and context objects.
+### Internal Usage
 
----
+Internal code may use a curated subset of the STL:
 
-## 5) Assertions, Logging, Diagnostics
+Allowed headers:
 
-* Programmer errors → `DNG_ASSERT(cond)`.
-* Recoverable runtime conditions → `DNG_CHECK(cond)` and return a `Status`.
-* Heavy logging under `Logger::IsEnabled("Category")` guards.
+* <array>, <span>, <bit>, <type_traits>, <limits>
+* <utility>, <tuple>, <optional>, <variant>
+* <string_view>
 
----
+Containers are allowed only if:
 
-## 6) Build Profiles (suggested)
+* they are wired to the engine allocator
+* their allocation behavior is documented
+* they are not used in hot paths without preallocation
 
-* **core_debug:** `-O0`, asserts ON, logs ON, `-fno-exceptions -fno-rtti`
-  (`/EHs- /GR-` on MSVC).
-* **core_release:** `-O3`, asserts OFF or light, logs minimal, same no-exceptions/no-rtti.
-* **interop_exceptions (optional):** an **isolated** target where exceptions are
-  ON to interface with throwing third-party libs; all exceptions are translated
-  to `Status` before returning to Core.
+Avoid by default in Core logic (justify if used):
+
+* <regex>, <filesystem>, <iostream>, <locale>
+* <future>, <thread>
 
 ---
 
-## 7) Quick FAQ
+## 4) Memory & Allocation
 
-* **Multiple inheritance?** Allowed (we are not bound by Unreal’s `UObject`
-  constraint). Prefer composition; document virtual destructor/ABI choices.
-* **Why not STL everywhere?** We do use STL—carefully. Public ABI should remain
-  lean, allocator-aware, and free of implicit EH/RTTI requirements.
-* **Why so strict on EH/RTTI?** Determinism, portability, binary size, and
-  predictable cost—central to D-Engine’s teaching/auditing goals.
+* No hidden allocations in hot paths.
+* Allocation must be explicit, visible, and documented.
+* APIs must state allocation behavior in their Contract.
+  This includes:
+  - whether allocation occurs
+  - when it occurs
+  - under which conditions it may fail
+* Callers must control lifetime and ownership.
 
-````
+OOM behavior is engine-defined and explicit.
+No allocation failure is allowed to escape implicitly.
+
+---
+
+## 5) Determinism
+
+* No direct use of std::rand, std::chrono, OS clocks, or global state.
+* Time, randomness, IO, and threading go through engine services.
+* Deterministic backends are the default.
+
+Note: Determinism is evaluated at the engine contract level, not at the OS level.
+
+---
+
+## 6) Namespaces & Globals
+
+* All symbols live under namespace dng.
+* No anonymous namespaces in public headers.
+* No mutable global state in headers.
+* Use constexpr data or explicit initialization APIs.
+
+---
+
+## 7) Assertions & Diagnostics
+
+* Programmer errors: DNG_ASSERT
+* Recoverable errors: DNG_CHECK + Status
+* Logging must be explicit and guarded.
+
+---
+
+## 8) Enforcement
+
+This policy is enforced by:
+
+* Compiler flags applied per target:
+
+  * -fno-exceptions / -fno-rtti (Clang/GCC)
+  * /EHs- /GR- (MSVC)
+* Force-included policy header (every translation unit): Source/Core/Policy/LanguagePolicy.hpp
+* CMake helper `dng_enforce_language_policy(target)` applies both the force-include and the disable-EH/RTTI flags to every engine-owned target.
+* CI forbidden-pattern scanning
+
+Violations are build errors.
+
+---
+
+## Final Note
+
+D-Engine is intentionally strict.
+If you need exceptions, RTTI, or opaque abstractions,
+they belong outside of this repository.
