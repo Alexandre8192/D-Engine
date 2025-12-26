@@ -20,6 +20,8 @@ ipch/
 Debug/
 Release/
 x64/
+Build/
+D-Engine/
 *.dll
 *.exe
 *.lib
@@ -34,6 +36,9 @@ Makefile
 ## Logs and dumps ##
 *.log
 *.dmp
+*.iobj
+*.ipdb
+*.recipe
 
 ## Others ##
 *.opensdf
@@ -85,6 +90,7 @@ out/
 bench_report.md
 **/*.bench.md
 sweep_report.md
+build_log.txt
 
 # Optional editor caches
 .vscode/
