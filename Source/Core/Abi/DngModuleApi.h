@@ -27,6 +27,15 @@ typedef struct dng_module_api_v1 {
     dng_u32         module_version_patch;
 
     dng_window_api_v1 window; // Pilot subsystem export.
+
+    // Purpose : Shutdown module and free allocated context.
+    // Contract: Must be called before module unload; ctx from window.ctx must
+    //           remain valid until this is called; returns DNG_STATUS_OK on
+    //           success or error code on failure; idempotent (safe to call
+    //           multiple times with same ctx).
+    // Notes   : Added to support proper cleanup of dynamically allocated contexts.
+    //           If NULL, module uses static storage and no cleanup is needed.
+    dng_status_v1 (*shutdown)(void* ctx, const dng_host_api_v1* host);
 } dng_module_api_v1;
 
 DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v1(

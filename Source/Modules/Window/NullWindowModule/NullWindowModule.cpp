@@ -3,9 +3,12 @@
 // ----------------------------------------------------------------------------
 // Purpose : Minimal loadable module implementing the Window ABI v1 (null impl).
 // Contract: C ABI; POD-only ABI structs; no exceptions/RTTI; single-window only;
-//           host allocator used for title copies; caller owns module lifetime.
+//           context allocated via host->alloc in dngModuleGetApi_v1 and freed
+//           in shutdown; host allocator used for title copies; caller must call
+//           shutdown before module unload.
 // Notes   : set_title allocates via host->alloc and frees previous via host->free;
 //           not intended for hot paths. Determinism follows host pump cadence.
+//           Context is thread-safe per-instance (one context per module load).
 // ============================================================================
 #define DNG_ABI_EXPORTS
 #include "Core/Abi/DngModuleApi.h"
@@ -19,6 +22,11 @@ typedef struct NullWindowCtx {
     char*                  title;
     dng_u32                title_size;
 } NullWindowCtx;
+
+// Context and title allocation constants (size and align must match free).
+static const dng_u64 kNullWindowCtxSize = sizeof(NullWindowCtx);
+static const dng_u64 kNullWindowCtxAlign = alignof(NullWindowCtx);
+static const dng_u64 kTitleAlign = 1u; // Byte alignment for title strings.
 
 static dng_u32 NullWindow_StrLen(const char* cstr)
 {
@@ -39,7 +47,7 @@ static dng_status_v1 NullWindow_SetTitleInternal(NullWindowCtx* ctx, dng_str_vie
 
     if (ctx->title)
     {
-        ctx->host->free(ctx->host->user, ctx->title, ctx->title_size, 1u);
+        ctx->host->free(ctx->host->user, ctx->title, ctx->title_size, kTitleAlign);
         ctx->title = NULL;
         ctx->title_size = 0u;
     }
@@ -49,7 +57,7 @@ static dng_status_v1 NullWindow_SetTitleInternal(NullWindowCtx* ctx, dng_str_vie
         return DNG_STATUS_OK;
     }
 
-    void* mem = ctx->host->alloc(ctx->host->user, title.size, 1u);
+    void* mem = ctx->host->alloc(ctx->host->user, title.size, kTitleAlign);
     if (!mem)
     {
         return DNG_STATUS_OUT_OF_MEMORY;
@@ -97,7 +105,7 @@ static dng_status_v1 DNG_ABI_CALL NullWindow_Destroy(void* raw_ctx, dng_window_h
 
     if (ctx->title)
     {
-        ctx->host->free(ctx->host->user, ctx->title, ctx->title_size, 1u);
+        ctx->host->free(ctx->host->user, ctx->title, ctx->title_size, kTitleAlign);
     }
 
     ctx->title = NULL;
@@ -148,6 +156,28 @@ static void NullWindow_InitWindowApi(NullWindowCtx* ctx, dng_window_api_v1* api)
     api->set_title = &NullWindow_SetTitle;
 }
 
+static dng_status_v1 DNG_ABI_CALL NullWindow_Shutdown(void* raw_ctx, const dng_host_api_v1* host)
+{
+    if (!raw_ctx || !host || !host->free)
+    {
+        return DNG_STATUS_INVALID_ARG;
+    }
+
+    NullWindowCtx* ctx = (NullWindowCtx*)raw_ctx;
+
+    // Free any window title allocation.
+    if (ctx->title)
+    {
+        host->free(host->user, ctx->title, ctx->title_size, kTitleAlign);
+        ctx->title = NULL;
+        ctx->title_size = 0u;
+    }
+
+    // Free the context itself (size and align must match allocation).
+    host->free(host->user, raw_ctx, kNullWindowCtxSize, kNullWindowCtxAlign);
+    return DNG_STATUS_OK;
+}
+
 static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v1* api)
 {
     api->header.struct_size = (dng_u32)sizeof(dng_module_api_v1);
@@ -159,6 +189,8 @@ static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v1* api)
     api->module_version_minor = 0u;
     api->module_version_patch = 0u;
 
+    api->shutdown = &NullWindow_Shutdown;
+
     NullWindow_InitWindowApi(ctx, &api->window);
 }
 
@@ -169,14 +201,21 @@ DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v1(const dng_host_api_v1*
         return DNG_STATUS_INVALID_ARG;
     }
 
-    static NullWindowCtx ctx;
-    ctx.host = host;
-    ctx.handle = 0u;
-    ctx.size.width = 0u;
-    ctx.size.height = 0u;
-    ctx.title = NULL;
-    ctx.title_size = 0u;
+    // Allocate module context via host allocator (caller owns lifetime).
+    void* mem = host->alloc(host->user, kNullWindowCtxSize, kNullWindowCtxAlign);
+    if (!mem)
+    {
+        return DNG_STATUS_OUT_OF_MEMORY;
+    }
 
-    NullWindow_FillModuleApi(&ctx, out_api);
+    NullWindowCtx* ctx = (NullWindowCtx*)mem;
+    ctx->host = host;
+    ctx->handle = 0u;
+    ctx->size.width = 0u;
+    ctx->size.height = 0u;
+    ctx->title = NULL;
+    ctx->title_size = 0u;
+
+    NullWindow_FillModuleApi(ctx, out_api);
     return DNG_STATUS_OK;
 }
