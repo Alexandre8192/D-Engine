@@ -108,4 +108,4 @@ The next renderer milestones can build on this foundation by tackling items such
 - Enriching `FrameSubmission` handling with multi-view/multi-instance scenarios, including culling hooks and job system integration.
 - Extending the smoke/demo coverage to include per-view stats, resize paths, and error-handling scenarios.
 
-(See `Docs/RenderVision.md` for the long-term renderer direction; the list above stays deliberately high-level and grounded in the current code.)
+(See `Docs/Renderer_Vision.md` for the long-term renderer direction; the list above stays deliberately high-level and grounded in the current code.)
