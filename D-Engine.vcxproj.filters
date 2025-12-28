@@ -191,5 +191,8 @@
     <ClCompile Include="tests\Smoke\Memory\Math_smoke.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
+    <ClCompile Include="tests\Abi\AbiLayout_v1.c">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
