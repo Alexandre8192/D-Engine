@@ -23,6 +23,10 @@ typedef struct NullWindowCtx {
     dng_u32                title_size;
 } NullWindowCtx;
 
+// Context allocation size and alignment (must match free).
+enum { kNullWindowCtxSize = sizeof(NullWindowCtx) };
+enum { kNullWindowCtxAlign = alignof(NullWindowCtx) };
+
 static dng_u32 NullWindow_StrLen(const char* cstr)
 {
     if (!cstr)
@@ -168,8 +172,8 @@ static void DNG_ABI_CALL NullWindow_Shutdown(void* raw_ctx, const dng_host_api_v
         ctx->title_size = 0u;
     }
 
-    // Free the context itself.
-    host->free(host->user, raw_ctx, sizeof(NullWindowCtx), alignof(NullWindowCtx));
+    // Free the context itself (size and align must match allocation).
+    host->free(host->user, raw_ctx, kNullWindowCtxSize, kNullWindowCtxAlign);
 }
 
 static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v1* api)
@@ -196,7 +200,7 @@ DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v1(const dng_host_api_v1*
     }
 
     // Allocate module context via host allocator (caller owns lifetime).
-    void* mem = host->alloc(host->user, sizeof(NullWindowCtx), alignof(NullWindowCtx));
+    void* mem = host->alloc(host->user, kNullWindowCtxSize, kNullWindowCtxAlign);
     if (!mem)
     {
         return DNG_STATUS_OUT_OF_MEMORY;
