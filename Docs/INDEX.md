@@ -15,7 +15,6 @@ Policies
 - LanguagePolicy.md
 - ABI_Interop_Policy.md
 - ABI_Review_Checklist.md
-- HeaderFirstStrategy.md
 
 Subsystem status (M0)
 - Window_M0_Status.md
