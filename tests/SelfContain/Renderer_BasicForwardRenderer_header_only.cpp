@@ -1,4 +1,4 @@
-#include "Modules/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp"
+#include "Modules/Renderer/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp"
 
 namespace
 {

@@ -1,5 +1,5 @@
 // ============================================================================
-// D-Engine - Modules/NullWindowModule/NullWindowModule.cpp
+// D-Engine - Modules/Window/NullWindowModule/NullWindowModule.cpp
 // ----------------------------------------------------------------------------
 // Purpose : Minimal loadable module implementing the Window ABI v1 (null impl).
 // Contract: C ABI; POD-only ABI structs; no exceptions/RTTI; single-window only;

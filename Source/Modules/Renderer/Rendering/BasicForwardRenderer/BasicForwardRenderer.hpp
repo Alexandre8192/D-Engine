@@ -1,5 +1,5 @@
 // ============================================================================
-// D-Engine - Modules/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp
+// D-Engine - Modules/Renderer/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp
 // ----------------------------------------------------------------------------
 // Purpose : Skeleton forward renderer backend implementing the RendererBackend
 //           contract without talking to any GPU yet. Serves as a starting point

@@ -23,8 +23,8 @@ This document captures the renderer state in D-Engine at milestone **M0**. It re
     - `InitRendererSystem` instantiates the inline `NullRenderer` when `RendererSystemBackend::Null` is requested. Forward backends must instead call `InitRendererSystemWithInterface`, which copies a caller-supplied `RendererInterface` into state without taking ownership.
     - `RenderFrame` issues `BeginFrame → SubmitInstances → EndFrame` on the active interface; `ShutdownRendererSystem` resets state to defaults.
 
-- **Modules/Rendering**
-  - `Source/Modules/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp`
+- **Modules/Renderer/Rendering**
+  - `Source/Modules/Renderer/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp`
     - Header-only stub backend that satisfies `RendererBackend` while remaining allocation-free.
     - Tracks `BasicForwardRendererStats` (fields: `frameIndex`, `lastViewCount`, `lastInstanceCount`, `surfaceWidth`, `surfaceHeight`).
     - `BeginFrame` increments `frameIndex`, records `viewCount`, derives surface size from the first view, and clears `lastInstanceCount`. `SubmitInstances` accumulates instance counts. `ResizeSurface` overrides the cached size. `GetCaps` returns default flags.

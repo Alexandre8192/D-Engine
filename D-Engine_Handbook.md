@@ -80,7 +80,7 @@ ABI (Application Binary Interface)
 Module (loadable)
 - A shared library (DLL/.so/.dylib) that exports a module entrypoint function.
 - The entrypoint returns one or more subsystem function tables.
-- Example: Source/Modules/NullWindowModule/NullWindowModule.cpp
+- Example: Source/Modules/Window/NullWindowModule/NullWindowModule.cpp
 
 Interop Helpers
 - C++ helpers that load a module and adapt ABI tables into a friendly C++ face.
@@ -126,7 +126,7 @@ Example (Window)
 - Null backend: Source/Core/Window/NullWindow.hpp
 - System: Source/Core/Window/WindowSystem.hpp
 - ABI types and tables: Source/Core/Abi/DngWindowApi.h
-- Loadable sample module: Source/Modules/NullWindowModule/NullWindowModule.cpp
+- Loadable sample module: Source/Modules/Window/NullWindowModule/NullWindowModule.cpp
 - Interop wrappers: Source/Core/Interop/WindowAbi.hpp
 
 -------------------------------------------------------------------------------
@@ -222,7 +222,7 @@ It fills a dng_module_api_v1 struct with:
 
 See:
 - Source/Core/Abi/DngModuleApi.h
-- Source/Modules/NullWindowModule/NullWindowModule.cpp
+- Source/Modules/Window/NullWindowModule/NullWindowModule.cpp
 
 ### 5.4 Host API (services provided to modules)
 

@@ -14,12 +14,12 @@ For each subsystem added to v0.1, the following must exist and build cleanly:
 - Status doc: `Docs/<Subsystem>_M0_Status.md` summarizing current behavior, guarantees, and limitations.
 
 ## 3) Proposed Subsystem List for v0.1
-- Core/Renderer: contract (`Renderer.hpp`), null backend (`NullRenderer.hpp`), system (`RendererSystem.hpp`), BasicForwardRenderer stub in Modules/Rendering for demonstration.
+- Core/Renderer: contract (`Renderer.hpp`), null backend (`NullRenderer.hpp`), system (`RendererSystem.hpp`), BasicForwardRenderer stub in Modules/Renderer/Rendering for demonstration.
 - Core/Memory: allocator contracts and configuration headers; null/backing paths already validated by existing smoke tests (OOM, frame/arena/small-object allocators) and self-contain TUs.
 - Core/Math: vector/matrix/quaternion contracts with header-only implementations; validated by self-contain and smoke tests.
 - Core/Containers: small engine containers (spans/views, adapters) with header-first policy; verified by self-contain coverage.
 - Core/Diagnostics: logger/timer contracts with header-first usage and smoke coverage.
-- Modules/Rendering: BasicForwardRenderer stub wired through `RendererInterface` for demo/tests; no GPU API bindings.
+- Modules/Renderer/Rendering: BasicForwardRenderer stub wired through `RendererInterface` for demo/tests; no GPU API bindings.
 - Tools/Tests: smoke harnesses and demos under `tests/` that validate contracts and telemetry without external assets.
 
 ## 4) Dependency Policy
@@ -27,7 +27,7 @@ For each subsystem added to v0.1, the following must exist and build cleanly:
 - Include hygiene will be enforced by a future checker: only engine-absolute includes allowed; headers must be self-contained; subsystem boundaries must not depend on undeclared modules.
 
 ## 5) Release Artifacts and Validation
-- Public surface of v0.1: `Source/Core/Contracts/*`, `Source/Core/<Subsystem>/*` null backends and systems, `Source/Modules/Rendering/BasicForwardRenderer/*`, status docs in `Docs/`, and the test/demo sources under `tests/`.
+- Public surface of v0.1: `Source/Core/Contracts/*`, `Source/Core/<Subsystem>/*` null backends and systems, `Source/Modules/Renderer/Rendering/BasicForwardRenderer/*`, status docs in `Docs/`, and the test/demo sources under `tests/`.
 - Validation steps:
   - Build Debug and Release configurations for all targets (D-Engine, Renderer demo, bench runner where applicable).
   - Run demo TU with `main` (e.g., `tests/Renderer_BasicForwardRenderer_demo.cpp`) to confirm telemetry and system wiring.
