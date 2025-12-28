@@ -7,6 +7,7 @@ Recommended reading order
 2) ../D-Engine_Handbook.md (architecture + contracts + ABI overview)
 3) LanguagePolicy.md (Core rules)
 4) ABI_Interop_Policy.md + ABI_Review_Checklist.md (interop rules)
+5) ABI_Module_Authoring.md (how to write external modules)
 5) Subsystem status docs (*_M0_Status.md)
 6) Vision docs (Renderer_Vision.md)
 7) Build and performance docs (BenchProtocol.md, Benchmarks.md, HeaderFirstStrategy.md)
