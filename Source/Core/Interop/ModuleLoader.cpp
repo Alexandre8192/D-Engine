@@ -32,6 +32,35 @@ namespace
         return len > 0xFFFFFFFFu ? 0xFFFFFFFFu : static_cast<dng_u32>(len);
     }
 
+    static void LogIssue(const dng_host_api_v1* host, const char* message) noexcept
+    {
+        if (!host || !host->log || !message)
+        {
+            return;
+        }
+
+        dng_str_view_v1 view;
+        view.data = message;
+        view.size = StrLen32(message);
+        host->log(host->user, 1u, view);
+    }
+
+    static dng_status_v1 ValidateStrView(const dng_str_view_v1& view, const char* label, const dng_host_api_v1* host) noexcept
+    {
+        if (view.size == 0u)
+        {
+            return DNG_STATUS_OK;
+        }
+
+        if (view.data == nullptr)
+        {
+            LogIssue(host, label);
+            return DNG_STATUS_INVALID_ARG;
+        }
+
+        return DNG_STATUS_OK;
+    }
+
     static dng_status_v1 ValidateHostApiV1(const dng_host_api_v1* host) noexcept
     {
         if (!host)
@@ -39,72 +68,86 @@ namespace
             return DNG_STATUS_INVALID_ARG;
         }
 
-        if (host->header.abi_version != DNG_ABI_VERSION_V1)
+        if (host->header.struct_size != sizeof(dng_host_api_v1))
         {
-            return DNG_STATUS_UNSUPPORTED;
+            LogIssue(host, "HostApi struct_size mismatch");
+            return DNG_STATUS_INVALID_ARG;
         }
 
-        if (host->header.struct_size < sizeof(dng_host_api_v1))
+        if (host->header.abi_version != DNG_ABI_VERSION_V1)
         {
-            return DNG_STATUS_INVALID_ARG;
+            LogIssue(host, "HostApi abi_version mismatch");
+            return DNG_STATUS_UNSUPPORTED;
         }
 
         if (!host->alloc || !host->free)
         {
+            LogIssue(host, "HostApi missing alloc/free");
             return DNG_STATUS_INVALID_ARG;
         }
 
         return DNG_STATUS_OK;
     }
 
-    static dng_status_v1 ValidateWindowApiV1(const dng_window_api_v1* api) noexcept
+    static dng_status_v1 ValidateWindowApiV1(const dng_window_api_v1* api, const dng_host_api_v1* host) noexcept
     {
         if (!api)
         {
             return DNG_STATUS_INVALID_ARG;
         }
 
-        if (api->header.abi_version != DNG_ABI_VERSION_V1)
+        if (api->header.struct_size != sizeof(dng_window_api_v1))
         {
-            return DNG_STATUS_UNSUPPORTED;
+            LogIssue(host, "WindowApi struct_size mismatch");
+            return DNG_STATUS_INVALID_ARG;
         }
 
-        if (api->header.struct_size < sizeof(dng_window_api_v1))
+        if (api->header.abi_version != DNG_ABI_VERSION_V1)
         {
-            return DNG_STATUS_INVALID_ARG;
+            LogIssue(host, "WindowApi abi_version mismatch");
+            return DNG_STATUS_UNSUPPORTED;
         }
 
         if (!api->ctx)
         {
+            LogIssue(host, "WindowApi ctx is null");
             return DNG_STATUS_INVALID_ARG;
         }
 
         if (!api->create || !api->destroy || !api->poll || !api->get_size || !api->set_title)
         {
+            LogIssue(host, "WindowApi missing function pointer");
             return DNG_STATUS_INVALID_ARG;
         }
 
         return DNG_STATUS_OK;
     }
 
-    static dng_status_v1 ValidateModuleApiV1(const dng_module_api_v1* api) noexcept
+    static dng_status_v1 ValidateModuleApiV1(const dng_module_api_v1* api, const dng_host_api_v1* host) noexcept
     {
         if (!api)
         {
             return DNG_STATUS_INVALID_ARG;
         }
 
+        if (api->header.struct_size != sizeof(dng_module_api_v1))
+        {
+            LogIssue(host, "ModuleApi struct_size mismatch");
+            return DNG_STATUS_INVALID_ARG;
+        }
+
         if (api->header.abi_version != DNG_ABI_VERSION_V1)
         {
+            LogIssue(host, "ModuleApi abi_version mismatch");
             return DNG_STATUS_UNSUPPORTED;
         }
 
-        if (api->header.struct_size < sizeof(dng_module_api_v1))
+        if (ValidateStrView(api->module_name, "ModuleApi module_name invalid", host) != DNG_STATUS_OK)
         {
             return DNG_STATUS_INVALID_ARG;
         }
 
-        return ValidateWindowApiV1(&api->window);
+        return ValidateWindowApiV1(&api->window, host);
     }
 
 #if defined(_WIN32) || defined(_WIN64)
