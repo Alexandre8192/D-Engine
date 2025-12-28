@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#include "Core/Abi/DngAbi.h"
+#include "DngAbi.h"
 
 typedef struct dng_host_api_v1 {
     dng_abi_header_v1 header;  // { struct_size, abi_version }
@@ -22,17 +22,17 @@ typedef struct dng_host_api_v1 {
 
     // Purpose : Log a message with a host-defined level.
     // Contract: Never throws; msg is a non-owning view; level is host-defined.
-    void (*log)(void* user, dng_u32 level, dng_str_view_v1 msg);
+    void (DNG_ABI_CALL *log)(void* user, dng_u32 level, dng_str_view_v1 msg);
 
     // Purpose : Allocate memory using host allocator.
     // Contract: Returns aligned block or NULL; caller owns result and must free
     //           with matching size/align via free; no exceptions.
-    void* (*alloc)(void* user, dng_u64 size, dng_u64 align);
+    void* (DNG_ABI_CALL *alloc)(void* user, dng_u64 size, dng_u64 align);
 
     // Purpose : Free memory previously allocated via alloc.
     // Contract: ptr/size/align must match alloc call; behavior is undefined
     //           otherwise. Never throws.
-    void (*free)(void* user, void* ptr, dng_u64 size, dng_u64 align);
+    void (DNG_ABI_CALL *free)(void* user, void* ptr, dng_u64 size, dng_u64 align);
 } dng_host_api_v1;
 
 #ifdef __cplusplus

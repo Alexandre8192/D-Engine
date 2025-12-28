@@ -44,8 +44,8 @@ typedef float    dng_f32;
 enum { DNG_ABI_VERSION_V1 = 1u };
 
 typedef struct dng_abi_header_v1 {
-    dng_u32 struct_size;
-    dng_u32 abi_version;
+    dng_u32 struct_size; // Caller sets to sizeof(the containing struct) before use.
+    dng_u32 abi_version; // Must equal DNG_ABI_VERSION_V1 for v1 tables.
 } dng_abi_header_v1;
 
 typedef dng_u32 dng_status_v1;
@@ -57,10 +57,12 @@ typedef dng_u32 dng_status_v1;
 #define DNG_STATUS_UNSUPPORTED   ((dng_status_v1)4u)
 
 typedef dng_u8 dng_bool_v1;
+#define DNG_BOOL_FALSE ((dng_bool_v1)0u)
+#define DNG_BOOL_TRUE  ((dng_bool_v1)1u)
 
 typedef struct dng_str_view_v1 {
-    const char* data;
-    dng_u32     size;
+    const char* data; // May be NULL only when size == 0; otherwise non-NULL. UTF-8 recommended.
+    dng_u32     size; // Byte length; if > 0, data must be non-NULL; no implicit terminator.
 } dng_str_view_v1;
 
 #ifdef __cplusplus

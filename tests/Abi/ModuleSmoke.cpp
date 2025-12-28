@@ -16,7 +16,7 @@
 #endif
 
 // Simple host services for test only (uses CRT alloc).
-static void* TestAlloc(void* user, dng_u64 size, dng_u64 align)
+static void* DNG_ABI_CALL TestAlloc(void* user, dng_u64 size, dng_u64 align)
 {
     (void)user;
     if (align < sizeof(void*))
@@ -35,7 +35,7 @@ static void* TestAlloc(void* user, dng_u64 size, dng_u64 align)
 #endif
 }
 
-static void TestFree(void* user, void* ptr, dng_u64 size, dng_u64 align)
+static void DNG_ABI_CALL TestFree(void* user, void* ptr, dng_u64 size, dng_u64 align)
 {
     (void)user;
     (void)size;
@@ -47,7 +47,7 @@ static void TestFree(void* user, void* ptr, dng_u64 size, dng_u64 align)
 #endif
 }
 
-static void TestLog(void* user, dng_u32 level, dng_str_view_v1 msg)
+static void DNG_ABI_CALL TestLog(void* user, dng_u32 level, dng_str_view_v1 msg)
 {
     (void)user;
     (void)level;

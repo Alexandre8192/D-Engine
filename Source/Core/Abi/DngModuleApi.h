@@ -14,9 +14,9 @@
 extern "C" {
 #endif
 
-#include "Core/Abi/DngAbi.h"
-#include "Core/Abi/DngHostApi.h"
-#include "Core/Abi/DngWindowApi.h"
+#include "DngAbi.h"
+#include "DngHostApi.h"
+#include "DngWindowApi.h"
 
 typedef struct dng_module_api_v1 {
     dng_abi_header_v1 header; // { struct_size, abi_version }
@@ -35,7 +35,7 @@ typedef struct dng_module_api_v1 {
     //           multiple times with same ctx).
     // Notes   : Added to support proper cleanup of dynamically allocated contexts.
     //           If NULL, module uses static storage and no cleanup is needed.
-    dng_status_v1 (*shutdown)(void* ctx, const dng_host_api_v1* host);
+    dng_status_v1 (DNG_ABI_CALL *shutdown)(void* ctx, const dng_host_api_v1* host);
 } dng_module_api_v1;
 
 DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v1(
