@@ -14,8 +14,17 @@
 //           are supported by capturing FrameAllocator markers.
 // ============================================================================
 
-#include "Core/Memory/MemorySystem.hpp"
-#include "Core/Memory/FrameAllocator.hpp"
+#if __has_include("Core/Memory/MemorySystem.hpp")
+#    include "Core/Memory/MemorySystem.hpp"
+#else
+#    include "MemorySystem.hpp"
+#endif
+
+#if __has_include("Core/Memory/FrameAllocator.hpp")
+#    include "Core/Memory/FrameAllocator.hpp"
+#else
+#    include "FrameAllocator.hpp"
+#endif
 
 namespace dng
 {
