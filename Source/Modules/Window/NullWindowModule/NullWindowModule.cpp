@@ -156,11 +156,11 @@ static void NullWindow_InitWindowApi(NullWindowCtx* ctx, dng_window_api_v1* api)
     api->set_title = &NullWindow_SetTitle;
 }
 
-static void DNG_ABI_CALL NullWindow_Shutdown(void* raw_ctx, const dng_host_api_v1* host)
+static dng_status_v1 DNG_ABI_CALL NullWindow_Shutdown(void* raw_ctx, const dng_host_api_v1* host)
 {
     if (!raw_ctx || !host || !host->free)
     {
-        return;
+        return DNG_STATUS_INVALID_ARG;
     }
 
     NullWindowCtx* ctx = (NullWindowCtx*)raw_ctx;
@@ -175,6 +175,7 @@ static void DNG_ABI_CALL NullWindow_Shutdown(void* raw_ctx, const dng_host_api_v
 
     // Free the context itself (size and align must match allocation).
     host->free(host->user, raw_ctx, kNullWindowCtxSize, kNullWindowCtxAlign);
+    return DNG_STATUS_OK;
 }
 
 static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v1* api)

@@ -121,7 +121,12 @@ int main()
 
     if (module_api.shutdown)
     {
-        module_api.shutdown(module_api.window.ctx, &host);
+        status = module_api.shutdown(module_api.window.ctx, &host);
+        if (status != DNG_STATUS_OK)
+        {
+            printf("Shutdown failed: %u\n", (unsigned)status);
+            return 7;
+        }
     }
 
     loader.Unload();
