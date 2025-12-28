@@ -3,7 +3,7 @@
 // D-Engine - Core/Memory/Allocator.hpp
 // ----------------------------------------------------------------------------
 // Purpose : Declare the allocator contract (`IAllocator`) and a lightweight
-//           non-owning façade (`AllocatorRef`) that normalizes alignment and
+//           non-owning facade (`AllocatorRef`) that normalizes alignment and
 //           forwards typed construction helpers.
 // Contract: All allocate/reallocate/deallocate operations must use the exact
 //           `(size, alignment)` pair that was used when the block was acquired.
@@ -115,7 +115,7 @@ namespace dng::core
     // - Typed helpers use std::construct_at / std::destroy_at (C++20).
     // ------------------------------------------------------------------------
     // ---
-    // Purpose : Lightweight non-owning façade for invoking allocator operations safely.
+    // Purpose : Lightweight non-owning facade for invoking allocator operations safely.
     // Contract: Holds a raw IAllocator pointer; all helpers normalize alignment and respect size/alignment tuples.
     // Notes   : Cheap to copy; intended for hot-path call sites needing typed helpers without ownership.
     // ---

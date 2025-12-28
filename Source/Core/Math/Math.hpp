@@ -75,7 +75,7 @@ namespace dng
             // ---
             // Purpose : Provide a fallback linear interpolation for POD-like types.
             // Contract: Requires +, -, and scalar multiply overloads; pure constexpr, no heap interaction.
-            // Notes   : Specialize this struct for types needing custom interpolation (e.g., Quatf → Slerp).
+            // Notes   : Specialize this struct for types needing custom interpolation (e.g., Quatf -> Slerp).
             // ---
             [[nodiscard]] static constexpr T Lerp(const T& a, const T& b, float32 t) noexcept
             {

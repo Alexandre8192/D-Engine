@@ -2,7 +2,7 @@
 // ============================================================================
 // D-Engine - Core/Memory/PageAllocator.hpp
 // ----------------------------------------------------------------------------
-// Purpose : Expose a minimal, cross-platform virtual memory façade that safely
+// Purpose : Expose a minimal, cross-platform virtual memory facade that safely
 //           wraps page reservation, commitment, and release without imposing a
 //           higher-level policy. Serves as the substrate for GuardAllocator,
 //           arena chains, and other paging allocators.

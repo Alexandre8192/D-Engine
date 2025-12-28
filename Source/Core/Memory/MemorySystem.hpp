@@ -2,7 +2,7 @@
 // ============================================================================
 // D-Engine - Core/Memory/MemorySystem.hpp
 // ----------------------------------------------------------------------------
-// Purpose : Publish the lifecycle façade for the engine-wide memory subsystem.
+// Purpose : Publish the lifecycle facade for the engine-wide memory subsystem.
 //           MemorySystem exposes a concise static API that bootstraps all global
 //           allocators, registers per-subsystem arenas, and manages optional
 //           thread-local allocators when thread-safety is enabled.
@@ -566,7 +566,7 @@ namespace memory
     } // namespace detail
 
     // =====================================================================
-    // Purpose : Expose a contracts-first façade over the engine-wide memory
+    // Purpose : Expose a contracts-first facade over the engine-wide memory
     //           subsystem, wiring global allocators and per-thread contexts.
     // Contract: Callers must execute `Init()` before consuming any global
     //           allocator accessors. `Shutdown()` may be invoked multiple
@@ -922,7 +922,7 @@ namespace memory
             return detail::Globals().initialized;
         }
 
-        // Purpose : Provide a façade over the default allocator wired during `Init()`.
+        // Purpose : Provide a facade over the default allocator wired during `Init()`.
         // Contract: Call only after initialization; returned reference is non-owning and may be invalid if MemorySystem is down.
         // Notes   : No hidden allocations; simply wraps the internal pointer.
         [[nodiscard]] static AllocatorRef GetDefaultAllocator() noexcept

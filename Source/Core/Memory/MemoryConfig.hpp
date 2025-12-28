@@ -12,7 +12,7 @@
 //           This header requires the logging front-end via Logger.hpp; no macro
 //           redefinition occurs here.
 // Notes   : Optimized for determinism and zero hidden costs. Runtime precedence
-//           for tunables is API → environment → macros; see MemorySystem.hpp for
+//           for tunables is API -> environment -> macros; see MemorySystem.hpp for
 //           resolution and logging. Defaults reflect Release | x64 bench sweeps
 //           (2025-10-29) with stable ns/op and unchanged bytes/allocs. We avoid
 //           shadowing `DNG_LOG_*` to prevent silent diagnostic loss due to include order.
@@ -112,14 +112,14 @@
 #endif
 
 // -----------------------------------------------------------------------------
-// Bench-derived production defaults (Release | x64) — see defaults.json
-// Sweep reference: artifacts/bench/sweeps/ (2025-10-29) → docs/Memory.md
+// Bench-derived production defaults (Release | x64) - see defaults.json
+// Sweep reference: artifacts/bench/sweeps/ (2025-10-29) -> docs/Memory.md
 // -----------------------------------------------------------------------------
 #ifndef DNG_MEM_TRACKING_SAMPLING_RATE
 // Purpose : Release sampling default chosen from sweep combo s1-h8-b64 (2025-10-29).
 // Contract: Only applies when the macro is left undefined; toolchains may override
 //           for debugging/instrumentation prior to including MemoryConfig.hpp.
-// Notes   : TrackingAllocator median=203.639 ns/op (Δ=-17.404%, -42.909 ns vs
+// Notes   : TrackingAllocator median=203.639 ns/op (delta=-17.404%, -42.909 ns vs
 //           s1-h1-b32 baseline) with bytes/allocs stable at 64/1. See defaults.md.
 #   define DNG_MEM_TRACKING_SAMPLING_RATE 1
 #endif
@@ -137,7 +137,7 @@
 // Purpose : Release batch size default for SmallObjectAllocator verified on 2025-10-29 sweeps.
 // Contract: Overridable by integrators; applies whenever SmallObjectAllocator is compiled in
 //           and no alternative batch is forced prior to including this header.
-// Notes   : SmallObject 64B median=26.466 ns/op (Δ=+0.096 ns, +0.364%) with identical
+// Notes   : SmallObject 64B median=26.466 ns/op (delta=+0.096 ns, +0.364%) with identical
 //           bytes/allocs (0/0) against the s1-h1-b32 baseline. Cross-check docs/Memory.md.
 #   define DNG_SOALLOC_BATCH 64
 #endif

@@ -97,3 +97,6 @@ build_log.txt
 
 # Researches data
 Researches/
+
+# CodeQL temporary file
+_codeql_detected_source_root

@@ -229,7 +229,7 @@ namespace dng::core
     }
 
     // ---
-    // Purpose : Provide const-correct façade for pointer alignment without duplicating logic.
+    // Purpose : Provide const-correct facade for pointer alignment without duplicating logic.
     // Contract: Mirrors mutable overload; never mutates the pointed-to data.
     // Notes   : Casts away const temporarily to reuse core implementation safely.
     // ---

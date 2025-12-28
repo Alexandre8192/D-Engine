@@ -228,7 +228,7 @@ namespace dng::memory
 
                 const auto entries = detail::MapToSortedVector(map);
                 oss << "  " << std::left << std::setw(colW) << "Tag"
-                    << "  Bytes (Δ)   Allocs (Δ)\n";
+                    << "  Bytes (delta)   Allocs (delta)\n";
                 for (const auto& [tag, stats] : entries)
                 {
                     const auto [db, da] = deltaResolver(tag, stats);
@@ -263,7 +263,7 @@ namespace dng::memory
     };
 
     // ------------------------------------------------------------------------
-    // LeakSnapshots façade
+    // LeakSnapshots facade
     // ------------------------------------------------------------------------
     // Purpose : Capture and diff global tracking state at runtime.
     // Contract: Requires MemorySystem initialized. Name must outlive Snapshot.

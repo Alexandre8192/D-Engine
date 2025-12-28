@@ -168,7 +168,7 @@ namespace dng::render
     static_assert(std::is_trivially_copyable_v<RenderInstance>);
 
     // Purpose : Aggregates per-frame submission views and instances.
-    // Contract: All pointers are non-owning; lifetimes must span BeginFrame →
+    // Contract: All pointers are non-owning; lifetimes must span BeginFrame ->
     //           EndFrame. No allocations occur inside the renderer contract.
     // Notes   : frameIndex enables determinism (useful for capture/replay).
     struct FrameSubmission

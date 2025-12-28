@@ -1,7 +1,7 @@
 # `docs/LanguagePolicy.md`
 
 ````markdown
-# D-Engine — Language Policy (Core)
+# D-Engine - Language Policy (Core)
 
 > **Goal:** Deterministic, auditable, portable C++23/26 with zero hidden costs.
 > This document defines **what the Core allows** and **why**. Subsystems and
@@ -129,8 +129,8 @@ struct [[nodiscard]] Status {
 
 ## 5) Assertions, Logging, Diagnostics
 
-* Programmer errors → `DNG_ASSERT(cond)`.
-* Recoverable runtime conditions → `DNG_CHECK(cond)` and return a `Status`.
+* Programmer errors -> `DNG_ASSERT(cond)`.
+* Recoverable runtime conditions -> `DNG_CHECK(cond)` and return a `Status`.
 * Heavy logging under `Logger::IsEnabled("Category")` guards.
 
 ---
@@ -148,11 +148,11 @@ struct [[nodiscard]] Status {
 
 ## 7) Quick FAQ
 
-* **Multiple inheritance?** Allowed (we are not bound by Unreal’s `UObject`
+* **Multiple inheritance?** Allowed (we are not bound by Unreal's `UObject`
   constraint). Prefer composition; document virtual destructor/ABI choices.
-* **Why not STL everywhere?** We do use STL—carefully. Public ABI should remain
+* **Why not STL everywhere?** We do use STL-carefully. Public ABI should remain
   lean, allocator-aware, and free of implicit EH/RTTI requirements.
 * **Why so strict on EH/RTTI?** Determinism, portability, binary size, and
-  predictable cost—central to D-Engine’s teaching/auditing goals.
+  predictable cost-central to D-Engine's teaching/auditing goals.
 
 ````

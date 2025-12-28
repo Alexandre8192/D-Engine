@@ -8,7 +8,7 @@
 // Contract: Header-only and single-threaded by default; callers must normalize
 //           synchronization at a higher layer (e.g., per-thread instances).
 //           All Allocate() calls normalize alignment via NormalizeAlignment().
-//           Deallocate() is a documented no-op—memory is reclaimed only by
+//           Deallocate() is a documented no-op-memory is reclaimed only by
 //           Reset() / Rewind(marker). Optional poison fills are guarded by
 //           FrameAllocatorConfig and off by default in Release builds.
 // Notes   : Integrates with the wider allocator ecosystem by inheriting
@@ -273,7 +273,7 @@ namespace dng::core {
     // ---
     // Purpose : Manage a FrameAllocator instance per thread to remove external synchronisation needs.
     // Contract: Caller provides backing storage; usage restricted to owning thread; Reset must be invoked explicitly.
-    // Notes   : Minimal façade; higher-level pooling can build on top without ABI changes.
+    // Notes   : Minimal facade; higher-level pooling can build on top without ABI changes.
     // ---
     class ThreadLocalFrameAllocator final {
     public:
