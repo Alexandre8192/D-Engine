@@ -23,8 +23,8 @@ This document captures the renderer state in D-Engine at milestone **M0**. It re
     - `InitRendererSystem` instantiates the inline `NullRenderer` when `RendererSystemBackend::Null` is requested. Forward backends must instead call `InitRendererSystemWithInterface`, which copies a caller-supplied `RendererInterface` into state without taking ownership.
     - `RenderFrame` issues `BeginFrame → SubmitInstances → EndFrame` on the active interface; `ShutdownRendererSystem` resets state to defaults.
 
-- **Modules/Rendering**
-  - `Source/Modules/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp`
+- **Modules/Renderer/Rendering**
+  - `Source/Modules/Renderer/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp`
     - Header-only stub backend that satisfies `RendererBackend` while remaining allocation-free.
     - Tracks `BasicForwardRendererStats` (fields: `frameIndex`, `lastViewCount`, `lastInstanceCount`, `surfaceWidth`, `surfaceHeight`).
     - `BeginFrame` increments `frameIndex`, records `viewCount`, derives surface size from the first view, and clears `lastInstanceCount`. `SubmitInstances` accumulates instance counts. `ResizeSurface` overrides the cached size. `GetCaps` returns default flags.
@@ -73,11 +73,11 @@ All renderer headers follow the project policy: header-first, `noexcept`, determ
   - `Renderer_RendererSystem_header_only.cpp`
   - These TUs include the corresponding headers in isolation, rely on `static_assert`s (e.g., `RendererBackend<DummyRenderer>`), and compile without defining `main`, ensuring each header is self-contained.
 
-- **Smoke helpers (tests/ and tests/smoke/)**
-  - `tests/BasicForwardRenderer_smoke.cpp` → `int RunBasicForwardRendererSmoke()` validates BasicForwardRenderer stats updates after `BeginFrame`/`SubmitInstances`.
-  - `tests/RendererSystem_smoke.cpp` → `int RunRendererSystemSmoke()` initializes `RendererSystem` with the inline Null backend and exercises a single `RenderFrame`.
-  - `tests/RendererSystem_BasicForwardRenderer_smoke.cpp` → `int RunRendererSystemBasicForwardRendererSmoke()` injects a BasicForwardRenderer through `InitRendererSystemWithInterface`, renders one frame, and inspects telemetry.
-  - Additional memory-system smoke helpers reside under `tests/smoke/` and follow the same no-entry-point convention, guaranteeing the renderer layer coexists with other subsystems.
+- **Smoke helpers (tests/Smoke/Subsystems/ and tests/Smoke/Memory/)**
+  - `tests/Smoke/Subsystems/BasicForwardRenderer_smoke.cpp` → `int RunBasicForwardRendererSmoke()` validates BasicForwardRenderer stats updates after `BeginFrame`/`SubmitInstances`.
+  - `tests/Smoke/Subsystems/RendererSystem_smoke.cpp` → `int RunRendererSystemSmoke()` initializes `RendererSystem` with the inline Null backend and exercises a single `RenderFrame`.
+  - `tests/Smoke/Subsystems/RendererSystem_BasicForwardRenderer_smoke.cpp` → `int RunRendererSystemBasicForwardRendererSmoke()` injects a BasicForwardRenderer through `InitRendererSystemWithInterface`, renders one frame, and inspects telemetry.
+  - Additional memory-system smoke helpers reside under `tests/Smoke/Memory/` and follow the same no-entry-point convention, guaranteeing the renderer layer coexists with other subsystems.
 
 - **Demo**
   - `tests/Renderer_BasicForwardRenderer_demo.cpp` is the only TU with a `main`. It constructs a `BasicForwardRenderer`, wraps it via `MakeBasicForwardRendererInterface`, feeds it into `RendererSystem`, drives three frames with a single view and three dummy instances, and validates every field in `BasicForwardRendererStats` before shutting down the system. The demo allocates nothing and performs no I/O.
@@ -108,4 +108,4 @@ The next renderer milestones can build on this foundation by tackling items such
 - Enriching `FrameSubmission` handling with multi-view/multi-instance scenarios, including culling hooks and job system integration.
 - Extending the smoke/demo coverage to include per-view stats, resize paths, and error-handling scenarios.
 
-(See `Docs/RenderVision.md` for the long-term renderer direction; the list above stays deliberately high-level and grounded in the current code.)
+(See `Docs/Renderer_Vision.md` for the long-term renderer direction; the list above stays deliberately high-level and grounded in the current code.)

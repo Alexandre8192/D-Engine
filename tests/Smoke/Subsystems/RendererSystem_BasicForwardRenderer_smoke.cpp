@@ -1,5 +1,5 @@
 #include "Core/Renderer/RendererSystem.hpp"
-#include "Modules/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp"
+#include "Modules/Renderer/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp"
 #include "Core/Contracts/Renderer.hpp"
 
 int RunRendererSystemBasicForwardRendererSmoke()

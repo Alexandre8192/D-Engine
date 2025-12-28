@@ -1,207 +1,102 @@
 # D-Engine
 
-**D-Engine** is a modern, header-first, STL-inspired C++23/26 game engine built **exclusively for programmers**.
-It prioritizes **transparency, determinism, and auditable code**: every public API explains its **Purpose / Contract / Notes**, and every design choice includes the **why**, not just the **how**.
+D-Engine is a modern, header-first C++ engine project focused on:
+- contracts first (backend-agnostic APIs)
+- deterministic behavior (Null backends as reference)
+- explicit costs (no hidden allocations at contract boundaries)
+- clarity and documentation as a feature
 
-> Status: **Pre-alpha** — foundation work (memory, diagnostics, contracts, bench harness).
-> Primary toolchain: **MSVC 2022**, with Clang/GCC compatibility expected for header-only paths.
+This README is intentionally short. The single source of truth for architecture is the handbook.
 
----
+## Quick links (read in this order)
 
-## Getting Started
+1) Handbook (architecture, contracts, ABI, interop):
+- D-Engine_Handbook.md
 
-### Prerequisites
-*   **Visual Studio 2022** (Community or Pro) with "Desktop development with C++".
-*   **Git** (for cloning).
+2) Docs index (map of all docs):
+- Docs/INDEX.md
 
-### Building
-1.  Clone the repository:
-    ```powershell
-    git clone https://github.com/Alexandre8192/D-Engine.git
-    cd D-Engine
-    ```
-2.  Open `D-Engine.sln` in Visual Studio 2022.
-3.  Select **Debug** or **Release** configuration (x64).
-4.  Build Solution (`Ctrl+Shift+B`).
+3) Core rules (non-negotiables):
+- Docs/LanguagePolicy.md
 
-### Running Tests
-Tests are located in the `tests/` directory. They are currently compile-only smoke tests or simple runners.
-*   Run `tests/smoke/Math_smoke.cpp` (via the solution) to verify math logic.
+4) ABI interop rules:
+- Docs/ABI_Interop_Policy.md
+- Docs/ABI_Review_Checklist.md
 
+5) Subsystem status (M0):
+- Docs/Window_M0_Status.md
+- Docs/Renderer_M0_Status.md
+- Docs/Time_M0_Status.md
+- Docs/Jobs_M0_Status.md
+- Docs/Input_M0_Status.md
+- Docs/FileSystem_M0_Status.md
 
----
+## What is D-Engine (in one paragraph)
 
-## Why D-Engine?
+D-Engine is a set of well-defined building blocks. Each subsystem starts as a Contract (types + invariants + call surface), then provides a deterministic Null backend plus a System orchestrator. Backends are interchangeable. A separate C ABI layer exists for loadable modules and for future cross-language backends.
 
-* **Header-first**: minimal translation units; include-safe headers that compile in isolation.
-* **Understandable by design**: richly commented code meant to **teach** as much as it runs.
-* **Pick only what you need**: a **contracts-first** architecture where modules are opt-in.
-* **Performance through clarity**: predictable memory behavior, data-oriented layouts, and zero hidden allocations in hot paths.
-* **Deterministic by default**: same (size, alignment) on alloc/free; explicit thread-safety and toggles.
+## Repository layout
 
----
+- Source/Core/Contracts/
+  - Backend-agnostic subsystem contracts (C++ headers).
+- Source/Core/<Subsystem>/
+  - System orchestrators and Null backends (reference implementations).
+- Source/Core/Abi/
+  - Stable C ABI headers (vtable-in-C shape, status codes, POD-only).
+- Source/Core/Interop/
+  - C++ helpers to load and use ABI modules.
+- Source/Modules/
+  - Optional modules (including loadable examples).
+- tests/
+  - Header self-containment checks and smoke/build-only tests.
+- Docs/
+  - Policies, status docs, vision docs, and scope notes.
 
-## Core Non-Negotiables
+## Build (Windows, Visual Studio 2022)
 
-1. **Language & Style**
+This repo ships a Visual Studio solution:
+- Open: D-Engine.sln
+- Build with MSVC (the project uses /std:c++latest)
 
-* `dng::` namespace; macros prefixed `DNG_`.
-* Default to `[[nodiscard]]`, `constexpr`, `noexcept`; lock invariants with `static_assert`.
-* No new STL/external deps without explicit justification.
-* Headers are **self-contained**; no hidden includes or side effects.
+Notes about configurations (current state of the repo):
+- x64 configurations are used primarily for "build-only" validation (compiles a large set of translation units, including header-only checks).
+- Win32 configurations may build a runnable console target (for example a small demo).
 
-2. **Diagnostics & Memory**
+If you want a fast sanity check:
+- Build Release|x64
+- Confirm the build completes warning-free (or with expected known warnings, if any)
 
-* All allocations go through the engine allocators. **Free** must match **(size, alignment)**.
-* Use `DNG_CHECK` / `DNG_ASSERT` for risky logic; guard expensive logs behind `Logger::IsEnabled()`.
-* Honor `Core/Memory/Alignment.hpp`: `NormalizeAlignment`, `AlignUp`, `IsPowerOfTwo` only.
-* Respect `MemoryConfig.hpp` toggles: `DNG_MEM_TRACKING`, `DNG_MEM_FATAL_ON_OOM`, etc.
+## How to start reading the code
 
-3. **Determinism & Performance**
+If you want the main mental model:
+- Read D-Engine_Handbook.md
 
-* No hidden heap work in hot paths (opt-in only).
-* Data layout decisions (AoS/SoA) are explicit and documented.
-* Prefer compile-time validation to runtime fallbacks.
-* **Header-First Strategy**: Follow `Docs/HeaderFirstStrategy.md` to keep builds fast (thin facades, explicit instantiation).
+If you want to see the pattern on a concrete subsystem:
+- Contract: Source/Core/Contracts/Window.hpp
+- Null backend: Source/Core/Window/NullWindow.hpp
+- System: Source/Core/Window/WindowSystem.hpp
 
-4. **Documentation & Tests**
+If you want to see the ABI foundation:
+- Base ABI types: Source/Core/Abi/DngAbi.h
+- Module entrypoint: Source/Core/Abi/DngModuleApi.h
+- Subsystem table (example): Source/Core/Abi/DngWindowApi.h
 
-* Every public symbol starts with **Purpose / Contract / Notes** and usage examples (compile-time when possible).
-* No heavy runtime test framework: small **compile-only smoke tests** live under `tests/`.
-* Micro-benchmarks via `Core/Diagnostics/Bench.hpp` (`DNG_BENCH(...)`) with warm-up + auto-scaling.
+## Contributing (rules)
 
----
-
-## Project Shape
-
-```
-Source/
-  Core/
-    CoreMinimal.hpp            # Safe umbrella for always-on headers
-    Platform/                  # Platform flags, compiler gates, scalar types
-    Memory/                    # Alignment, allocators, adapter, tracking
-    Diagnostics/               # Check.hpp (DNG_CHECK), Logger.hpp, Bench.hpp
-    Contracts/                 # Stable module contracts (Physics, Renderer, ...)
-    Physics/                   # (Backends live here; optional)
-    Renderer/                  # (Backends live here; optional)
-    ...
-tests/
-  ...                          # Compile-only smoke tests & micro-bench drivers
-D-Engine.sln                   # MSVC solution (primary entry)
-```
-
-* **Header-first**: almost everything is implemented in headers under `Source/Core/**`.
-* **Rare `.cpp` files** exist only when strictly required (e.g., `GlobalNewDelete.cpp`).
-
----
-
-## Contracts > Implementations
-
-D-Engine standardizes **module contracts** first. Implementations/backends are optional and interchangeable.
-You can ship **no physics**, a **classic solver**, or a **cubic-barrier solver** later — as long as the contract is honored.
-
-**Example (Physics contract outline)**
-
-* **Inputs**: POD views of bodies (positions, velocities, invMass), meshes (triangles/edges).
-* **Step config**: explicit budget knobs (dt, max substep fraction, Newton/PCG iters, contact gap…).
-* **Outputs**: updated body states; no hidden allocations; deterministic when configured.
-
-Two faces of the same contract:
-
-* **Static** (templates / concepts / CRTP) for zero overhead.
-* **Dynamic** (tiny V-table) for late binding / plugins — opt-in.
-
-> This pattern generalizes to **Renderer**, **Audio**, **IO**, etc.
-> The engine depends on **contracts**, not on specific backends.
-
----
-
-## Module Selection (“only what you need”)
-
-Projects declare enabled modules in a small manifest (example):
-
-```yaml
-# ProjectModules.yml
-Physics:  "NullPhysics"      # or "ClassicPhysics", "PPFPhysics"
-Renderer: "NullRenderer"     # or "RhiDX12", "RhiVulkan"
-Audio:    "NullAudio"
-```
-
-* **Static builds**: template aliases pick the backend types.
-* **Dynamic builds**: a small V-table is populated (plugin/DLL), same contract.
-
-Nothing is compiled or linked if you don’t select it.
-
----
-
-## Memory System (current focus)
-
-* `Core/Memory/Allocator.hpp`: allocator contract + `AllocatorRef` helpers.
-* `DefaultAllocator`, `ArenaAllocator`, `StackAllocator`, `TrackingAllocator`.
-* Rules: same (size, alignment) on free; diagnostics via `DNG_MEM_*` toggles; normalized alignment using `Alignment.hpp`.
-
-**Bench Harness**
-`Core/Diagnostics/Bench.hpp` provides `DNG_BENCH(name, iterations, lambda)` and integrates with tracking counters for churn measurement.
-
----
-
-## Build & Toolchain
-
-* **Windows / MSVC 2022** (primary):
-
-  ```powershell
-  msbuild "$PWD\D-Engine.sln" /p:Configuration=Debug /p:Platform=x64
-  ```
-* **Clang/GCC**: expected compatibility for header-only paths; CI targets will be added.
-* **Release builds** must compile cleanly; assertions degrade to no-ops where applicable.
-
----
-
-## Contribution Guidelines (short)
-
-* Follow the **Non-Negotiables** and the **Authoring style** (Purpose / Contract / Notes).
-* Keep headers self-contained; add minimal includes; avoid transitive surprises.
-* Use `DNG_CHECK`/`DNG_ASSERT` and alignment helpers; never re-implement math you can import from `Alignment.hpp`.
-* Prefer compile-time checks & examples; add smoke tests under `tests/`.
-* Justify new dependencies with a short **Design Note** in the PR.
-
----
-
-## Roadmap (high level)
-
-* ✅ Memory: allocators, alignment, diagnostics, tracking, bench harness.
-* 🚧 Contracts: `Physics`, `Renderer`, `Audio` skeletons with examples and smoke tests.
-* ⏭ Physics backends:
-
-  * `NullPhysics` (reference & docs)
-  * `ClassicPhysics` (simple, readable)
-  * `PPFPhysics` **prototype** (cubic barrier + dynamic stiffness; friction optional)
-* ⏭ Renderer backends (minimal RHI prototype), IO, assets.
-* ⏭ CI across MSVC/Clang/GCC; static analysis; more compile-only tests.
-
----
-
-## FAQ (short)
-
-**Is this a gameplay framework?**
-No — it’s a **programmer-first engine**. You pick modules and assemble your stack deliberately.
-
-**Why so many comments?**
-Because code should be **auditable and educational**. Every file is meant to be read and learned from.
-
-**Can I plug my own physics/renderer?**
-Yes. Implement the **contract** (static or dynamic face) and you’re in.
-
----
+Before changing Core code, read:
+- Docs/LanguagePolicy.md
+- Docs/HeaderFirstStrategy.md
+- Docs/ABI_Interop_Policy.md (if you touch ABI)
 
 ## License
 
-TBD (will be permissive and business-friendly). Third-party projects referenced in docs retain their original licenses and notices.
+See:
+- LICENSE.txt
+- EULA.txt
 
----
+## Status
 
-## Acknowledgements
-
-This project continuously learns from community research and industry engines — successes **and** failures. The goal isn’t to copy; it’s to **distill** robust, well-explained building blocks.
-
----
+Current scope and progress:
+- Docs/D-Engine_v0.1_Scope.md
+- Docs/Progress_Summary_v0.1.md
+- CHANGELOG.md

@@ -31,7 +31,7 @@
   - Defines the abstract RendererAPI.
   - Does not know about any specific backend.
 
-- Modules/Rendering/*:
+- Modules/Renderer/Rendering/*:
   - `NullRenderer`: does nothing, for tests/headless.
   - `BasicForwardRenderer`: classic mesh+material drawing.
   - Future: `VirtualGeometryRenderer` (Nanite-like), `RTRenderer`, etc.

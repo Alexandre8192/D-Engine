@@ -76,14 +76,14 @@
     <ClCompile Include="tests\SelfContain\Renderer_NullRenderer_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\Renderer_BasicForwardRenderer_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\Renderer_RendererSystem_header_only.cpp" />
-    <ClCompile Include="tests\BasicForwardRenderer_smoke.cpp" />
-    <ClCompile Include="tests\RendererSystem_smoke.cpp" />
-    <ClCompile Include="tests\RendererSystem_BasicForwardRenderer_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="tests\Renderer_BasicForwardRenderer_demo.cpp" />
-    <ClCompile Include="tests\smoke\guard_allocator_alignment_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\guard_allocator_alignment_smoke.cpp" />
     <ClCompile Include="tests\Math\Mat4_Convention_tests.cpp" />
     <ClCompile Include="tests\Math\Math_core_tests.cpp" />
-    <ClCompile Include="tests\smoke\Math_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\Math_smoke.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
