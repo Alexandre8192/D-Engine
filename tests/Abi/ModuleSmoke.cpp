@@ -119,6 +119,11 @@ int main()
         return 6;
     }
 
+    if (module_api.shutdown)
+    {
+        module_api.shutdown(module_api.window.ctx, &host);
+    }
+
     loader.Unload();
     return 0;
 }
