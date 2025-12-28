@@ -173,19 +173,22 @@
     <ClCompile Include="tests\SelfContain\Renderer_RendererSystem_header_only.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
-    <ClCompile Include="tests\BasicForwardRenderer_smoke.cpp">
+    <ClCompile Include="tests\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
-    <ClCompile Include="tests\RendererSystem_smoke.cpp">
+    <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_smoke.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
-    <ClCompile Include="tests\RendererSystem_BasicForwardRenderer_smoke.cpp">
+    <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_BasicForwardRenderer_smoke.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\Renderer_BasicForwardRenderer_demo.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
-    <ClCompile Include="tests\smoke\guard_allocator_alignment_smoke.cpp">
+    <ClCompile Include="tests\Smoke\Memory\guard_allocator_alignment_smoke.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Smoke\Memory\Math_smoke.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
   </ItemGroup>

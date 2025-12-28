@@ -73,11 +73,11 @@ All renderer headers follow the project policy: header-first, `noexcept`, determ
   - `Renderer_RendererSystem_header_only.cpp`
   - These TUs include the corresponding headers in isolation, rely on `static_assert`s (e.g., `RendererBackend<DummyRenderer>`), and compile without defining `main`, ensuring each header is self-contained.
 
-- **Smoke helpers (tests/ and tests/smoke/)**
-  - `tests/BasicForwardRenderer_smoke.cpp` → `int RunBasicForwardRendererSmoke()` validates BasicForwardRenderer stats updates after `BeginFrame`/`SubmitInstances`.
-  - `tests/RendererSystem_smoke.cpp` → `int RunRendererSystemSmoke()` initializes `RendererSystem` with the inline Null backend and exercises a single `RenderFrame`.
-  - `tests/RendererSystem_BasicForwardRenderer_smoke.cpp` → `int RunRendererSystemBasicForwardRendererSmoke()` injects a BasicForwardRenderer through `InitRendererSystemWithInterface`, renders one frame, and inspects telemetry.
-  - Additional memory-system smoke helpers reside under `tests/smoke/` and follow the same no-entry-point convention, guaranteeing the renderer layer coexists with other subsystems.
+- **Smoke helpers (tests/Smoke/Subsystems/ and tests/Smoke/Memory/)**
+  - `tests/Smoke/Subsystems/BasicForwardRenderer_smoke.cpp` → `int RunBasicForwardRendererSmoke()` validates BasicForwardRenderer stats updates after `BeginFrame`/`SubmitInstances`.
+  - `tests/Smoke/Subsystems/RendererSystem_smoke.cpp` → `int RunRendererSystemSmoke()` initializes `RendererSystem` with the inline Null backend and exercises a single `RenderFrame`.
+  - `tests/Smoke/Subsystems/RendererSystem_BasicForwardRenderer_smoke.cpp` → `int RunRendererSystemBasicForwardRendererSmoke()` injects a BasicForwardRenderer through `InitRendererSystemWithInterface`, renders one frame, and inspects telemetry.
+  - Additional memory-system smoke helpers reside under `tests/Smoke/Memory/` and follow the same no-entry-point convention, guaranteeing the renderer layer coexists with other subsystems.
 
 - **Demo**
   - `tests/Renderer_BasicForwardRenderer_demo.cpp` is the only TU with a `main`. It constructs a `BasicForwardRenderer`, wraps it via `MakeBasicForwardRendererInterface`, feeds it into `RendererSystem`, drives three frames with a single view and three dummy instances, and validates every field in `BasicForwardRendererStats` before shutting down the system. The demo allocates nothing and performs no I/O.

@@ -10,7 +10,7 @@ For each subsystem added to v0.1, the following must exist and build cleanly:
 - Contract header: `Source/Core/Contracts/<Subsystem>.hpp` (self-contained, POD data, noexcept surface, no hidden allocations).
 - Null backend: `Source/Core/<Subsystem>/Null<Subsystem>.hpp` (or equivalent minimal implementation) satisfying the contract without side effects.
 - System orchestrator: `Source/Core/<Subsystem>/<Subsystem>System.hpp` (owns or accepts a backend, exposes a unified entry point, no dynamic allocations in this layer).
-- Tests: one header-only TU under `tests/SelfContain/` that includes the contract/backends, and one smoke helper under `tests/` or `tests/smoke/` without `main`, exercising basic flows.
+- Tests: one header-only TU under `tests/SelfContain/` that includes the contract/backends, and one smoke helper under `tests/Smoke/Subsystems/` (per-subsystem) or `tests/Smoke/Memory/` (memory allocators) without `main`, exercising basic flows.
 - Status doc: `Docs/<Subsystem>_M0_Status.md` summarizing current behavior, guarantees, and limitations.
 
 ## 3) Proposed Subsystem List for v0.1
@@ -31,5 +31,5 @@ For each subsystem added to v0.1, the following must exist and build cleanly:
 - Validation steps:
   - Build Debug and Release configurations for all targets (D-Engine, Renderer demo, bench runner where applicable).
   - Run demo TU with `main` (e.g., `tests/Renderer_BasicForwardRenderer_demo.cpp`) to confirm telemetry and system wiring.
-  - Run smoke/header-only harness (all `tests/` and `tests/smoke/` and `tests/SelfContain/` TUs) to ensure contracts are self-contained and backends meet the concept requirements.
+  - Run smoke/header-only harness (all `tests/Smoke/Subsystems/`, `tests/Smoke/Memory/`, and `tests/SelfContain/` TUs) to ensure contracts are self-contained and backends meet the concept requirements.
 - Passing the above with no warnings (treat warnings as errors) constitutes acceptance for v0.1.
