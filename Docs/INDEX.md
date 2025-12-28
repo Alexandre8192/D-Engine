@@ -9,7 +9,7 @@ Recommended reading order
 4) ABI_Interop_Policy.md + ABI_Review_Checklist.md (interop rules)
 5) Subsystem status docs (*_M0_Status.md)
 6) Vision docs (Renderer_Vision.md)
-7) Build and performance docs (Benchmarks.md, HeaderFirstStrategy.md)
+7) Build and performance docs (BenchProtocol.md, Benchmarks.md, HeaderFirstStrategy.md)
 
 Policies
 - LanguagePolicy.md
@@ -25,10 +25,14 @@ Subsystem status (M0)
 - Input_M0_Status.md
 - FileSystem_M0_Status.md
 
+Build and performance
+- BenchProtocol.md
+- Benchmarks.md
+- HeaderFirstStrategy.md
+
 Other
 - D-Engine_v0.1_Scope.md
 - Progress_Summary_v0.1.md
 - Memory.md
 - Math.md
 - Containers.md
-- Benchmarks.md
