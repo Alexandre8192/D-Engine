@@ -23,9 +23,10 @@ typedef struct NullWindowCtx {
     dng_u32                title_size;
 } NullWindowCtx;
 
-// Context allocation size and alignment (must match free).
-enum { kNullWindowCtxSize = sizeof(NullWindowCtx) };
-enum { kNullWindowCtxAlign = alignof(NullWindowCtx) };
+// Context and title allocation constants (size and align must match free).
+static const dng_u64 kNullWindowCtxSize = sizeof(NullWindowCtx);
+static const dng_u64 kNullWindowCtxAlign = alignof(NullWindowCtx);
+static const dng_u64 kTitleAlign = 1u; // Byte alignment for title strings.
 
 static dng_u32 NullWindow_StrLen(const char* cstr)
 {
@@ -46,7 +47,7 @@ static dng_status_v1 NullWindow_SetTitleInternal(NullWindowCtx* ctx, dng_str_vie
 
     if (ctx->title)
     {
-        ctx->host->free(ctx->host->user, ctx->title, ctx->title_size, 1u);
+        ctx->host->free(ctx->host->user, ctx->title, ctx->title_size, kTitleAlign);
         ctx->title = NULL;
         ctx->title_size = 0u;
     }
@@ -56,7 +57,7 @@ static dng_status_v1 NullWindow_SetTitleInternal(NullWindowCtx* ctx, dng_str_vie
         return DNG_STATUS_OK;
     }
 
-    void* mem = ctx->host->alloc(ctx->host->user, title.size, 1u);
+    void* mem = ctx->host->alloc(ctx->host->user, title.size, kTitleAlign);
     if (!mem)
     {
         return DNG_STATUS_OUT_OF_MEMORY;
@@ -104,7 +105,7 @@ static dng_status_v1 DNG_ABI_CALL NullWindow_Destroy(void* raw_ctx, dng_window_h
 
     if (ctx->title)
     {
-        ctx->host->free(ctx->host->user, ctx->title, ctx->title_size, 1u);
+        ctx->host->free(ctx->host->user, ctx->title, ctx->title_size, kTitleAlign);
     }
 
     ctx->title = NULL;
@@ -167,7 +168,7 @@ static void DNG_ABI_CALL NullWindow_Shutdown(void* raw_ctx, const dng_host_api_v
     // Free any window title allocation.
     if (ctx->title)
     {
-        host->free(host->user, ctx->title, ctx->title_size, 1u);
+        host->free(host->user, ctx->title, ctx->title_size, kTitleAlign);
         ctx->title = NULL;
         ctx->title_size = 0u;
     }
