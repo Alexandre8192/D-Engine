@@ -1,4 +1,5 @@
 // ABI layout enforcement for v1 (C11)
+#include <assert.h>
 #include <stddef.h>
 #include <stdalign.h>
 

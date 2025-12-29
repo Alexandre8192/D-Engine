@@ -44,5 +44,8 @@ Validation steps
 - Run the module smoke test: `tests/Abi/ModuleSmoke.cpp` (loads the sample NullWindow module and exercises the window API).
 - Optional: add your own layout/static asserts similar to `tests/Abi/AbiLayout_v1.c` to pin sizes/offsets in your toolchain.
 
+Windows export note
+- When building a C/C++ module on Windows, define `DNG_ABI_EXPORTS` so that `DNG_ABI_API` resolves to `__declspec(dllexport)` and exports `dngModuleGetApi_v1` correctly.
+
 Packaging note
 - Use `tools/package_abi_sdk.ps1` to produce a distributable SDK bundle containing ABI headers and this guide.

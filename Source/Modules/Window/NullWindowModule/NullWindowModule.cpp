@@ -52,9 +52,14 @@ static dng_status_v1 NullWindow_SetTitleInternal(NullWindowCtx* ctx, dng_str_vie
         ctx->title_size = 0u;
     }
 
-    if (!title.data || title.size == 0u)
+    if (title.size == 0u)
     {
         return DNG_STATUS_OK;
+    }
+
+    if (title.data == NULL)
+    {
+        return DNG_STATUS_INVALID_ARG;
     }
 
     void* mem = ctx->host->alloc(ctx->host->user, title.size, kTitleAlign);
@@ -73,6 +78,10 @@ static dng_status_v1 DNG_ABI_CALL NullWindow_Create(void* raw_ctx, const dng_win
 {
     NullWindowCtx* ctx = (NullWindowCtx*)raw_ctx;
     if (!ctx || !desc || !out_handle)
+    {
+        return DNG_STATUS_INVALID_ARG;
+    }
+    if (desc->flags != 0u)
     {
         return DNG_STATUS_INVALID_ARG;
     }
