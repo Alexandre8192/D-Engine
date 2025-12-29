@@ -134,6 +134,9 @@
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp">
       <Filter>Source\Core\Memory</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Core\Interop\ModuleLoader.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="tests\Test_GlobalNewDelete_BuildOnly.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>

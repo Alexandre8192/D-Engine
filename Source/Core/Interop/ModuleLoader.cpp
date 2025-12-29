@@ -281,7 +281,7 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
         return status;
     }
 
-    const dng_status_v1 api_ok = ValidateModuleApiV1(outApi);
+    const dng_status_v1 api_ok = ValidateModuleApiV1(outApi, host);
     if (api_ok != DNG_STATUS_OK)
     {
         Log(host, 1u, "Module returned an invalid API table");
