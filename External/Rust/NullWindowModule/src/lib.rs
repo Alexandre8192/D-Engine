@@ -9,7 +9,6 @@ use core::panic::UnwindSafe;
 use core::ptr;
 use std::panic::catch_unwind;
 
-pub type DNG_ABI_CALL = extern "C" fn;
 pub type dng_u8 = u8;
 pub type dng_u32 = u32;
 pub type dng_u64 = u64;
@@ -32,6 +31,7 @@ pub struct dng_abi_header_v1 {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct dng_str_view_v1 {
     pub data: *const c_char,
     pub size: dng_u32,
@@ -48,6 +48,7 @@ pub struct dng_window_desc_v1 {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct dng_window_size_v1 {
     pub width: dng_u32,
     pub height: dng_u32,
@@ -255,10 +256,10 @@ pub extern "C" fn dngModuleGetApi_v1(host: *const dng_host_api_v1, out_api: *mut
         if h.header.struct_size != size_of::<dng_host_api_v1>() as dng_u32 || h.header.abi_version != DNG_ABI_VERSION_V1 {
             return DNG_STATUS_UNSUPPORTED;
         }
-        if h.alloc.is_none() || h.free.is_none() {
-            return DNG_STATUS_INVALID_ARG;
-        }
-        let alloc_fn = h.alloc.unwrap();
+        let alloc_fn = match (h.alloc, h.free) {
+            (Some(a), Some(_)) => a,
+            _ => return DNG_STATUS_INVALID_ARG,
+        };
         let ctx_mem = alloc_fn(h.user, size_of::<NullWindowCtx>() as dng_u64, align_of::<NullWindowCtx>() as dng_u64);
         if ctx_mem.is_null() {
             return DNG_STATUS_OUT_OF_MEMORY;
