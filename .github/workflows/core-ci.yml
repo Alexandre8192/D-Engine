@@ -1,0 +1,37 @@
+name: core-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v1.3.1
+
+      - name: Build Debug
+        run: msbuild D-Engine.sln /p:Configuration=Debug /p:Platform=x64 /m
+
+      - name: Build Release
+        run: msbuild D-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
+
+      - name: Run AllSmokes
+        shell: pwsh
+        run: |
+          $candidates = Get-ChildItem -Path . -Recurse -Filter 'AllSmokes*.exe' | Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, FullName
+          if (-not $candidates) {
+            Write-Error 'AllSmokes executable not found after build.'
+            exit 1
+          }
+          $exe = $candidates[0].FullName
+          Write-Host "Running" $exe
+          & $exe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "AllSmokes failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }

@@ -141,18 +141,13 @@ namespace dng::core {
             Logger& self = Get();
             const char* lvlStr = ToShortLevel(lvl);
             std::scoped_lock lock(self.mMutex);
-            try {
-                if (category) {
-                    std::print(stream, "[{}][{}] ", lvlStr, category);
-                }
-                else {
-                    std::print(stream, "[{}] ", lvlStr);
-                }
-                std::println(stream, fmt, static_cast<Args&&>(args)...);
+            if (category) {
+                std::print(stream, "[{}][{}] ", lvlStr, category);
             }
-            catch (...) {
-                // swallow
+            else {
+                std::print(stream, "[{}] ", lvlStr);
             }
+            std::println(stream, fmt, static_cast<Args&&>(args)...);
         }
 
         static void PrintRaw(LogLevel lvl, const char* category, std::FILE* stream, std::string_view msg) noexcept {
@@ -160,16 +155,11 @@ namespace dng::core {
             Logger& self = Get();
             const char* lvlStr = ToShortLevel(lvl);
             std::scoped_lock lock(self.mMutex);
-            try {
-                if (category) {
-                    std::println(stream, "[{}][{}] {}", lvlStr, category, msg);
-                }
-                else {
-                    std::println(stream, "[{}] {}", lvlStr, msg);
-                }
+            if (category) {
+                std::println(stream, "[{}][{}] {}", lvlStr, category, msg);
             }
-            catch (...) {
-                // swallow
+            else {
+                std::println(stream, "[{}] {}", lvlStr, msg);
             }
         }
 

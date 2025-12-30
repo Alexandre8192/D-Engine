@@ -1,0 +1,19 @@
+name: policy-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  policy-lint:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Run policy lint
+        run: python tools/policy_lint.py
+      - name: Run policy lint (strict)
+        run: python tools/policy_lint.py --strict

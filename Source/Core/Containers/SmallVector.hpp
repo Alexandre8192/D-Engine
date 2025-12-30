@@ -429,21 +429,9 @@ namespace dng::core
 
             pointer newStorage = m_allocator.allocate(newCapacity);
             size_type i = 0;
-            try
+            for (; i < m_size; ++i)
             {
-                for (; i < m_size; ++i)
-                {
-                    new (newStorage + i) T(std::move(m_data[i]));
-                }
-            }
-            catch (...)
-            {
-                for (size_type j = 0; j < i; ++j)
-                {
-                    std::destroy_at(newStorage + j);
-                }
-                m_allocator.deallocate(newStorage, newCapacity);
-                throw;
+                new (newStorage + i) T(std::move(m_data[i]));
             }
 
             DestroyRange(m_data, m_size);

@@ -247,7 +247,7 @@ namespace dng::core {
         void Pop(const StackMarker& marker) noexcept {
             if (!ValidateLifoOrder(marker)) {
 #ifndef NDEBUG
-                assert(false && "StackAllocator: LIFO violation in Pop(marker).");
+                DNG_ASSERT(false && "StackAllocator: LIFO violation in Pop(marker).");
 #endif
                 return;
             }
@@ -290,7 +290,7 @@ namespace dng::core {
 #if defined(DNG_STRICT_STACK_DEALLOC_ASSERTS) && DNG_STRICT_STACK_DEALLOC_ASSERTS
             // Hard-fail in Debug if someone tries to call Deallocate().
             DNG_LOG_FATAL("Memory", "StackAllocator: Deallocate() is not supported. Use Pop(marker) or Reset().");
-            assert(false && "StackAllocator: Deallocate() is not supported. Use Pop(marker) or Reset().");
+            DNG_ASSERT(false && "StackAllocator: Deallocate() is not supported. Use Pop(marker) or Reset().");
 #else
             // Marker-only free policy: Deallocate() intentionally does nothing and documents the correct usage path.
             (void)ptr;
