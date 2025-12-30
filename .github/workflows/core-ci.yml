@@ -35,3 +35,19 @@ jobs:
             Write-Error "AllSmokes failed with exit code $LASTEXITCODE"
             exit $LASTEXITCODE
           }
+
+      - name: Run ModuleSmoke (ABI runtime smoke)
+        shell: pwsh
+        run: |
+          $candidates = Get-ChildItem -Path . -Recurse -Filter 'ModuleSmoke*.exe' | Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, FullName
+          if (-not $candidates) {
+            Write-Error 'ModuleSmoke executable not found after build.'
+            exit 1
+          }
+          $exe = $candidates[0].FullName
+          Write-Host "Running" $exe
+          & $exe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "ModuleSmoke failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }

@@ -13,6 +13,7 @@ int RunFileSystemSmoke();
 int RunWindowSmoke();
 int RunInputSmoke();
 int RunJobsSmoke();
+int RunDeterminismReplaySmoke();
 
 int main()
 {
@@ -26,6 +27,7 @@ int main()
     failures += (RunWindowSmoke() != 0) ? 1 : 0;
     failures += (RunInputSmoke() != 0) ? 1 : 0;
     failures += (RunJobsSmoke() != 0) ? 1 : 0;
+    failures += (RunDeterminismReplaySmoke() != 0) ? 1 : 0;
 
     return (failures == 0) ? 0 : 1;
 }

@@ -17,3 +17,7 @@ jobs:
         run: python tools/policy_lint.py
       - name: Run policy lint (strict)
         run: python tools/policy_lint.py --strict
+      - name: Run policy lint (strict, modules)
+        run: python tools/policy_lint.py --strict --modules
+      - name: policy_lint self-test (expects failure)
+        run: python tools/policy_lint_selftest.py
