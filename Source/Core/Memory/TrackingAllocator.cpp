@@ -37,7 +37,6 @@
 #include "Core/Logger.hpp"
 
 // Standard Library
-#include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <unordered_map>

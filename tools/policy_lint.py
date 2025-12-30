@@ -34,9 +34,7 @@ CODE_EXTENSIONS: Set[str] = {
 FORBIDDEN_TOKENS: List[str] = ["throw", "try", "catch", "dynamic_cast", "typeid"]
 
 # Strict mode fails if any entry here is used.
-TOKEN_ALLOWLIST: dict[str, Set[str]] = {
-    "Source/Core/Memory/GlobalNewDelete.cpp": {"throw"},
-}
+TOKEN_ALLOWLIST: dict[str, Set[str]] = {}
 
 HEAVY_INCLUDES: Set[str] = {
     "regex",
@@ -45,15 +43,16 @@ HEAVY_INCLUDES: Set[str] = {
     "locale",
 }
 
-HEAVY_INCLUDE_ALLOWLIST = {
-    "Source/Core/Memory/TrackingAllocator.cpp": {"iostream"},
-}
+HEAVY_INCLUDE_ALLOWLIST: dict[str, Set[str]] = {}
 
 # Strict mode fails if any entry here is used.
 CORE_TOKEN_ALLOWLIST: dict[str, Set[str]] = {
-    "Source/Core/Abi/DngHostApi.h": {"free"},
-    "Source/Core/Interop/ModuleLoader.cpp": {"free"},
     "Source/Core/Memory/GlobalNewDelete.cpp": {"malloc", "free"},
+}
+
+STRICT_BLESSED_HITS: Set[Tuple[str, str]] = {
+    ("Source/Core/Memory/GlobalNewDelete.cpp", "core:malloc"),
+    ("Source/Core/Memory/GlobalNewDelete.cpp", "core:free"),
 }
 
 EXPR_NEW_PATTERN = re.compile(r"\bnew\b")
@@ -62,11 +61,18 @@ EXPR_DELETE_PATTERN = re.compile(r"\bdelete\b")
 # Matches both #include <...> and #include "..."
 INCLUDE_PATTERN = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]')
 
-MALLOC_TOKENS: List[str] = ["malloc", "free", "realloc", "calloc"]
 USING_NAMESPACE_PATTERN = re.compile(r"\busing\s+namespace\b")
 SHARED_PTR_PATTERN = re.compile(r"std::shared_ptr\b")
 WEAK_PTR_PATTERN = re.compile(r"std::weak_ptr\b")
 ASSERT_PATTERN = re.compile(r"\bassert\s*\(")
+
+# CRT allocation call detection (avoid member names like obj.free())
+MALLOC_CALL_PATTERN = re.compile(r"(?<!->)(?<!\.)\bmalloc\s*\(")
+FREE_CALL_PATTERN = re.compile(r"(?<!->)(?<!\.)\bfree\s*\(")
+OTHER_ALLOC_PATTERNS = {
+    "realloc": re.compile(r"(?<!->)(?<!\.)\brealloc\s*\("),
+    "calloc": re.compile(r"(?<!->)(?<!\.)\bcalloc\s*\("),
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -198,6 +204,55 @@ def strip_comments_and_strings(text: str) -> List[str]:
     return out_lines
 
 
+def strip_comments_only(text: str) -> List[str]:
+    # Keep string contents intact for include parsing; only comments are blanked.
+    lines = text.splitlines()
+    out_lines: List[str] = []
+    in_block = False
+
+    for line in lines:
+        i = 0
+        out_chars: List[str] = []
+        in_line_comment = False
+
+        while i < len(line):
+            ch = line[i]
+            nxt = line[i + 1] if i + 1 < len(line) else ""
+
+            if in_line_comment:
+                out_chars.append(" ")
+                i += 1
+                continue
+
+            if in_block:
+                if ch == "*" and nxt == "/":
+                    in_block = False
+                    out_chars.extend([" ", " "])
+                    i += 2
+                else:
+                    out_chars.append(" ")
+                    i += 1
+                continue
+
+            if ch == "/" and nxt == "/":
+                in_line_comment = True
+                out_chars.extend(" " * (len(line) - i))
+                break
+
+            if ch == "/" and nxt == "*":
+                in_block = True
+                out_chars.extend([" ", " "])
+                i += 2
+                continue
+
+            out_chars.append(ch)
+            i += 1
+
+        out_lines.append("".join(out_chars))
+
+    return out_lines
+
+
 def is_token_allowed(path: str, token: str) -> bool:
     allowed = TOKEN_ALLOWLIST.get(path)
     return allowed is not None and token in allowed
@@ -248,9 +303,9 @@ def is_raw_delete_line(line: str) -> bool:
 def check_alloc_tokens(path: str, lines: List[str], violations: List[Tuple[str, int, str]]) -> None:
     for lineno, line in enumerate(lines, start=1):
         if is_raw_new_line(line):
-            violations.append((path, lineno, "raw new expression in Core; use engine allocator or placement new"))
+            violations.append((path, lineno, "raw new expression; use engine allocator or placement new"))
         if is_raw_delete_line(line):
-            violations.append((path, lineno, "raw delete expression in Core; ownership should use engine allocators"))
+            violations.append((path, lineno, "raw delete expression; ownership should use engine allocators"))
 
 
 def check_heavy_includes(path: str, lines: List[str], violations: List[Tuple[str, int, str]], allowlist_hits: List[Tuple[str, int, str]]) -> None:
@@ -286,18 +341,23 @@ def check_ascii(path: str, data: bytes, violations: List[Tuple[str, int, str]]) 
 
 def check_core_only_tokens(path: str, lines: List[str], violations: List[Tuple[str, int, str]], allowlist_hits: List[Tuple[str, int, str]]) -> None:
     allowed_tokens = CORE_TOKEN_ALLOWLIST.get(path, set())
-
-    for token in MALLOC_TOKENS:
-        pattern = re.compile(rf"\b{re.escape(token)}\b")
-        for lineno, line in enumerate(lines, start=1):
-            if not pattern.search(line):
-                continue
-            if token in allowed_tokens:
-                allowlist_hits.append((path, lineno, f"core:{token}"))
-                continue
-            violations.append((path, lineno, f"forbidden token '{token}' in Core; use engine allocators"))
-
     for lineno, line in enumerate(lines, start=1):
+        if MALLOC_CALL_PATTERN.search(line):
+            if "malloc" in allowed_tokens:
+                allowlist_hits.append((path, lineno, "core:malloc"))
+            else:
+                violations.append((path, lineno, "forbidden token 'malloc' in Core; use engine allocators"))
+
+        if FREE_CALL_PATTERN.search(line):
+            if "free" in allowed_tokens:
+                allowlist_hits.append((path, lineno, "core:free"))
+            else:
+                violations.append((path, lineno, "forbidden token 'free' in Core; use engine allocators"))
+
+        for token, pattern in OTHER_ALLOC_PATTERNS.items():
+            if pattern.search(line):
+                violations.append((path, lineno, f"forbidden token '{token}' in Core; use engine allocators"))
+
         if USING_NAMESPACE_PATTERN.search(line):
             violations.append((path, lineno, "'using namespace' is banned in Core"))
         if SHARED_PTR_PATTERN.search(line):
@@ -313,7 +373,7 @@ def check_relative_includes_core(path: str, lines: List[str], violations: List[T
         match = INCLUDE_PATTERN.search(line)
         if not match:
             continue
-        header = match.group(1).strip()
+        header = match.group(1).strip().replace("\\", "/")
         if header.startswith("../") or header.startswith("./") or "/../" in header or "/./" in header:
             violations.append((path, lineno, "relative include is banned in Core"))
 
@@ -347,13 +407,15 @@ def main() -> int:
 
         text = data.decode("utf-8", errors="replace")
         sanitized_lines = strip_comments_and_strings(text)
+        comment_only_lines = strip_comments_only(text)
 
         check_forbidden_tokens(rel_path, sanitized_lines, violations, allowlist_hits)
         check_alloc_tokens(rel_path, sanitized_lines, violations)
-        check_heavy_includes(rel_path, sanitized_lines, violations, allowlist_hits)
+        # Include checks keep string literals so INCLUDE_PATTERN can see the header path.
+        check_heavy_includes(rel_path, comment_only_lines, violations, allowlist_hits)
         if is_core_path(rel_path):
             check_core_only_tokens(rel_path, sanitized_lines, violations, allowlist_hits)
-            check_relative_includes_core(rel_path, sanitized_lines, violations)
+            check_relative_includes_core(rel_path, comment_only_lines, violations)
 
     exit_code = 0
 
@@ -363,11 +425,15 @@ def main() -> int:
         print(f"\n{len(violations)} violation(s) found.")
         exit_code = 1
 
-    if args.strict and allowlist_hits:
-        print("Strict mode: allowlist entries were used:")
-        for path, lineno, reason in sorted(allowlist_hits):
-            print(f"  {path}:{lineno}: allowlisted {reason}")
-        exit_code = 1
+    if args.strict:
+        unblessed = [(path, lineno, reason) for path, lineno, reason in allowlist_hits if (path, reason) not in STRICT_BLESSED_HITS]
+        if unblessed:
+            print("Strict mode: unblessed allowlist entries were used:")
+            for path, lineno, reason in sorted(unblessed):
+                print(f"  {path}:{lineno}: allowlisted {reason}")
+            exit_code = 1
+        elif allowlist_hits:
+            print("Strict mode: only blessed allowlist entries were used.")
     elif allowlist_hits:
         print("Warning: allowlist entries were used (non-strict mode):")
         for path, lineno, reason in sorted(allowlist_hits):

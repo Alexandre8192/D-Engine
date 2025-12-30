@@ -2,11 +2,10 @@
 
 // ---
 // Purpose : Engine-wide global new/delete overloads wired to D-Engine OOM policy.
-// Contract: Throwing operator new forms may emit std::bad_alloc in SOFT mode, but
-//           terminate in FATAL mode; nothrow forms return nullptr in SOFT mode.
-//           Delete variants honor (size, alignment) invariants.
-// Notes   : This file is the ONLY allowed exception boundary for Core regarding
-//           std::bad_alloc; engine code must not rely on exceptions internally.
+// Contract: Throwing operator new forms terminate on OOM; nothrow forms return
+//           nullptr. Delete variants honor (size, alignment) invariants.
+// Notes   : Core is built without exceptions for global new/delete; diagnostics
+//           run before std::terminate() is invoked on throwing paths.
 // ---
 
 #if DNG_ROUTE_GLOBAL_NEW
@@ -31,7 +30,6 @@ namespace
     using ::dng::core::AllocatorRef;
     using ::dng::core::IsPowerOfTwo;
     using ::dng::core::NormalizeAlignment;
-    using ::dng::core::ShouldFatalOnOOM;
     using ::dng::memory::MemorySystem;
 
     // ---------------------------------------------------------------------
@@ -286,24 +284,19 @@ namespace
     // Purpose : Centralize out-of-memory (OOM) handling for global operator new
     //           overloads.
     // Contract: Returns nullptr when nothrow==true and allocation fails. When
-    //           nothrow==false, emits std::bad_alloc in SOFT mode and terminates
-    //           in FATAL mode (either via FatalOOM or std::terminate()).
-    // Notes   : This is the only Core site allowed to throw; OOM hooks still run
-    //           through DNG_MEM_CHECK_OOM for diagnostics and fatal escalation.
+    //           nothrow==false, runs diagnostics then terminates via
+    //           std::terminate(); control never returns to the caller.
+    // Notes   : Global new/delete in Core does not throw; OOM hooks still run
+    //           through DNG_MEM_CHECK_OOM for diagnostics.
     // ---
     [[nodiscard]] void* HandleAllocationFailure(std::size_t size,
         std::size_t alignment,
         bool nothrow,
         const char* context)
     {
-        const bool fatalMode = ShouldFatalOnOOM();
         DNG_MEM_CHECK_OOM(size, alignment, context);
         if (!nothrow)
         {
-            if (!fatalMode)
-            {
-                throw std::bad_alloc{};
-            }
             std::terminate();
         }
         return nullptr;
