@@ -9,6 +9,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ModuleSmoke", "tests\Abi\Mo
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AllSmokes", "tests\AllSmokes\AllSmokes.vcxproj", "{7A4B3AE4-2D3E-4A56-9E29-3051A0D6AF5E}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "D-Engine-BenchRunner", "tests\BenchRunner\D-Engine-BenchRunner.vcxproj", "{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -41,6 +43,14 @@ Global
 		{7A4B3AE4-2D3E-4A56-9E29-3051A0D6AF5E}.Release|x64.Build.0 = Release|x64
 		{7A4B3AE4-2D3E-4A56-9E29-3051A0D6AF5E}.Release|x86.ActiveCfg = Release|Win32
 		{7A4B3AE4-2D3E-4A56-9E29-3051A0D6AF5E}.Release|x86.Build.0 = Release|Win32
+		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Debug|x64.ActiveCfg = Debug|x64
+		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Debug|x64.Build.0 = Debug|x64
+		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Debug|x86.ActiveCfg = Debug|Win32
+		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Debug|x86.Build.0 = Debug|Win32
+		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Release|x64.ActiveCfg = Release|x64
+		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Release|x64.Build.0 = Release|x64
+		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Release|x86.ActiveCfg = Release|Win32
+		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

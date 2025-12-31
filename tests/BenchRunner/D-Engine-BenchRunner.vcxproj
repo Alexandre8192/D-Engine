@@ -19,9 +19,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{7A4B3AE4-2D3E-4A56-9E29-3051A0D6AF5E}</ProjectGuid>
+    <ProjectGuid>{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>AllSmokes</RootNamespace>
+    <RootNamespace>BenchRunner</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -69,14 +69,14 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(Platform)\$(Configuration)\AllSmokes\</IntDir>
-    <TargetName>AllSmokes</TargetName>
+    <IntDir>$(Platform)\$(Configuration)\BenchRunner\</IntDir>
+    <TargetName>D-Engine-BenchRunner</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;DNG_MEM_TRACKING=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;DNG_MEM_TRACKING=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(SolutionDir)Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp23</LanguageStandard>
@@ -96,7 +96,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;DNG_MEM_TRACKING=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;DNG_MEM_TRACKING=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(SolutionDir)Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpplatest</LanguageStandard>
@@ -116,7 +116,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;DNG_MEM_TRACKING=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;DNG_MEM_TRACKING=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
       <AdditionalIncludeDirectories>$(SolutionDir)Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -136,7 +136,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;DNG_MEM_TRACKING=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;DNG_MEM_TRACKING=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(SolutionDir)Source;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpplatest</LanguageStandard>
@@ -153,15 +153,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="AllSmokes_main.cpp" />
-    <ClCompile Include="..\Smoke\Determinism\ReplayHash_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\FileSystem_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Input_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Jobs_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\RendererSystem_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Time_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Window_smoke.cpp" />
+    <ClCompile Include="BenchRunner_main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\D-Engine.vcxproj">

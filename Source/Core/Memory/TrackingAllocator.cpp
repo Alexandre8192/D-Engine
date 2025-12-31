@@ -37,8 +37,7 @@
 #include "Core/Logger.hpp"
 
 // Standard Library
-#include <iomanip>
-#include <sstream>
+#include <cstdio>
 #include <unordered_map>
 #include <vector>
 #include <mutex>
@@ -112,7 +111,11 @@ namespace dng::core {
             }
         }
 
-        std::string FormatBytes(usize bytes) {
+        void FormatBytes(usize bytes, char* buffer, usize bufferSize) {
+            const std::size_t destSize = static_cast<std::size_t>(bufferSize);
+            if (!buffer || destSize == 0) {
+                return;
+            }
             const char* units[] = { "B", "KB", "MB", "GB", "TB" };
             double size = static_cast<double>(bytes);
             int unitIndex = 0;
@@ -122,9 +125,7 @@ namespace dng::core {
                 ++unitIndex;
             }
 
-            std::ostringstream oss;
-            oss << std::fixed << std::setprecision(2) << size << " " << units[unitIndex];
-            return oss.str();
+            std::snprintf(buffer, destSize, "%.2f %s", size, units[unitIndex]);
         }
     } // namespace
 
@@ -156,14 +157,22 @@ namespace dng::core {
             if (totalAllocs > 0) {
                 const char* tagName = AllocTagToString(static_cast<AllocTag>(i));
 
-                std::ostringstream line;
-                line << "  " << tagName << ": "
-                    << "Current=" << FormatBytes(currentBytes)
-                    << " (" << currentAllocs << " allocs), "
-                    << "Peak=" << FormatBytes(peakBytes)
-                    << ", Total=" << totalAllocs << " allocs";
+                char currentBuf[32];
+                char peakBuf[32];
+                char lineBuf[160];
+                FormatBytes(currentBytes, currentBuf, sizeof(currentBuf));
+                FormatBytes(peakBytes, peakBuf, sizeof(peakBuf));
+                std::snprintf(
+                    lineBuf,
+                    sizeof(lineBuf),
+                    "  %s: Current=%s (%llu allocs), Peak=%s, Total=%llu allocs",
+                    tagName,
+                    currentBuf,
+                    static_cast<unsigned long long>(currentAllocs),
+                    peakBuf,
+                    static_cast<unsigned long long>(totalAllocs));
 
-                LogMemoryInfo(line.str().c_str());
+                LogMemoryInfo(lineBuf);
 
                 totalCurrentBytes += currentBytes;
                 totalPeakBytes += peakBytes;
@@ -173,12 +182,20 @@ namespace dng::core {
         }
 
         if (totalAllocations > 0) {
-            std::ostringstream totals;
-            totals << "TOTALS: Current=" << FormatBytes(totalCurrentBytes)
-                << " (" << totalCurrentAllocations << " allocs), "
-                << "Peak=" << FormatBytes(totalPeakBytes)
-                << ", Total=" << totalAllocations << " allocs";
-            LogMemoryInfo(totals.str().c_str());
+            char currentBuf[32];
+            char peakBuf[32];
+            char totalsBuf[160];
+            FormatBytes(totalCurrentBytes, currentBuf, sizeof(currentBuf));
+            FormatBytes(totalPeakBytes, peakBuf, sizeof(peakBuf));
+            std::snprintf(
+                totalsBuf,
+                sizeof(totalsBuf),
+                "TOTALS: Current=%s (%llu allocs), Peak=%s, Total=%llu allocs",
+                currentBuf,
+                static_cast<unsigned long long>(totalCurrentAllocations),
+                peakBuf,
+                static_cast<unsigned long long>(totalAllocations));
+            LogMemoryInfo(totalsBuf);
         }
         else {
             LogMemoryInfo("No allocations tracked.");
@@ -257,11 +274,17 @@ namespace dng::core {
                 tagLeakedBytes += rec->size;
             }
 
-            std::ostringstream tagHeader;
-            tagHeader << "  " << tagName << " leaks: "
-                << recs.size() << " allocations, "
-                << FormatBytes(tagLeakedBytes);
-            LogMemoryError(tagHeader.str().c_str());
+            char leakedBuf[32];
+            char tagHeader[160];
+            FormatBytes(tagLeakedBytes, leakedBuf, sizeof(leakedBuf));
+            std::snprintf(
+                tagHeader,
+                sizeof(tagHeader),
+                "  %s leaks: %llu allocations, %s",
+                tagName,
+                static_cast<unsigned long long>(recs.size()),
+                leakedBuf);
+            LogMemoryError(tagHeader);
 
             // Limit detailed entries to avoid spamming logs
             constexpr usize kMaxReportedLeaks = 10;
@@ -269,31 +292,53 @@ namespace dng::core {
 
             for (const AllocationRecord* rec : recs) {
                 if (reported >= kMaxReportedLeaks) {
-                    std::ostringstream remaining;
-                    remaining << "    ... and " << (recs.size() - reported) << " more leaks";
-                    LogMemoryError(remaining.str().c_str());
+                    char remaining[96];
+                    std::snprintf(
+                        remaining,
+                        sizeof(remaining),
+                        "    ... and %llu more leaks",
+                        static_cast<unsigned long long>(recs.size() - reported));
+                    LogMemoryError(remaining);
                     break;
                 }
 
-                std::ostringstream leak;
-                leak << "    - " << FormatBytes(rec->size)
-                    << " (" << rec->info.name << ")";
+                char sizeBuf[32];
+                char leak[192];
+                const char* name = rec->info.name ? rec->info.name : "<unnamed>";
+                FormatBytes(rec->size, sizeBuf, sizeof(sizeBuf));
+                int written = std::snprintf(
+                    leak,
+                    sizeof(leak),
+                    "    - %s (%s)",
+                    sizeBuf,
+                    name);
 
 #if DNG_MEM_CAPTURE_CALLSITE
-                if (rec->info.file && rec->info.line > 0) {
-                    leak << " at " << rec->info.file << ":" << rec->info.line;
+                if (written > 0 && written < static_cast<int>(sizeof(leak)) && rec->info.file && rec->info.line > 0) {
+                    std::snprintf(
+                        leak + static_cast<std::size_t>(written),
+                        sizeof(leak) - static_cast<std::size_t>(written),
+                        " at %s:%u",
+                        rec->info.file,
+                        rec->info.line);
                 }
 #endif
-                LogMemoryError(leak.str().c_str());
+                LogMemoryError(leak);
                 ++reported;
             }
         }
 
         // Summary
-        std::ostringstream summary;
-        summary << "TOTAL LEAKS: " << leakCount << " allocations, "
-            << FormatBytes(totalLeakedBytes);
-        LogMemoryError(summary.str().c_str());
+        char leakedBuf[32];
+        char summary[128];
+        FormatBytes(totalLeakedBytes, leakedBuf, sizeof(leakedBuf));
+        std::snprintf(
+            summary,
+            sizeof(summary),
+            "TOTAL LEAKS: %llu allocations, %s",
+            static_cast<unsigned long long>(leakCount),
+            leakedBuf);
+        LogMemoryError(summary);
         LogMemoryError("=============================");
     }
 

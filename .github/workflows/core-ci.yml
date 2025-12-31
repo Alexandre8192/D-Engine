@@ -20,6 +20,14 @@ jobs:
       - name: Build Release
         run: msbuild D-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
 
+      - name: Build Debug (mem tracking compile-only)
+        run: >
+          msbuild D-Engine.vcxproj
+          /p:Configuration=Debug
+          /p:Platform=x64
+          /p:PreprocessorDefinitions="DNG_MEM_TRACKING=1;DNG_MEM_CAPTURE_CALLSITE=1;%(PreprocessorDefinitions)"
+          /p:BuildProjectReferences=false
+
       - name: Run AllSmokes
         shell: pwsh
         run: |

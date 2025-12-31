@@ -37,6 +37,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify baseline exists
+        run: |
+          $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
+          if (-not (Test-Path $baseline)) { throw "Baseline not found: $baseline" }
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 

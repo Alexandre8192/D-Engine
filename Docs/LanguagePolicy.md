@@ -18,6 +18,10 @@
   public headers.
 - **Assert-first.** Use `DNG_CHECK` / `DNG_ASSERT`; guard costly logs behind
   `Logger::IsEnabled()`.
+- **Blessed exceptions (narrow):** ABI host tables may have a field named `free`
+  that is not the CRT `free`; `Source/Core/Memory/GlobalNewDelete.cpp` alone may
+  call `std::malloc/std::free` to avoid recursion; global operator new OOM is
+  fatal (std::terminate) while nothrow new returns `nullptr`.
 
 ---
 
@@ -28,13 +32,12 @@
 - Allowed **only at interop boundaries** (separate module) to **catch and
   translate** third-party exceptions into explicit status for the Core.
   Exceptions must never cross into Core code.
-- The **only** sanctioned emission of `std::bad_alloc` inside Core is the
-  global `operator new/new[]` overrides in `Core/Memory/GlobalNewDelete.cpp`; all
-  other code must remain exception-free.
-- Global OOM behavior is configured via `SetFatalOnOOMPolicy` (wired through
-  `MemorySystem`). **Hard** mode aborts immediately inside the failing allocator;
-  **Soft** mode bubbles a `nullptr` back to Core and only the global new/delete
-  bridge translates it to `std::bad_alloc`.
+- Global `operator new/new[]` in Core are **fatal on OOM** (call
+  `std::terminate`). Nothrow forms return `nullptr`. Core does **not** emit
+  `std::bad_alloc` anywhere.
+- Global OOM behavior inside allocators is configured via `SetFatalOnOOMPolicy`
+  (wired through `MemorySystem`). **Hard** mode aborts immediately inside the
+  failing allocator; **Soft** mode bubbles a `nullptr` back to Core.
 
 ### Rationale
 - Determinism and performance (no unwinding tables, no surprise slow paths).

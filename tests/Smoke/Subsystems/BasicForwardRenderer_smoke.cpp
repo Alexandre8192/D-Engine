@@ -1,6 +1,8 @@
 #include "Modules/Renderer/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp"
 #include "Core/Contracts/Renderer.hpp"
 
+#include <cstdio>
+
 int RunBasicForwardRendererSmoke()
 {
     using namespace dng::render;
@@ -11,13 +13,23 @@ int RunBasicForwardRendererSmoke()
         initialStats.lastInstanceCount != 0 || initialStats.surfaceWidth != 0 ||
         initialStats.surfaceHeight != 0)
     {
+        std::printf("BasicForwardRenderer initial stats mismatch: fi=%u, views=%u, inst=%u, w=%u, h=%u\n",
+                    initialStats.frameIndex,
+                    initialStats.lastViewCount,
+                    initialStats.lastInstanceCount,
+                    initialStats.surfaceWidth,
+                    initialStats.surfaceHeight);
         return 1;
     }
 
     backend.ResizeSurface(1280U, 720U);
-    if (backend.GetStats().surfaceWidth != 1280U || backend.GetStats().surfaceHeight != 720U)
+    const auto& resizedStats = backend.GetStats();
+    if (resizedStats.surfaceWidth != 1280U || resizedStats.surfaceHeight != 720U)
     {
-        return 1;
+        std::printf("BasicForwardRenderer resize mismatch: w=%u, h=%u\n",
+                    resizedStats.surfaceWidth,
+                    resizedStats.surfaceHeight);
+        return 2;
     }
 
     FrameSubmission submission{};
@@ -29,7 +41,8 @@ int RunBasicForwardRendererSmoke()
 
     auto iface = MakeBasicForwardRendererInterface(backend);
     BeginFrame(iface, submission);
-    SubmitInstances(iface, nullptr, 3U);
+    RenderInstance instances[3]{};
+    SubmitInstances(iface, instances, 3U);
     EndFrame(iface);
 
     const auto& stats = backend.GetStats();
@@ -37,7 +50,13 @@ int RunBasicForwardRendererSmoke()
         stats.lastInstanceCount != 3U || stats.surfaceWidth != 800U ||
         stats.surfaceHeight != 600U)
     {
-        return 1;
+        std::printf("BasicForwardRenderer frame stats mismatch: fi=%u, views=%u, inst=%u, w=%u, h=%u\n",
+                    stats.frameIndex,
+                    stats.lastViewCount,
+                    stats.lastInstanceCount,
+                    stats.surfaceWidth,
+                    stats.surfaceHeight);
+        return 3;
     }
 
     (void)backend.GetCaps();

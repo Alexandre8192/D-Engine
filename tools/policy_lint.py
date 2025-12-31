@@ -67,8 +67,9 @@ WEAK_PTR_PATTERN = re.compile(r"std::weak_ptr\b")
 ASSERT_PATTERN = re.compile(r"\bassert\s*\(")
 
 # CRT allocation call detection (avoid member names like obj.free())
-MALLOC_CALL_PATTERN = re.compile(r"(?<!->)(?<!\.)\bmalloc\s*\(")
-FREE_CALL_PATTERN = re.compile(r"(?<!->)(?<!\.)\bfree\s*\(")
+# Match standalone calls, including std::malloc/free and ::malloc/free, but not member access.
+MALLOC_CALL_PATTERN = re.compile(r"(?<!->)(?<!\.)\b(?:(?:std::)?malloc|::malloc)\s*\(")
+FREE_CALL_PATTERN = re.compile(r"(?<!->)(?<!\.)\b(?:(?:std::)?free|::free)\s*\(")
 OTHER_ALLOC_PATTERNS = {
     "realloc": re.compile(r"(?<!->)(?<!\.)\brealloc\s*\("),
     "calloc": re.compile(r"(?<!->)(?<!\.)\bcalloc\s*\("),

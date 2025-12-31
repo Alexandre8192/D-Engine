@@ -6,6 +6,8 @@
 // Notes   : Assumes Run*Smoke helpers are linked from their respective TUs.
 // ============================================================================
 
+#include <cstdio>
+
 int RunRendererSystemSmoke();
 int RunBasicForwardRendererSmoke();
 int RunTimeSmoke();
@@ -15,19 +17,41 @@ int RunInputSmoke();
 int RunJobsSmoke();
 int RunDeterminismReplaySmoke();
 
+namespace
+{
+    struct SmokeEntry
+    {
+        const char* name;
+        int (*func)();
+    };
+}
+
 int main()
 {
+    const SmokeEntry smokes[] = {
+        {"RendererSystem", &RunRendererSystemSmoke},
+        {"BasicForwardRenderer", &RunBasicForwardRendererSmoke},
+        {"Time", &RunTimeSmoke},
+        {"FileSystem", &RunFileSystemSmoke},
+        {"Window", &RunWindowSmoke},
+        {"Input", &RunInputSmoke},
+        {"Jobs", &RunJobsSmoke},
+        {"DeterminismReplay", &RunDeterminismReplaySmoke},
+    };
+
     int failures = 0;
 
-    // Each smoke returns 0 on pass, non-zero on failure.
-    failures += (RunRendererSystemSmoke() != 0) ? 1 : 0;
-    failures += (RunBasicForwardRendererSmoke() != 0) ? 1 : 0;
-    failures += (RunTimeSmoke() != 0) ? 1 : 0;
-    failures += (RunFileSystemSmoke() != 0) ? 1 : 0;
-    failures += (RunWindowSmoke() != 0) ? 1 : 0;
-    failures += (RunInputSmoke() != 0) ? 1 : 0;
-    failures += (RunJobsSmoke() != 0) ? 1 : 0;
-    failures += (RunDeterminismReplaySmoke() != 0) ? 1 : 0;
+    for (const SmokeEntry& entry : smokes)
+    {
+        const int code = entry.func ? entry.func() : 1;
+        if (code != 0)
+        {
+            ++failures;
+        }
+
+        // Minimal reporting for gate diagnostics.
+        std::printf("%s: %s (code=%d)\n", entry.name, (code == 0) ? "OK" : "FAIL", code);
+    }
 
     return (failures == 0) ? 0 : 1;
 }

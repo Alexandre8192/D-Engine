@@ -1,0 +1,29 @@
+{
+  "benchmarks": [
+    {
+      "name": "baseline_loop",
+      "value": 1.329687,
+      "rsdPct": 4.796124,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000
+    },
+    {
+      "name": "vec3_dot",
+      "value": 1.316268,
+      "rsdPct": 0.637305,
+      "bytesPerOp": 12.000000,
+      "allocsPerOp": 0.000000
+    },
+    {
+      "name": "memcpy_64",
+      "value": 0.587935,
+      "rsdPct": 1.486131,
+      "bytesPerOp": 512.000000,
+      "allocsPerOp": 0.000000
+    }
+  ],
+  "metadata": {
+    "note": "BenchRunner M0",
+    "unit": "ns/op"
+  }
+}

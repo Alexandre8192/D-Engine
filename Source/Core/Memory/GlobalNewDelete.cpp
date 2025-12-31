@@ -2,10 +2,12 @@
 
 // ---
 // Purpose : Engine-wide global new/delete overloads wired to D-Engine OOM policy.
-// Contract: Throwing operator new forms terminate on OOM; nothrow forms return
-//           nullptr. Delete variants honor (size, alignment) invariants.
-// Notes   : Core is built without exceptions for global new/delete; diagnostics
-//           run before std::terminate() is invoked on throwing paths.
+// Contract: Throwing operator new forms are fatal on OOM (std::terminate);
+//           nothrow forms return nullptr. Delete variants honor (size,
+//           alignment) invariants.
+// Notes   : Core does not emit std::bad_alloc here; OOM diagnostics run before
+//           termination. Nothrow paths remain non-throwing for callers that
+//           probe for nullptr.
 // ---
 
 #if DNG_ROUTE_GLOBAL_NEW
@@ -20,7 +22,6 @@ static_assert(DNG_GLOBAL_NEW_FALLBACK_MALLOC == 0 || DNG_GLOBAL_NEW_FALLBACK_MAL
 
 #include <atomic>
 #include <cstdlib>
-#include <exception>
 #include <mutex>
 #include <new>
 #include <cstdint>
