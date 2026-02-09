@@ -46,7 +46,15 @@ namespace dng::input
         dng::i32       valueInt   = 0;
     };
 
+    struct InputCaps
+    {
+        dng::DeterminismMode determinism = dng::DeterminismMode::Replay;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
+        bool stableEventOrder = true;
+    };
+
     static_assert(std::is_trivially_copyable_v<InputEvent>);
+    static_assert(std::is_trivially_copyable_v<InputCaps>);
 
     // ------------------------------------------------------------------------
     // Dynamic face (tiny v-table for late binding)
@@ -55,8 +63,10 @@ namespace dng::input
     struct InputVTable
     {
         using PollEventsFunc = InputStatus(*)(void* userData, InputEvent* outEvents, dng::u32 capacity, dng::u32& outCount) noexcept;
+        using GetCapsFunc    = InputCaps(*)(const void* userData) noexcept;
 
         PollEventsFunc pollEvents = nullptr;
+        GetCapsFunc    getCaps    = nullptr;
     };
 
     struct InputInterface
@@ -64,6 +74,13 @@ namespace dng::input
         InputVTable vtable{};
         void*       userData = nullptr; // Non-owning backend instance pointer.
     };
+
+    [[nodiscard]] inline InputCaps QueryCaps(const InputInterface& iface) noexcept
+    {
+        return (iface.vtable.getCaps && iface.userData)
+            ? iface.vtable.getCaps(iface.userData)
+            : InputCaps{};
+    }
 
     [[nodiscard]] inline InputStatus PollEvents(InputInterface& iface, InputEvent* outEvents, dng::u32 capacity, dng::u32& outCount) noexcept
     {
@@ -78,8 +95,13 @@ namespace dng::input
     // ------------------------------------------------------------------------
 
     template <typename Backend>
-    concept InputBackend = requires(Backend& backend, InputEvent* events, dng::u32 capacity, dng::u32& outCount)
+    concept InputBackend = requires(Backend& backend,
+                                    const Backend& constBackend,
+                                    InputEvent* events,
+                                    dng::u32 capacity,
+                                    dng::u32& outCount)
     {
+        { constBackend.GetCaps() } noexcept -> std::same_as<InputCaps>;
         { backend.PollEvents(events, capacity, outCount) } noexcept -> std::same_as<InputStatus>;
     };
 
@@ -88,6 +110,11 @@ namespace dng::input
         template <typename Backend>
         struct InputInterfaceAdapter
         {
+            static InputCaps GetCaps(const void* userData) noexcept
+            {
+                return static_cast<const Backend*>(userData)->GetCaps();
+            }
+
             static InputStatus PollEvents(void* userData, InputEvent* events, dng::u32 capacity, dng::u32& outCount) noexcept
             {
                 return static_cast<Backend*>(userData)->PollEvents(events, capacity, outCount);
@@ -102,6 +129,7 @@ namespace dng::input
 
         InputInterface iface{};
         iface.userData         = &backend;
+        iface.vtable.getCaps   = &detail::InputInterfaceAdapter<Backend>::GetCaps;
         iface.vtable.pollEvents = &detail::InputInterfaceAdapter<Backend>::PollEvents;
         return iface;
     }

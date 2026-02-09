@@ -5,6 +5,8 @@
 //           exposes unified read-only queries to the rest of the engine.
 // Contract: Header-only, no exceptions/RTTI, no allocations in this layer.
 //           Lifetime of the backend is tied to FileSystemSystemState.
+//           Thread-safety and determinism follow FileSystemCaps from the backend;
+//           callers must serialize access per instance.
 // Notes   : Defaults to the NullFileSystem backend but accepts external
 //           backends via interface injection.
 // ============================================================================
@@ -40,6 +42,7 @@ namespace dng::fs
                                                                 FileSystemSystemBackend backend) noexcept
     {
         if (interface.userData == nullptr ||
+            interface.vtable.getCaps == nullptr ||
             interface.vtable.exists == nullptr ||
             interface.vtable.fileSize == nullptr ||
             interface.vtable.readFile == nullptr)
@@ -82,6 +85,11 @@ namespace dng::fs
         state.backend       = FileSystemSystemBackend::Null;
         state.nullBackend   = NullFileSystem{};
         state.isInitialized = false;
+    }
+
+    [[nodiscard]] inline FileSystemCaps QueryCaps(const FileSystemSystemState& state) noexcept
+    {
+        return state.isInitialized ? QueryCaps(state.interface) : FileSystemCaps{};
     }
 
     [[nodiscard]] inline FsStatus Exists(FileSystemSystemState& state, PathView path) noexcept

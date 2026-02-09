@@ -5,6 +5,8 @@
 //           poll-based event retrieval to the rest of the engine.
 // Contract: Header-only, no exceptions/RTTI, no allocations in this layer.
 //           Lifetime of the backend is tied to InputSystemState.
+//           Thread-safety and determinism follow InputCaps from the backend;
+//           callers must serialize access per instance.
 // Notes   : Defaults to the NullInput backend but accepts external backends
 //           via interface injection.
 // ============================================================================
@@ -40,6 +42,7 @@ namespace dng::input
                                                            InputSystemBackend backend) noexcept
     {
         if (interface.userData == nullptr ||
+            interface.vtable.getCaps == nullptr ||
             interface.vtable.pollEvents == nullptr)
         {
             return false;
@@ -80,6 +83,11 @@ namespace dng::input
         state.backend       = InputSystemBackend::Null;
         state.nullBackend   = NullInput{};
         state.isInitialized = false;
+    }
+
+    [[nodiscard]] inline InputCaps QueryCaps(const InputSystemState& state) noexcept
+    {
+        return state.isInitialized ? QueryCaps(state.interface) : InputCaps{};
     }
 
     [[nodiscard]] inline InputStatus PollEvents(InputSystemState& state, InputEvent* events, dng::u32 capacity, dng::u32& outCount) noexcept

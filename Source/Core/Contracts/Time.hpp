@@ -31,6 +31,9 @@ namespace dng::time
     {
         bool monotonic = false;
         bool high_res  = false;
+        dng::DeterminismMode determinism = dng::DeterminismMode::Replay;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
+        bool stableSampleOrder = true;
     };
 
     static_assert(std::is_trivially_copyable_v<TimeCaps>, "TimeCaps must stay POD for telemetry dumps.");

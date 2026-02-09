@@ -53,7 +53,23 @@ using bool8 = uint8; // Optional compact bool
 
 // ---- Aliases for readability (optional) ----
 using byte = uint8;
+
+enum class DeterminismMode : u8
+{
+    Unknown = 0,
+    Off,
+    Replay,
+    Strict
+};
+
+enum class ThreadSafetyMode : u8
+{
+    Unknown = 0,
+    ExternalSync,
+    ThreadSafe
+};
 } // namespace dng
+
 
 // =============================
 // Internal macros (use only in engine internals)

@@ -37,6 +37,15 @@ namespace dng::fs
         UnknownError
     };
 
+    struct FileSystemCaps
+    {
+        dng::DeterminismMode determinism = dng::DeterminismMode::Replay;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
+        bool stableOrderingRequired = true;
+    };
+
+    static_assert(std::is_trivially_copyable_v<FileSystemCaps>);
+
     // ------------------------------------------------------------------------
     // Dynamic face (tiny v-table for late binding)
     // ------------------------------------------------------------------------
@@ -46,10 +55,12 @@ namespace dng::fs
         using ExistsFunc   = FsStatus(*)(void* userData, PathView path) noexcept;
         using FileSizeFunc = FsStatus(*)(void* userData, PathView path, dng::u64& outSize) noexcept;
         using ReadFileFunc = FsStatus(*)(void* userData, PathView path, void* dst, dng::u64 dstSize, dng::u64& outRead) noexcept;
+        using GetCapsFunc  = FileSystemCaps(*)(const void* userData) noexcept;
 
         ExistsFunc   exists   = nullptr;
         FileSizeFunc fileSize = nullptr;
         ReadFileFunc readFile = nullptr;
+        GetCapsFunc  getCaps  = nullptr;
     };
 
     struct FileSystemInterface
@@ -57,6 +68,13 @@ namespace dng::fs
         FileSystemVTable vtable{};
         void*            userData = nullptr; // Non-owning backend instance pointer.
     };
+
+    [[nodiscard]] inline FileSystemCaps QueryCaps(const FileSystemInterface& fs) noexcept
+    {
+        return (fs.vtable.getCaps && fs.userData)
+            ? fs.vtable.getCaps(fs.userData)
+            : FileSystemCaps{};
+    }
 
     [[nodiscard]] inline FsStatus Exists(FileSystemInterface& fs, PathView path) noexcept
     {
@@ -86,8 +104,15 @@ namespace dng::fs
     // ------------------------------------------------------------------------
 
     template <typename Backend>
-    concept FileSystemBackend = requires(Backend& backend, const PathView path, void* dst, dng::u64 dstSize, dng::u64& outSize, dng::u64& outRead)
+    concept FileSystemBackend = requires(Backend& backend,
+                                         const Backend& constBackend,
+                                         const PathView path,
+                                         void* dst,
+                                         dng::u64 dstSize,
+                                         dng::u64& outSize,
+                                         dng::u64& outRead)
     {
+        { constBackend.GetCaps() } noexcept -> std::same_as<FileSystemCaps>;
         { backend.Exists(path) } noexcept -> std::same_as<FsStatus>;
         { backend.FileSize(path, outSize) } noexcept -> std::same_as<FsStatus>;
         { backend.ReadFile(path, dst, dstSize, outRead) } noexcept -> std::same_as<FsStatus>;
@@ -98,6 +123,11 @@ namespace dng::fs
         template <typename Backend>
         struct FileSystemInterfaceAdapter
         {
+            static FileSystemCaps GetCaps(const void* userData) noexcept
+            {
+                return static_cast<const Backend*>(userData)->GetCaps();
+            }
+
             static FsStatus Exists(void* userData, PathView path) noexcept
             {
                 return static_cast<Backend*>(userData)->Exists(path);
@@ -122,6 +152,7 @@ namespace dng::fs
 
         FileSystemInterface iface{};
         iface.userData         = &backend;
+        iface.vtable.getCaps   = &detail::FileSystemInterfaceAdapter<Backend>::GetCaps;
         iface.vtable.exists    = &detail::FileSystemInterfaceAdapter<Backend>::Exists;
         iface.vtable.fileSize  = &detail::FileSystemInterfaceAdapter<Backend>::FileSize;
         iface.vtable.readFile  = &detail::FileSystemInterfaceAdapter<Backend>::ReadFile;

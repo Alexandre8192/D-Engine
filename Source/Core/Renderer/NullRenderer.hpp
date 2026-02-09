@@ -30,8 +30,13 @@ namespace dng::render
         // Notes   : Can be extended to expose fake features for testing.
         [[nodiscard]] constexpr RendererCaps GetCaps() const noexcept
         {
-            return RendererCaps{};
+            RendererCaps caps{};
+            caps.determinism = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableSubmissionRequired = true;
+            return caps;
         }
+
 
         // Purpose : Receives per-frame submission metadata and caches viewport.
         // Contract: Does not allocate or log; ignores submission contents.

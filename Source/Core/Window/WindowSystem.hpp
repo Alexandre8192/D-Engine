@@ -6,6 +6,8 @@
 //           size queries to the rest of the engine.
 // Contract: Header-only, no exceptions/RTTI, no allocations in this layer.
 //           Lifetime of the backend is tied to WindowSystemState.
+//           Thread-safety and determinism follow WindowCaps from the backend;
+//           callers must serialize access per instance.
 // Notes   : Defaults to the NullWindow backend but accepts external backends
 //           via interface injection.
 // ============================================================================
@@ -41,6 +43,7 @@ namespace dng::win
                                                             WindowSystemBackend backend) noexcept
     {
         if (interface.userData == nullptr ||
+            interface.vtable.getCaps == nullptr ||
             interface.vtable.createWindow == nullptr ||
             interface.vtable.destroyWindow == nullptr ||
             interface.vtable.pollEvents == nullptr ||
@@ -94,6 +97,11 @@ namespace dng::win
             return WindowStatus::InvalidArg;
         }
         return CreateWindow(state.interface, desc, outHandle);
+    }
+
+    [[nodiscard]] inline WindowCaps QueryCaps(const WindowSystemState& state) noexcept
+    {
+        return state.isInitialized ? QueryCaps(state.interface) : WindowCaps{};
     }
 
     [[nodiscard]] inline WindowStatus DestroyWindow(WindowSystemState& state, WindowHandle handle) noexcept

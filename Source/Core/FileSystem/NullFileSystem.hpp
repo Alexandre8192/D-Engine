@@ -16,6 +16,15 @@ namespace dng::fs
 {
     struct NullFileSystem
     {
+        [[nodiscard]] constexpr FileSystemCaps GetCaps() const noexcept
+        {
+            FileSystemCaps caps{};
+            caps.determinism = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableOrderingRequired = true;
+            return caps;
+        }
+
         [[nodiscard]] FsStatus Exists(PathView) noexcept
         {
             return FsStatus::NotFound;

@@ -5,8 +5,11 @@
 //           a unified entry point (RenderFrame) to the rest of the engine.
 // Contract: Header-only, no exceptions/RTTI, no allocations in this layer.
 //           Lifetime of the backend is tied to RendererSystemState.
+//           Thread-safety and determinism follow RendererCaps from the backend;
+//           callers must serialize access per instance.
 // Notes   : For now only the NullRenderer backend is owned directly. External
 //           backends (forward, RT, GPU-driven) can plug in via a renderer interface.
+
 // ============================================================================
 
 #pragma once
@@ -47,10 +50,21 @@ namespace dng::render
                                                              RendererSystemBackend backend) noexcept
     {
         state              = RendererSystemState{};
+        if (interface.userData == nullptr ||
+            interface.vtable.getCaps == nullptr ||
+            interface.vtable.beginFrame == nullptr ||
+            interface.vtable.submitInstances == nullptr ||
+            interface.vtable.endFrame == nullptr ||
+            interface.vtable.resizeSurface == nullptr)
+        {
+            return false;
+        }
+
         state.interface    = interface;
         state.backend      = backend;
         state.isInitialized = true;
         return true;
+
     }
 
     // Purpose : Initialize the renderer system with the requested backend.
@@ -94,6 +108,11 @@ namespace dng::render
     // Contract: InitRendererSystem must have succeeded earlier. Submission
     //           views/instances must remain valid for the duration of the call.
     // Notes   : No allocations or synchronization; higher layers own ordering.
+    [[nodiscard]] inline RendererCaps QueryCaps(const RendererSystemState& state) noexcept
+    {
+        return state.isInitialized ? QueryCaps(state.interface) : RendererCaps{};
+    }
+
     inline void RenderFrame(RendererSystemState& state,
                             const FrameSubmission& submission) noexcept
     {
@@ -106,5 +125,6 @@ namespace dng::render
         SubmitInstances(state.interface, submission.instances, submission.instanceCount);
         EndFrame(state.interface);
     }
+
 
 } // namespace dng::render

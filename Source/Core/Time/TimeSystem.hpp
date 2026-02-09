@@ -5,6 +5,8 @@
 //           unified TickTimeSystem entry point to the rest of the engine.
 // Contract: Header-only, no exceptions/RTTI, no allocations in this layer.
 //           Lifetime of the backend is tied to TimeSystemState.
+//           Thread-safety and determinism follow TimeCaps from the backend;
+//           callers must serialize access per instance.
 // Notes   : Defaults to the NullTime backend but accepts external backends via
 //           TimeInterface injection.
 // ============================================================================
@@ -44,6 +46,7 @@ namespace dng::time
                                                           bool primeOnInit = true) noexcept
     {
         if (interface.userData == nullptr ||
+            interface.vtable.getCaps == nullptr ||
             interface.vtable.nowMonotonic == nullptr ||
             interface.vtable.beginFrame == nullptr ||
             interface.vtable.endFrame == nullptr)
@@ -98,6 +101,11 @@ namespace dng::time
         state.nullBackend   = NullTime{};
         state.lastFrameTime = FrameTime{};
         state.isInitialized = false;
+    }
+
+    [[nodiscard]] inline TimeCaps QueryCaps(const TimeSystemState& state) noexcept
+    {
+        return state.isInitialized ? QueryCaps(state.interface) : TimeCaps{};
     }
 
     [[nodiscard]] inline FrameTime TickTimeSystem(TimeSystemState& state) noexcept

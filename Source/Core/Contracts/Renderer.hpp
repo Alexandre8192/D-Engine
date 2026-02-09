@@ -57,7 +57,11 @@ namespace dng::render
         bool supportsIndirectSubmission = false;
         bool supportsGpuDrivenCulling   = false;
         bool supportsSoftwareOcclusion  = false;
+        dng::DeterminismMode determinism = dng::DeterminismMode::Replay;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
+        bool stableSubmissionRequired = true;
     };
+
 
     static_assert(std::is_trivially_copyable_v<RendererCaps>, "RendererCaps must stay POD for telemetry dumps.");
 

@@ -40,6 +40,15 @@ namespace dng::win
         TitleView title  {};
     };
 
+    struct WindowCaps
+    {
+        dng::DeterminismMode determinism = dng::DeterminismMode::Replay;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
+        bool stableEventOrder = true;
+    };
+
+    static_assert(std::is_trivially_copyable_v<WindowCaps>);
+
     enum class WindowEventType : dng::u8
     {
         CloseRequested = 0,
@@ -77,11 +86,13 @@ namespace dng::win
         using DestroyWindowFunc = WindowStatus(*)(void* userData, WindowHandle handle) noexcept;
         using PollEventsFunc    = WindowStatus(*)(void* userData, WindowEvent* events, dng::u32 capacity, dng::u32& outCount) noexcept;
         using GetSurfaceSizeFunc= WindowStatus(*)(void* userData, WindowHandle handle, dng::u32& outWidth, dng::u32& outHeight) noexcept;
+        using GetCapsFunc        = WindowCaps(*)(const void* userData) noexcept;
 
         CreateWindowFunc   createWindow   = nullptr;
         DestroyWindowFunc  destroyWindow  = nullptr;
         PollEventsFunc     pollEvents     = nullptr;
         GetSurfaceSizeFunc getSurfaceSize = nullptr;
+        GetCapsFunc        getCaps        = nullptr;
     };
 
     struct WindowInterface
@@ -89,6 +100,13 @@ namespace dng::win
         WindowVTable vtable{};
         void*        userData = nullptr; // Non-owning backend instance pointer.
     };
+
+    [[nodiscard]] inline WindowCaps QueryCaps(const WindowInterface& iface) noexcept
+    {
+        return (iface.vtable.getCaps && iface.userData)
+            ? iface.vtable.getCaps(iface.userData)
+            : WindowCaps{};
+    }
 
     [[nodiscard]] inline WindowStatus CreateWindow(WindowInterface& iface, const WindowDesc& desc, WindowHandle& outHandle) noexcept
     {
@@ -127,8 +145,17 @@ namespace dng::win
     // ------------------------------------------------------------------------
 
     template <typename Backend>
-    concept WindowBackend = requires(Backend& backend, const WindowDesc& desc, WindowHandle handle, WindowEvent* events, dng::u32 capacity, dng::u32& outCount, dng::u32& outWidth, dng::u32& outHeight)
+    concept WindowBackend = requires(Backend& backend,
+                                     const Backend& constBackend,
+                                     const WindowDesc& desc,
+                                     WindowHandle handle,
+                                     WindowEvent* events,
+                                     dng::u32 capacity,
+                                     dng::u32& outCount,
+                                     dng::u32& outWidth,
+                                     dng::u32& outHeight)
     {
+        { constBackend.GetCaps() } noexcept -> std::same_as<WindowCaps>;
         { backend.CreateWindow(desc, handle) } noexcept -> std::same_as<WindowStatus>;
         { backend.DestroyWindow(handle) } noexcept -> std::same_as<WindowStatus>;
         { backend.PollEvents(events, capacity, outCount) } noexcept -> std::same_as<WindowStatus>;
@@ -140,6 +167,11 @@ namespace dng::win
         template <typename Backend>
         struct WindowInterfaceAdapter
         {
+            static WindowCaps GetCaps(const void* userData) noexcept
+            {
+                return static_cast<const Backend*>(userData)->GetCaps();
+            }
+
             static WindowStatus CreateWindow(void* userData, const WindowDesc& desc, WindowHandle& outHandle) noexcept
             {
                 return static_cast<Backend*>(userData)->CreateWindow(desc, outHandle);
@@ -169,6 +201,7 @@ namespace dng::win
 
         WindowInterface iface{};
         iface.userData              = &backend;
+        iface.vtable.getCaps        = &detail::WindowInterfaceAdapter<Backend>::GetCaps;
         iface.vtable.createWindow   = &detail::WindowInterfaceAdapter<Backend>::CreateWindow;
         iface.vtable.destroyWindow  = &detail::WindowInterfaceAdapter<Backend>::DestroyWindow;
         iface.vtable.pollEvents     = &detail::WindowInterfaceAdapter<Backend>::PollEvents;

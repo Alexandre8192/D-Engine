@@ -16,6 +16,15 @@ namespace dng::input
 {
     struct NullInput
     {
+        [[nodiscard]] constexpr InputCaps GetCaps() const noexcept
+        {
+            InputCaps caps{};
+            caps.determinism = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableEventOrder = true;
+            return caps;
+        }
+
         [[nodiscard]] InputStatus PollEvents(InputEvent*, dng::u32, dng::u32& outCount) noexcept
         {
             outCount = 0;

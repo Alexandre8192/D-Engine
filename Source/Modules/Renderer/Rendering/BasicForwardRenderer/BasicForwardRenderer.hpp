@@ -39,8 +39,13 @@ namespace dng::render
         // Notes   : All advanced features remain disabled for now.
         [[nodiscard]] constexpr RendererCaps GetCaps() const noexcept
         {
-            return RendererCaps{};
+            RendererCaps caps{};
+            caps.determinism = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableSubmissionRequired = true;
+            return caps;
         }
+
 
         // Purpose : Cache per-frame submission metadata (views, surface size).
         // Contract: Must not allocate or throw. Safe to call with zero views.

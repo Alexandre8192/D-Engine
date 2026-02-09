@@ -21,6 +21,15 @@ namespace dng::win
         dng::u32     width  = 0;
         dng::u32     height = 0;
 
+        [[nodiscard]] constexpr WindowCaps GetCaps() const noexcept
+        {
+            WindowCaps caps{};
+            caps.determinism = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableEventOrder = true;
+            return caps;
+        }
+
         [[nodiscard]] WindowStatus CreateWindow(const WindowDesc& desc, WindowHandle& outHandle) noexcept
         {
             width     = desc.width;

@@ -5,6 +5,8 @@
 //           unified submission and waiting helpers to the rest of the engine.
 // Contract: Header-only, no exceptions/RTTI, no allocations in this layer.
 //           Lifetime of the backend is tied to JobsSystemState.
+//           Thread-safety and determinism follow JobsCaps from the backend;
+//           callers must serialize access per instance.
 // Notes   : Defaults to the NullJobs backend but accepts external backends via
 //           JobsInterface injection.
 // ============================================================================
@@ -40,6 +42,7 @@ namespace dng::jobs
                                                           JobsSystemBackend backend) noexcept
     {
         if (interface.userData == nullptr ||
+            interface.vtable.getCaps == nullptr ||
             interface.vtable.submit == nullptr ||
             interface.vtable.submitBatch == nullptr ||
             interface.vtable.wait == nullptr)
@@ -80,6 +83,11 @@ namespace dng::jobs
         state.backend       = JobsSystemBackend::Null;
         state.nullBackend   = NullJobs{};
         state.isInitialized = false;
+    }
+
+    [[nodiscard]] inline JobsCaps QueryCaps(const JobsSystemState& state) noexcept
+    {
+        return state.isInitialized ? QueryCaps(state.interface) : JobsCaps{};
     }
 
     inline void SubmitJob(JobsSystemState& state, const JobDesc& job, JobCounter& counter) noexcept

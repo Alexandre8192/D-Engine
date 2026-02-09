@@ -29,6 +29,9 @@ namespace dng::jobs
             JobsCaps caps{};
             caps.deterministic = true;
             caps.multithreaded = false;
+            caps.determinismMode = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableSubmissionOrder = true;
             return caps;
         }
 

@@ -25,6 +25,8 @@ namespace dng::time
             TimeCaps caps{};
             caps.monotonic = true;
             caps.high_res  = false;
+            caps.determinism = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
             return caps;
         }
 
