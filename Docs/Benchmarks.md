@@ -8,11 +8,14 @@ Vector(reserved)=3.357 ns | Arena(64B)=7.971 ns | Arena(8x64B)=56.302 ns | Small
 
 ## Stable-run options (BenchRunner)
 
-- --warmup N (default 0): Perform N warm-up runs to prime caches and JIT-like effects. Warmups are excluded from metrics.
-- --repeat M (default 1): Repeat each scenario M times, then compute per-metric statistics across repeats.
-	- The JSON keeps backward-compatible fields and sets `value` to the MEDIAN(ns/op).
-	- Also includes optional fields: `min`, `max`, `mean`, `stddev` (in ns/op).
-	- `bytesPerOp` and `allocsPerOp` remain single values; a WARN is printed if they differ across repeats.
+- --warmup N (default 1): Warm-up runs before measurement.
+- --target-rsd P (default 3.0): Stop early once sample RSD is below threshold.
+- --max-repeat M (default 15): Maximum measured repeats per scenario.
+- --iterations K (default 20000000): Base iteration budget (bench-specific scaling still applies).
+
+Current BenchRunner JSON (M0) emits:
+- `benchmarks[]` with `name`, `value` (ns/op), `rsdPct`, `bytesPerOp`, `allocsPerOp`
+- `metadata` with `note` and `unit`
 
 Recommended CI invocation:
-- `--warmup 1 --repeat 3` (used by bench-ci and bench-nightly) to reduce run-to-run variance on Windows runners to < 5%.
+- `--warmup 1 --target-rsd 3 --max-repeat 7`

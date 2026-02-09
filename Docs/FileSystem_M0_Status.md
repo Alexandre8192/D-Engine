@@ -31,7 +31,7 @@ This document captures the file system subsystem state at milestone M0. It refle
 
 ## Tests
 - Header-only compile check: `tests/SelfContain/FileSystem_header_only.cpp` (`static_assert` on `FileSystemBackend`, interface usage, no main).
-- Smoke helper: `tests/FileSystem_smoke.cpp` (`RunFileSystemSmoke()` initializes the system with the Null backend and checks deterministic `NotFound` responses and zeroed outputs; no main).
+- Smoke helper: `tests/Smoke/Subsystems/FileSystem_smoke.cpp` (`RunFileSystemSmoke()` initializes the system with the Null backend and checks deterministic `NotFound` responses and zeroed outputs; no main).
 
 ## Milestone Definition: FileSystem M0
 FileSystem M0 is considered complete when:

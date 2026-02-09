@@ -30,7 +30,7 @@ This document captures the input subsystem state at milestone M0. It reflects on
 
 ## Tests
 - Header-only compile check: `tests/SelfContain/Input_header_only.cpp` (`static_assert` on `InputBackend`, interface usage, no main).
-- Smoke helper: `tests/Input_smoke.cpp` (`RunInputSmoke()` initializes the system with the Null backend and expects `PollEvents` to return `Ok` with zero events; no main).
+- Smoke helper: `tests/Smoke/Subsystems/Input_smoke.cpp` (`RunInputSmoke()` initializes the system with the Null backend and expects `PollEvents` to return `Ok` with zero events; no main).
 
 ## Milestone Definition: Input M0
 Input M0 is considered complete when:

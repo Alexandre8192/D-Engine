@@ -31,8 +31,8 @@ This document captures the time subsystem state at milestone M0. It reflects onl
 - No profiling/telemetry exporters beyond the minimal `FrameTime` surface.
 
 ## Tests
-- Header-only compile check: `tests/Time_header_only.cpp` (`static_assert` on `TimeBackend`, interface usage, no main).
-- Smoke helper: `tests/Time_smoke.cpp` (`RunTimeSmoke()` ticks the Null backend, validates primed baseline (frameIndex=0, deltaNs=0, totalNs>0), then checks frameIndex progression, positive deltas, and strictly monotonic totals; no main).
+- Header-only compile check: `tests/SelfContain/Time_header_only.cpp` (`static_assert` on `TimeBackend`, interface usage, no main).
+- Smoke helper: `tests/Smoke/Subsystems/Time_smoke.cpp` (`RunTimeSmoke()` ticks the Null backend, validates primed baseline (frameIndex=0, deltaNs=0, totalNs>0), then checks frameIndex progression, positive deltas, and strictly monotonic totals; no main).
 
 ## Milestone Definition: Time M0
 Time M0 is considered complete when:

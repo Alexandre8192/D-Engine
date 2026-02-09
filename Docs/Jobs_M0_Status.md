@@ -30,7 +30,7 @@ This document captures the jobs subsystem state at milestone M0. It reflects onl
 
 ## Tests
 - Header-only self-containment: [tests/SelfContain/Jobs_header_only.cpp](tests/SelfContain/Jobs_header_only.cpp) includes the contract alone and `static_assert`s POD and concept conformance.
-- Smoke helper: [tests/Jobs_smoke.cpp](tests/Jobs_smoke.cpp) initializes the JobsSystem with Null, submits individual and batched jobs that mutate counters, runs `ParallelFor`, verifies counters complete, and returns 0 on success (no `main`).
+- Smoke helper: [tests/Smoke/Subsystems/Jobs_smoke.cpp](tests/Smoke/Subsystems/Jobs_smoke.cpp) initializes the JobsSystem with Null, submits individual and batched jobs that mutate counters, runs `ParallelFor`, verifies counters complete, and returns 0 on success (no `main`).
 
 ## Milestone Definition: Jobs M0
 Jobs M0 is considered complete when:

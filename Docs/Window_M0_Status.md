@@ -30,7 +30,7 @@ This document captures the window subsystem state at milestone M0. It reflects o
 
 ## Tests
 - Header-only compile check: `tests/SelfContain/Window_header_only.cpp` (`static_assert` on `WindowBackend`, interface usage, no main).
-- Smoke helper: `tests/Window_smoke.cpp` (`RunWindowSmoke()` initializes the system with the Null backend, creates a dummy window, queries surface size, polls events (expect zero), destroys the window, then shuts down; no main).
+- Smoke helper: `tests/Smoke/Subsystems/Window_smoke.cpp` (`RunWindowSmoke()` initializes the system with the Null backend, creates a dummy window, queries surface size, polls events (expect zero), destroys the window, then shuts down; no main).
 
 ## Milestone Definition: Window M0
 Window M0 is considered complete when:
