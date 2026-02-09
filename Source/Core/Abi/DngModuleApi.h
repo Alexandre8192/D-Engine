@@ -31,8 +31,9 @@ typedef struct dng_module_api_v1 {
     // Purpose : Shutdown module and free allocated context.
     // Contract: Must be called before module unload; ctx from window.ctx must
     //           remain valid until this is called; returns DNG_STATUS_OK on
-    //           success or error code on failure; idempotent (safe to call
-    //           multiple times with same ctx).
+    //           success or error code on failure. The host must call shutdown
+    //           at most once for a given context; repeated calls with the same
+    //           ctx are undefined because the context may already be freed.
     // Notes   : Added to support proper cleanup of dynamically allocated contexts.
     //           If NULL, module uses static storage and no cleanup is needed.
     dng_status_v1 (DNG_ABI_CALL *shutdown)(void* ctx, const dng_host_api_v1* host);

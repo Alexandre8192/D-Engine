@@ -654,6 +654,12 @@ namespace memory
             const bool tlsBinsRequested = globalConfig.enable_smallobj_tls_bins;
             const bool tlsBinsCompiled  = (DNG_SMALLOBJ_TLS_BINS != 0);
             const bool tlsBinsEffective = tlsBinsCompiled && tlsBinsRequested;
+            const bool trackingCompiled = ::dng::core::CompiledTracking() || ::dng::core::CompiledStatsOnly();
+            const bool guardsCompiled   = ::dng::core::CompiledGuards();
+            const bool trackingRequested = globalConfig.enable_tracking;
+            const bool guardsRequested   = globalConfig.enable_guards;
+            const bool trackingEffective = trackingCompiled && trackingRequested;
+            const bool guardsEffective   = guardsCompiled && guardsRequested;
 
             // Truth table (CT = DNG_SMALLOBJ_TLS_BINS, RT = enable_smallobj_tls_bins):
             // CT RT | Effective
@@ -664,11 +670,24 @@ namespace memory
             globalConfig.tracking_sampling_rate = effectiveSampling;
             globalConfig.tracking_shard_count   = effectiveShards;
             globalConfig.small_object_batch     = effectiveBatch;
+            globalConfig.enable_tracking        = trackingEffective;
+            globalConfig.enable_guards          = guardsEffective;
             globalConfig.enable_smallobj_tls_bins = tlsBinsEffective;
             globals.activeConfig = globalConfig;
+            ::dng::core::SetFatalOnOOMPolicy(globals.activeConfig.fatal_on_oom);
 
             if (warnEnabled)
             {
+                if (trackingRequested && !trackingCompiled)
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "Ignoring MemoryConfig::enable_tracking request (tracking/statistics compiled out).");
+                }
+                if (guardsRequested && !guardsCompiled)
+                {
+                    DNG_LOG_WARNING("Memory",
+                        "Ignoring MemoryConfig::enable_guards request (DNG_MEM_GUARDS=0).");
+                }
                 if (sampling.envInvalid)
                 {
                     DNG_LOG_WARNING("Memory", "Ignoring DNG_MEM_TRACKING_SAMPLING_RATE environment override (must be >= 1).");
@@ -751,6 +770,7 @@ namespace memory
             }
 
             globals.defaultAllocator = new (globals.defaultAllocatorStorage) detail::DefaultAllocator();
+            auto* effectiveParent = static_cast<::dng::core::IAllocator*>(globals.defaultAllocator);
 
             const std::uint32_t trackingSamplingRate = globals.activeConfig.tracking_sampling_rate != 0u
                 ? globals.activeConfig.tracking_sampling_rate
@@ -759,13 +779,18 @@ namespace memory
                 ? globals.activeConfig.tracking_shard_count
                 : static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
 
-            globals.trackingAllocator = new (globals.trackingAllocatorStorage)
-                detail::TrackingAllocator(globals.defaultAllocator, trackingSamplingRate, trackingShardCount);
+            if (globals.activeConfig.enable_tracking)
+            {
+                globals.trackingAllocator = new (globals.trackingAllocatorStorage)
+                    detail::TrackingAllocator(globals.defaultAllocator, trackingSamplingRate, trackingShardCount);
+                effectiveParent = static_cast<::dng::core::IAllocator*>(globals.trackingAllocator);
+            }
 #if DNG_MEM_GUARDS
-            globals.guardAllocator = new (globals.guardAllocatorStorage) detail::GuardAllocator(globals.trackingAllocator);
-            auto* effectiveParent = static_cast<::dng::core::IAllocator*>(globals.guardAllocator);
-#else
-            auto* effectiveParent = static_cast<::dng::core::IAllocator*>(globals.trackingAllocator);
+            if (globals.activeConfig.enable_guards)
+            {
+                globals.guardAllocator = new (globals.guardAllocatorStorage) detail::GuardAllocator(effectiveParent);
+                effectiveParent = static_cast<::dng::core::IAllocator*>(globals.guardAllocator);
+            }
 #endif
 
             ::dng::core::SmallObjectConfig smallCfg{};
@@ -824,18 +849,18 @@ namespace memory
                     tlsBinsRequested ? "1" : "0",
                     globals.activeConfig.enable_smallobj_tls_bins ? "1" : "0");
             }
-            constexpr const char* kGuardState =
-#if DNG_MEM_GUARDS
-                "ENABLED";
-#else
-                "DISABLED";
-#endif
-
             if (logInfo)
             {
                 DNG_LOG_INFO("Memory",
-                    "MemorySystem: GuardAllocator {}",
-                    kGuardState);
+                    "MemorySystem: Tracking CT={} RT={} EFFECTIVE={}",
+                    trackingCompiled ? "1" : "0",
+                    trackingRequested ? "1" : "0",
+                    globals.activeConfig.enable_tracking ? "1" : "0");
+                DNG_LOG_INFO("Memory",
+                    "MemorySystem: GuardAllocator CT={} RT={} EFFECTIVE={}",
+                    guardsCompiled ? "1" : "0",
+                    guardsRequested ? "1" : "0",
+                    globals.activeConfig.enable_guards ? "1" : "0");
             }
 
             detail::AttachThreadStateUnlocked(globals);
@@ -875,6 +900,7 @@ namespace memory
 
             detail::DestroyGlobals(globals);
             ::dng::core::MemoryConfig::GetGlobal() = MemoryConfig{};
+            ::dng::core::SetFatalOnOOMPolicy(::dng::core::MemoryConfig::GetGlobal().fatal_on_oom);
         }
 
         // Purpose : Bind the calling thread to MemorySystem-managed thread-local allocators.

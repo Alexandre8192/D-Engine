@@ -127,6 +127,9 @@ int main()
             printf("Shutdown failed: %u\n", (unsigned)status);
             return 7;
         }
+        // Shutdown is single-use for dynamically allocated contexts.
+        module_api.window.ctx = NULL;
+        module_api.shutdown = NULL;
     }
 
     loader.Unload();

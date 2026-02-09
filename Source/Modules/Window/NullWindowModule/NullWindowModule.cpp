@@ -5,7 +5,7 @@
 // Contract: C ABI; POD-only ABI structs; no exceptions/RTTI; single-window only;
 //           context allocated via host->alloc in dngModuleGetApi_v1 and freed
 //           in shutdown; host allocator used for title copies; caller must call
-//           shutdown before module unload.
+//           shutdown exactly once before module unload.
 // Notes   : set_title allocates via host->alloc and frees previous via host->free;
 //           not intended for hot paths. Determinism follows host pump cadence.
 //           Context is thread-safe per-instance (one context per module load).

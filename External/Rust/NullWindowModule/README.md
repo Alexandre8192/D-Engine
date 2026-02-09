@@ -18,4 +18,4 @@ Notes
 - Uses `catch_unwind` to map any panic to `DNG_STATUS_FAIL` (no unwinding across the ABI).
 - Validates title string views: `size > 0` requires non-NULL `data`; `size == 0` accepts NULL data.
 - Validates reserved flags: `desc->flags` must be zero in v1.
-- Uses host `alloc`/`free` for context and title storage; frees everything in `shutdown`.
+- Uses host `alloc`/`free` for context and title storage; frees everything in `shutdown` (single-use per context).

@@ -4,6 +4,9 @@
 // Purpose : Minimal cross-platform loader for ABI modules (C ABI v1).
 // Contract: No exceptions/RTTI; returns dng_status_v1; ASCII-only messages;
 //           ownership of loaded module belongs to ModuleLoader until Unload.
+//           ModuleLoader does not invoke module shutdown callbacks; callers
+//           must call module_api.shutdown(module_api.window.ctx, host) before
+//           Unload when the module exports shutdown.
 // Notes   : Dynamic loading is slow/cold-path. Thread-safety is caller-managed.
 // ============================================================================
 #ifndef DNG_INTEROP_MODULE_LOADER_HPP
