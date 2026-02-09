@@ -31,13 +31,21 @@ jobs:
       - name: Run AllSmokes
         shell: pwsh
         run: |
-          $candidates = Get-ChildItem -Path . -Recurse -Filter 'AllSmokes*.exe' | Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, FullName
-          if (-not $candidates) {
-            Write-Error 'AllSmokes executable not found after build.'
-            exit 1
+          $preferred = @('.\x64\Release\AllSmokes.exe', '.\x64\Debug\AllSmokes.exe')
+          $exe = $null
+          foreach ($p in $preferred) {
+            if (Test-Path $p) { $exe = (Resolve-Path $p).Path; break }
           }
-          $exe = $candidates[0].FullName
-          Write-Host "Running" $exe
+          if (-not $exe) {
+            $candidates = Get-ChildItem -Path . -Recurse -Filter 'AllSmokes*.exe' | Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, LastWriteTime -Descending
+            if (-not $candidates) {
+              Write-Error 'AllSmokes executable not found after build.'
+              exit 1
+            }
+            Write-Host "WARNING: using fallback exe discovery: $($candidates[0].FullName)" -ForegroundColor Yellow
+            $exe = $candidates[0].FullName
+          }
+          Write-Host "Running $exe"
           & $exe
           if ($LASTEXITCODE -ne 0) {
             Write-Error "AllSmokes failed with exit code $LASTEXITCODE"
@@ -47,13 +55,21 @@ jobs:
       - name: Run ModuleSmoke (ABI runtime smoke)
         shell: pwsh
         run: |
-          $candidates = Get-ChildItem -Path . -Recurse -Filter 'ModuleSmoke*.exe' | Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, FullName
-          if (-not $candidates) {
-            Write-Error 'ModuleSmoke executable not found after build.'
-            exit 1
+          $preferred = @('.\x64\Release\ModuleSmoke.exe', '.\x64\Debug\ModuleSmoke.exe')
+          $exe = $null
+          foreach ($p in $preferred) {
+            if (Test-Path $p) { $exe = (Resolve-Path $p).Path; break }
           }
-          $exe = $candidates[0].FullName
-          Write-Host "Running" $exe
+          if (-not $exe) {
+            $candidates = Get-ChildItem -Path . -Recurse -Filter 'ModuleSmoke*.exe' | Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, LastWriteTime -Descending
+            if (-not $candidates) {
+              Write-Error 'ModuleSmoke executable not found after build.'
+              exit 1
+            }
+            Write-Host "WARNING: using fallback exe discovery: $($candidates[0].FullName)" -ForegroundColor Yellow
+            $exe = $candidates[0].FullName
+          }
+          Write-Host "Running $exe"
           & $exe
           if ($LASTEXITCODE -ne 0) {
             Write-Error "ModuleSmoke failed with exit code $LASTEXITCODE"

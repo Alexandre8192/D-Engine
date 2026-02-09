@@ -76,12 +76,14 @@ function Run-PolicyLint {
 
     if ($Fast) {
         & $invoke @('tools/policy_lint.py', '--strict', '--modules')
+        & $invoke @('tools/policy_lint_selftest.py')
         return
     }
 
     & $invoke @('tools/policy_lint.py')
     & $invoke @('tools/policy_lint.py', '--strict')
     & $invoke @('tools/policy_lint.py', '--strict', '--modules')
+    & $invoke @('tools/policy_lint_selftest.py')
 }
 
 function Get-MSBuildPath {
@@ -128,11 +130,35 @@ function Run-MSBuild([string]$config) {
     if ($p.ExitCode -ne 0) { Fail "msbuild failed for $config" }
 }
 
-function Run-Exe([string]$pattern, [string]$friendly) {
-    $candidates = Get-ChildItem -Path $repoRoot -Recurse -Filter $pattern -ErrorAction SilentlyContinue |
+function Run-MSBuildMemTrackingCompileOnly {
+    $msbuild = Get-MSBuildPath
+    $args = @(
+        "D-Engine.vcxproj",
+        "/p:Configuration=Debug",
+        "/p:Platform=x64",
+        '/p:PreprocessorDefinitions="DNG_MEM_TRACKING=1;DNG_MEM_CAPTURE_CALLSITE=1;%(PreprocessorDefinitions)"',
+        "/p:BuildProjectReferences=false"
+    )
+    Write-Host "Building mem tracking compile-only with: $msbuild $($args -join ' ')"
+    $p = Start-Process -FilePath $msbuild -ArgumentList $args -NoNewWindow -Wait -PassThru
+    if ($p.ExitCode -ne 0) { Fail "msbuild failed for mem tracking compile-only" }
+}
+
+function Resolve-ExePath([string[]]$preferredPaths, [string]$fallbackPattern, [string]$friendly) {
+    foreach ($p in $preferredPaths) {
+        $full = Join-Path $repoRoot $p
+        if (Test-Path $full) { return $full }
+    }
+
+    $candidates = Get-ChildItem -Path $repoRoot -Recurse -Filter $fallbackPattern -ErrorAction SilentlyContinue |
         Sort-Object @{Expression = { $_.FullName -match 'Release' }; Descending = $true}, LastWriteTime -Descending
-    if (-not $candidates) { Fail "$friendly executable not found (pattern $pattern)" }
-    $exe = $candidates[0].FullName
+    if (-not $candidates) { Fail "$friendly executable not found" }
+    Write-Host "WARNING: using fallback exe discovery: $($candidates[0].FullName)" -ForegroundColor Yellow
+    return $candidates[0].FullName
+}
+
+function Run-Exe([string]$pattern, [string]$friendly, [string[]]$preferredPaths) {
+    $exe = Resolve-ExePath -preferredPaths $preferredPaths -fallbackPattern $pattern -friendly $friendly
     Write-Host "Running ${friendly}: $exe"
     $p = Start-Process -FilePath $exe -NoNewWindow -Wait -PassThru
     if ($p.ExitCode -ne 0) { Fail "$friendly failed with exit code $($p.ExitCode)" }
@@ -270,12 +296,14 @@ try {
     Measure-Gate 'Compile' {
         Write-Host "=== Compile gate ==="
         if ($Fast) { Run-MSBuild 'Release' } else { Run-MSBuild 'Debug'; Run-MSBuild 'Release' }
+        Run-MSBuildMemTrackingCompileOnly
         Set-GateStatus 'Compile' 'OK'
     }
 
     Measure-Gate 'AllSmokes' {
         Write-Host "=== Runtime gate (AllSmokes) ==="
-        Run-Exe 'AllSmokes*.exe' 'AllSmokes'
+        $allSmokesPreferred = @('x64\Release\AllSmokes.exe', 'x64\Debug\AllSmokes.exe')
+        Run-Exe 'AllSmokes*.exe' 'AllSmokes' $allSmokesPreferred
         Set-GateStatus 'AllSmokes' 'OK'
     }
 
@@ -288,7 +316,8 @@ try {
             $nullDll = Find-NullWindowModuleDll
             if (-not $nullDll) { Fail "NullWindowModule.dll not found. Build the C/C++ null module (solution build) or use -RustModule." }
         }
-        Run-Exe '*ModuleSmoke*.exe' 'ModuleSmoke'
+        $moduleSmokesPreferred = @('x64\Release\ModuleSmoke.exe', 'x64\Debug\ModuleSmoke.exe')
+        Run-Exe '*ModuleSmoke*.exe' 'ModuleSmoke' $moduleSmokesPreferred
         Set-GateStatus 'ModuleSmoke' 'OK'
     }
 
