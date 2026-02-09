@@ -154,6 +154,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AllSmokes_main.cpp" />
+    <ClCompile Include="..\Smoke\Memory\arena_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\frame_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\small_object_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\stack_allocator_smoke.cpp" />
     <ClCompile Include="..\Smoke\Determinism\ReplayHash_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\FileSystem_smoke.cpp" />

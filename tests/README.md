@@ -8,9 +8,9 @@ This folder collects the compile-only and smoke helpers that keep the header-fir
 - Smoke/Memory/: allocator and memory-policy smokes; no `main`.
 - Abi/: ABI conformance/interop compilation helpers.
 - Policy/: policy-violation checks (expected-to-fail builds) that document guardrails.
-- AllSmokes/: smoke aggregator entrypoint (`AllSmokes_main.cpp`) that calls the subsystem/memory smoke helpers.
+- AllSmokes/: smoke aggregator entrypoint (`AllSmokes_main.cpp`) that calls subsystem smokes plus selected runtime memory smokes (Arena/Frame/Stack/SmallObject).
 - Math/, AllSmokes/, and other folders: targeted math/unit coverage and aggregated smoke harness code.
 
 ## Running
 - Build the solution (e.g., `msbuild D-Engine.sln /p:Configuration=Debug /p:Platform=x64`) to compile header-only and smoke helpers.
-- Run the smoke aggregator target built from AllSmokes/AllSmokes_main.cpp to execute the subsystem/memory smoke helpers in one process.
+- Run the smoke aggregator target built from AllSmokes/AllSmokes_main.cpp to execute subsystem smokes and selected runtime memory smokes in one process.

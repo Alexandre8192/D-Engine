@@ -16,6 +16,10 @@ int RunWindowSmoke();
 int RunInputSmoke();
 int RunJobsSmoke();
 int RunDeterminismReplaySmoke();
+int RunArenaAllocatorSmoke();
+int RunFrameAllocatorSmoke();
+int RunStackAllocatorSmoke();
+int RunSmallObjectAllocatorSmoke();
 
 namespace
 {
@@ -37,6 +41,10 @@ int main()
         {"Input", &RunInputSmoke},
         {"Jobs", &RunJobsSmoke},
         {"DeterminismReplay", &RunDeterminismReplaySmoke},
+        {"ArenaAllocator", &RunArenaAllocatorSmoke},
+        {"FrameAllocator", &RunFrameAllocatorSmoke},
+        {"StackAllocator", &RunStackAllocatorSmoke},
+        {"SmallObjectAllocator", &RunSmallObjectAllocatorSmoke},
     };
 
     int failures = 0;
