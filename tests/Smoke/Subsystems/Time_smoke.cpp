@@ -12,7 +12,17 @@ int RunTimeSmoke()
         return 1;
     }
 
+    const TimeCaps caps = QueryCaps(state.interface);
+    if (!caps.monotonic ||
+        caps.determinism != dng::DeterminismMode::Replay ||
+        caps.threadSafety != dng::ThreadSafetyMode::ExternalSync ||
+        !caps.stableSampleOrder)
+    {
+        return 7;
+    }
+
     FrameTime previous = state.lastFrameTime;
+
 
     if (previous.frameIndex != 0U || previous.deltaNs != 0U)
     {

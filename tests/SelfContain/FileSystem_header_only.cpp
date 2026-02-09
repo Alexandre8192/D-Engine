@@ -9,6 +9,7 @@ namespace
 
     struct DummyFs
     {
+        [[nodiscard]] constexpr FileSystemCaps GetCaps() const noexcept { return {}; }
         [[nodiscard]] FsStatus Exists(PathView) noexcept { return FsStatus::Ok; }
         [[nodiscard]] FsStatus FileSize(PathView, dng::u64& outSize) noexcept { outSize = 0; return FsStatus::Ok; }
         [[nodiscard]] FsStatus ReadFile(PathView, void*, dng::u64, dng::u64& outRead) noexcept { outRead = 0; return FsStatus::Ok; }

@@ -12,7 +12,16 @@ int RunWindowSmoke()
         return 1;
     }
 
+    const WindowCaps caps = QueryCaps(state.interface);
+    if (caps.determinism != dng::DeterminismMode::Replay ||
+        caps.threadSafety != dng::ThreadSafetyMode::ExternalSync ||
+        !caps.stableEventOrder)
+    {
+        return 6;
+    }
+
     WindowDesc desc{};
+
     desc.width  = 800;
     desc.height = 600;
     constexpr char titleData[] = "Test";

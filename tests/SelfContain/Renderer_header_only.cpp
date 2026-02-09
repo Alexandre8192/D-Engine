@@ -4,7 +4,14 @@ namespace
 {
     struct DummyRenderer
     {
-        [[nodiscard]] constexpr dng::render::RendererCaps GetCaps() const noexcept { return {}; }
+        [[nodiscard]] constexpr dng::render::RendererCaps GetCaps() const noexcept
+        {
+            dng::render::RendererCaps caps{};
+            caps.determinism = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableSubmissionRequired = true;
+            return caps;
+        }
         void BeginFrame(const dng::render::FrameSubmission&) noexcept {}
         void SubmitInstances(const dng::render::RenderInstance*, dng::u32) noexcept {}
         void EndFrame() noexcept {}

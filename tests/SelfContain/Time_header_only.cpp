@@ -9,7 +9,14 @@ namespace
 
     struct DummyTime
     {
-        [[nodiscard]] constexpr TimeCaps GetCaps() const noexcept { return {}; }
+        [[nodiscard]] constexpr TimeCaps GetCaps() const noexcept
+        {
+            TimeCaps caps{};
+            caps.determinism = dng::DeterminismMode::Replay;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableSampleOrder = true;
+            return caps;
+        }
         [[nodiscard]] Nanoseconds NowMonotonicNs() noexcept { return 0; }
         void BeginFrame() noexcept {}
         void EndFrame() noexcept {}

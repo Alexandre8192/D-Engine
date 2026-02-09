@@ -9,6 +9,7 @@ namespace
 
     struct DummyWindow
     {
+        [[nodiscard]] constexpr WindowCaps GetCaps() const noexcept { return {}; }
         [[nodiscard]] WindowStatus CreateWindow(const WindowDesc&, WindowHandle& outHandle) noexcept { outHandle = WindowHandle{42}; return WindowStatus::Ok; }
         [[nodiscard]] WindowStatus DestroyWindow(WindowHandle) noexcept { return WindowStatus::Ok; }
         [[nodiscard]] WindowStatus PollEvents(WindowEvent*, dng::u32, dng::u32& outCount) noexcept { outCount = 0; return WindowStatus::Ok; }

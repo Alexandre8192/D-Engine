@@ -9,6 +9,8 @@ namespace
 
     struct DummyInput
     {
+        [[nodiscard]] constexpr InputCaps GetCaps() const noexcept { return {}; }
+
         [[nodiscard]] InputStatus PollEvents(InputEvent*, dng::u32, dng::u32& outCount) noexcept
         {
             outCount = 0;

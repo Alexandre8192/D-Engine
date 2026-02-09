@@ -44,10 +44,15 @@ int RunJobsSmoke()
     }
 
     const JobsCaps caps = QueryCaps(state.interface);
-    if (!caps.deterministic || caps.multithreaded)
+    if (!caps.deterministic ||
+        caps.multithreaded ||
+        caps.determinismMode != dng::DeterminismMode::Replay ||
+        caps.threadSafety != dng::ThreadSafetyMode::ExternalSync ||
+        !caps.stableSubmissionOrder)
     {
         return 6;
     }
+
 
     int counter = 0;
     CounterJobData jobData{&counter};

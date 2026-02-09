@@ -14,8 +14,17 @@ int RunRendererSystemSmoke()
         return 1;
     }
 
+    const RendererCaps caps = QueryCaps(state.interface);
+    if (caps.determinism != dng::DeterminismMode::Replay ||
+        caps.threadSafety != dng::ThreadSafetyMode::ExternalSync ||
+        !caps.stableSubmissionRequired)
+    {
+        return 2;
+    }
+
     FrameSubmission submission{};
     RenderFrame(state, submission);
+
 
     ShutdownRendererSystem(state);
     return 0;
