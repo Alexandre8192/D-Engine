@@ -25,9 +25,11 @@ namespace
         return std::fwrite(bytes, 1, sizeof(bytes), file) == sizeof(bytes);
     }
 
-    [[nodiscard]] bool WritePcm16WavForSmoke(const char* path) noexcept
+    [[nodiscard]] bool WritePcm16WavForSmoke(const char* path,
+                                             dng::u32 sampleRate,
+                                             dng::u32 frameCount) noexcept
     {
-        if (path == nullptr)
+        if (path == nullptr || sampleRate == 0 || frameCount == 0)
         {
             return false;
         }
@@ -46,13 +48,11 @@ namespace
             return false;
         }
 
-        constexpr dng::u32 kSampleRate = 48000;
         constexpr dng::u16 kChannels = 2;
         constexpr dng::u16 kBitsPerSample = 16;
-        constexpr dng::u32 kFrameCount = 16;
-        constexpr dng::u32 kDataBytes = kFrameCount * static_cast<dng::u32>(kChannels) * sizeof(dng::i16);
+        const dng::u32 kDataBytes = frameCount * static_cast<dng::u32>(kChannels) * sizeof(dng::i16);
         constexpr dng::u32 kFmtChunkBytes = 16;
-        constexpr dng::u32 kRiffSize = 4 + 8 + kFmtChunkBytes + 8 + kDataBytes;
+        const dng::u32 kRiffSize = 4 + 8 + kFmtChunkBytes + 8 + kDataBytes;
 
         bool ok = true;
         ok = ok && (std::fwrite("RIFF", 1, 4, file) == 4);
@@ -63,17 +63,17 @@ namespace
         ok = ok && WriteLe32(file, kFmtChunkBytes);
         ok = ok && WriteLe16(file, 1u); // PCM
         ok = ok && WriteLe16(file, kChannels);
-        ok = ok && WriteLe32(file, kSampleRate);
-        ok = ok && WriteLe32(file, kSampleRate * static_cast<dng::u32>(kChannels) * sizeof(dng::i16));
+        ok = ok && WriteLe32(file, sampleRate);
+        ok = ok && WriteLe32(file, sampleRate * static_cast<dng::u32>(kChannels) * sizeof(dng::i16));
         ok = ok && WriteLe16(file, static_cast<dng::u16>(kChannels * sizeof(dng::i16)));
         ok = ok && WriteLe16(file, kBitsPerSample);
 
         ok = ok && (std::fwrite("data", 1, 4, file) == 4);
         ok = ok && WriteLe32(file, kDataBytes);
 
-        for (dng::u32 frame = 0; ok && frame < kFrameCount; ++frame)
+        for (dng::u32 frame = 0; ok && frame < frameCount; ++frame)
         {
-            const dng::i16 left = (frame < (kFrameCount / 2u)) ? 12000 : -12000;
+            const dng::i16 left = (frame < (frameCount / 2u)) ? 12000 : -12000;
             const dng::i16 right = static_cast<dng::i16>(-left);
             ok = ok && (std::fwrite(&left, sizeof(left), 1, file) == 1);
             ok = ok && (std::fwrite(&right, sizeof(right), 1, file) == 1);
@@ -123,7 +123,9 @@ int RunAudioPlaybackSmoke()
     using namespace dng::audio;
 
     constexpr const char* kTestWavPath = "AudioPlayback_test.wav";
-    if (!WritePcm16WavForSmoke(kTestWavPath))
+    constexpr const char* kResampledWavPath = "AudioPlayback_test_24k.wav";
+    if (!WritePcm16WavForSmoke(kTestWavPath, 48000u, 16u) ||
+        !WritePcm16WavForSmoke(kResampledWavPath, 24000u, 32u))
     {
         return 1;
     }
@@ -132,19 +134,24 @@ int RunAudioPlaybackSmoke()
     struct SmokeCleanup
     {
         AudioSystemState* state = nullptr;
-        const char* wavPath = nullptr;
+        const char* wavPathA = nullptr;
+        const char* wavPathB = nullptr;
         ~SmokeCleanup() noexcept
         {
             if (state != nullptr)
             {
                 ShutdownAudioSystem(*state);
             }
-            if (wavPath != nullptr)
+            if (wavPathA != nullptr)
             {
-                (void)std::remove(wavPath);
+                (void)std::remove(wavPathA);
+            }
+            if (wavPathB != nullptr)
+            {
+                (void)std::remove(wavPathB);
             }
         }
-    } cleanup{&state, kTestWavPath};
+    } cleanup{&state, kTestWavPath, kResampledWavPath};
     (void)cleanup;
 
     AudioSystemConfig config{};
@@ -204,6 +211,12 @@ int RunAudioPlaybackSmoke()
             return 5;
         }
 
+        constexpr float kStartEpsilon = 0.0001f;
+        if (out[0] > kStartEpsilon || out[0] < -kStartEpsilon)
+        {
+            return 28;
+        }
+
         if (!HasNonZero(out, 32))
         {
             return 6;
@@ -251,21 +264,44 @@ int RunAudioPlaybackSmoke()
             return 11;
         }
 
-        float afterStop[256]{};
         AudioMixParams stopMix{};
-        stopMix.outSamples = afterStop;
-        stopMix.outputCapacitySamples = 256;
         stopMix.sampleRate = config.platform.sampleRate;
         stopMix.channelCount = config.platform.channelCount;
         stopMix.requestedFrames = 32;
-        if (Mix(state, stopMix) != AudioStatus::Ok)
+
+        bool observedFadeOutEnergy = false;
+        for (dng::u32 i = 0; i < 6; ++i)
         {
-            return 12;
+            float afterStop[256]{};
+            stopMix.outSamples = afterStop;
+            stopMix.outputCapacitySamples = 256;
+            if (Mix(state, stopMix) != AudioStatus::Ok)
+            {
+                return 12;
+            }
+
+            if (HasNonZero(afterStop, stopMix.writtenSamples))
+            {
+                observedFadeOutEnergy = true;
+            }
         }
 
-        if (HasNonZero(afterStop, stopMix.writtenSamples))
+        if (!observedFadeOutEnergy)
         {
             return 13;
+        }
+
+        float afterFade[256]{};
+        stopMix.outSamples = afterFade;
+        stopMix.outputCapacitySamples = 256;
+        if (Mix(state, stopMix) != AudioStatus::Ok)
+        {
+            return 29;
+        }
+
+        if (HasNonZero(afterFade, stopMix.writtenSamples))
+        {
+            return 30;
         }
     }
 
@@ -322,9 +358,12 @@ int RunAudioPlaybackSmoke()
         flushMix.sampleRate = config.platform.sampleRate;
         flushMix.channelCount = config.platform.channelCount;
         flushMix.requestedFrames = 16;
-        if (Mix(state, flushMix) != AudioStatus::Ok)
+        for (dng::u32 i = 0; i < 10; ++i)
         {
-            return false;
+            if (Mix(state, flushMix) != AudioStatus::Ok)
+            {
+                return false;
+            }
         }
 
         return true;
@@ -340,6 +379,75 @@ int RunAudioPlaybackSmoke()
     if (hashA != hashB)
     {
         return 15;
+    }
+
+    {
+        AudioClipId resampledClip{};
+        if (LoadWavPcm16Clip(state, kResampledWavPath, resampledClip) != AudioStatus::Ok || !IsValid(resampledClip))
+        {
+            return 31;
+        }
+
+        AudioPlayParams resampledPlay{};
+        resampledPlay.clip = resampledClip;
+        resampledPlay.gain = 1.0f;
+        resampledPlay.pitch = 1.0f;
+        resampledPlay.loop = false;
+
+        AudioVoiceId resampledVoice{};
+        if (Play(state, resampledPlay, resampledVoice) != AudioStatus::Ok)
+        {
+            return 32;
+        }
+
+        float resampledOut[512]{};
+        AudioMixParams resampledMix{};
+        resampledMix.outSamples = resampledOut;
+        resampledMix.outputCapacitySamples = 512;
+        resampledMix.sampleRate = config.platform.sampleRate;
+        resampledMix.channelCount = config.platform.channelCount;
+        resampledMix.requestedFrames = 64;
+        if (Mix(state, resampledMix) != AudioStatus::Ok || resampledMix.writtenSamples != 128)
+        {
+            return 33;
+        }
+
+        if (!HasNonZero(resampledOut, 48) || !HasNonZero(&resampledOut[96], 32))
+        {
+            return 34;
+        }
+
+        bool reachedSilence = false;
+        for (dng::u32 i = 0; i < 4; ++i)
+        {
+            float resampledTail[512]{};
+            resampledMix.outSamples = resampledTail;
+            if (Mix(state, resampledMix) != AudioStatus::Ok)
+            {
+                return 35;
+            }
+
+            if (!HasNonZero(resampledTail, resampledMix.writtenSamples))
+            {
+                reachedSilence = true;
+                break;
+            }
+        }
+
+        if (!reachedSilence)
+        {
+            return 36;
+        }
+
+        if (UnloadClip(state, resampledClip) != AudioStatus::Ok)
+        {
+            return 37;
+        }
+
+        if (GetLoadedClipCount(state) != 1)
+        {
+            return 38;
+        }
     }
 
     {
