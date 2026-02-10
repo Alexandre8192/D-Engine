@@ -168,6 +168,16 @@ int RunAudioPlaybackSmoke()
         return 3;
     }
 
+    const dng::u32 clipPoolCapacity = GetClipPoolCapacitySamples(state);
+    const dng::u32 clipPoolUsageAfterLoad = GetClipPoolUsageSamples(state);
+    if (clipPoolCapacity == 0 ||
+        clipPoolUsageAfterLoad == 0 ||
+        clipPoolUsageAfterLoad > clipPoolCapacity ||
+        GetLoadedClipCount(state) != 1)
+    {
+        return 20;
+    }
+
     {
         AudioPlayParams oneShot{};
         oneShot.clip = clip;
@@ -379,6 +389,49 @@ int RunAudioPlaybackSmoke()
         {
             return 19;
         }
+    }
+
+    if (UnloadClip(state, clip) != AudioStatus::Ok)
+    {
+        return 21;
+    }
+
+    if (GetLoadedClipCount(state) != 0 || GetClipPoolUsageSamples(state) != 0)
+    {
+        return 22;
+    }
+
+    AudioPlayParams afterUnload{};
+    afterUnload.clip = clip;
+    afterUnload.gain = 1.0f;
+    afterUnload.pitch = 1.0f;
+    AudioVoiceId staleVoice{};
+    if (Play(state, afterUnload, staleVoice) != AudioStatus::InvalidArg)
+    {
+        return 23;
+    }
+
+    if (UnloadClip(state, clip) != AudioStatus::InvalidArg)
+    {
+        return 24;
+    }
+
+    AudioClipId clipReloaded{};
+    if (LoadWavPcm16Clip(state, kTestWavPath, clipReloaded) != AudioStatus::Ok || !IsValid(clipReloaded))
+    {
+        return 25;
+    }
+
+    if (GetLoadedClipCount(state) != 1 || GetClipPoolUsageSamples(state) == 0)
+    {
+        return 26;
+    }
+
+    if (UnloadClip(state, clipReloaded) != AudioStatus::Ok ||
+        GetLoadedClipCount(state) != 0 ||
+        GetClipPoolUsageSamples(state) != 0)
+    {
+        return 27;
     }
 
     return 0;

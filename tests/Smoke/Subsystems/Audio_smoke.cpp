@@ -46,6 +46,20 @@ int RunAudioSmoke()
         return 5;
     }
 
+    if (GetLoadedClipCount(state) != 0 ||
+        GetClipPoolUsageSamples(state) != 0 ||
+        GetClipPoolCapacitySamples(state) != 0)
+    {
+        ShutdownAudioSystem(state);
+        return 23;
+    }
+
+    if (UnloadClip(state, MakeAudioClipId(1)) != AudioStatus::NotSupported)
+    {
+        ShutdownAudioSystem(state);
+        return 24;
+    }
+
     AudioPlayParams play{};
     play.clip = MakeAudioClipId(7);
     play.gain = 0.75f;
