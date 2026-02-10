@@ -4,7 +4,7 @@ This folder collects the compile-only and smoke helpers that keep the header-fir
 
 ## Layout
 - SelfContain/: header-only translation units; no `main`; each includes a single public header to validate self-containment.
-- Smoke/Subsystems/: subsystem smoke helpers (Window, Time, Jobs, Input, FileSystem, RendererSystem, BasicForwardRenderer); no `main`; consumed by the smoke aggregator or demos.
+- Smoke/Subsystems/: subsystem smoke helpers (Window, Time, Jobs, Input, FileSystem, RendererSystem, BasicForwardRenderer, CoreRuntime); no `main`; consumed by the smoke aggregator or demos.
 - Smoke/Memory/: allocator and memory-policy smokes; no `main`.
 - Abi/: ABI conformance/interop compilation helpers.
 - Policy/: policy-violation checks (expected-to-fail builds) that document guardrails.
