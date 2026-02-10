@@ -98,6 +98,11 @@ namespace
         }
         return value;
     }
+
+    [[nodiscard]] inline float Lerp(float a, float b, float t) noexcept
+    {
+        return a + ((b - a) * t);
+    }
 } // namespace
 
 AudioClipId WinMmAudio::AllocateClipId() noexcept
@@ -260,12 +265,6 @@ AudioStatus WinMmAudio::LoadWavPcm16Clip(const char* path, AudioClipId& outClip)
                     break;
                 }
 
-                if (fmtSampleRate != m_SampleRate)
-                {
-                    status = AudioStatus::NotSupported;
-                    break;
-                }
-
                 const dng::u32 sampleOffset = m_NextClipSample;
                 if (std::fread(&s_ClipSamplePool[sampleOffset], 1, chunkSize, file) != chunkSize)
                 {
@@ -337,7 +336,11 @@ AudioStatus WinMmAudio::UnloadClip(AudioClipId clip) noexcept
         voice.loop = false;
         voice.clip = AudioClipId{};
         voice.frameCursor = 0.0;
-        voice.gain = 1.0f;
+        voice.currentGain = 0.0f;
+        voice.targetGain = 1.0f;
+        voice.gainStepPerFrame = 0.0f;
+        voice.gainRampFramesRemaining = 0;
+        voice.stopAfterGainRamp = false;
         voice.pitch = 1.0f;
         ++voice.generation;
         if (voice.generation == 0)
@@ -522,8 +525,12 @@ void WinMmAudio::Shutdown() noexcept
 
     for (dng::u32 i = 0; i < kMaxVoices; ++i)
     {
-        m_Voices[i].gain = 1.0f;
+        m_Voices[i].currentGain = 0.0f;
+        m_Voices[i].targetGain = 1.0f;
+        m_Voices[i].gainStepPerFrame = 0.0f;
         m_Voices[i].pitch = 1.0f;
+        m_Voices[i].gainRampFramesRemaining = 0;
+        m_Voices[i].stopAfterGainRamp = false;
         m_Voices[i].generation = 1;
     }
 }
@@ -559,18 +566,23 @@ AudioStatus WinMmAudio::Play(AudioVoiceId voice, const AudioPlayParams& params) 
         return AudioStatus::InvalidArg;
     }
 
-    const ClipState& clipState = m_Clips[params.clip.value - 1u];
-    if (clipState.sampleRate != m_SampleRate)
-    {
-        return AudioStatus::NotSupported;
-    }
-
     VoiceState& voiceState = m_Voices[voice.slot];
+    voiceState = VoiceState{};
     voiceState.clip = params.clip;
     voiceState.frameCursor = 0.0;
-    voiceState.gain = params.gain;
+    voiceState.currentGain = 0.0f;
+    voiceState.targetGain = params.gain;
+    voiceState.gainRampFramesRemaining = kGainRampFrames;
+    voiceState.gainStepPerFrame = params.gain / static_cast<float>(kGainRampFrames);
+    if (params.gain <= 0.0f)
+    {
+        voiceState.currentGain = params.gain;
+        voiceState.gainRampFramesRemaining = 0;
+        voiceState.gainStepPerFrame = 0.0f;
+    }
     voiceState.pitch = params.pitch;
     voiceState.generation = voice.generation;
+    voiceState.stopAfterGainRamp = false;
     voiceState.active = true;
     voiceState.loop = params.loop;
     return AudioStatus::Ok;
@@ -594,12 +606,24 @@ AudioStatus WinMmAudio::Stop(AudioVoiceId voice) noexcept
         return AudioStatus::InvalidArg;
     }
 
-    voiceState.active = false;
-    voiceState.loop = false;
-    voiceState.clip = AudioClipId{};
-    voiceState.frameCursor = 0.0;
-    voiceState.gain = 1.0f;
-    voiceState.pitch = 1.0f;
+    voiceState.stopAfterGainRamp = true;
+    voiceState.targetGain = 0.0f;
+    if (voiceState.currentGain <= 0.0f)
+    {
+        voiceState.active = false;
+        voiceState.loop = false;
+        voiceState.clip = AudioClipId{};
+        voiceState.frameCursor = 0.0;
+        voiceState.currentGain = 0.0f;
+        voiceState.gainStepPerFrame = 0.0f;
+        voiceState.gainRampFramesRemaining = 0;
+        voiceState.pitch = 1.0f;
+        voiceState.stopAfterGainRamp = false;
+        return AudioStatus::Ok;
+    }
+
+    voiceState.gainRampFramesRemaining = kGainRampFrames;
+    voiceState.gainStepPerFrame = -voiceState.currentGain / static_cast<float>(kGainRampFrames);
     return AudioStatus::Ok;
 }
 
@@ -621,7 +645,11 @@ AudioStatus WinMmAudio::SetGain(AudioVoiceId voice, float gain) noexcept
         return AudioStatus::InvalidArg;
     }
 
-    voiceState.gain = gain;
+    voiceState.targetGain = gain;
+    voiceState.stopAfterGainRamp = false;
+    voiceState.gainRampFramesRemaining = kGainRampFrames;
+    voiceState.gainStepPerFrame =
+        (voiceState.targetGain - voiceState.currentGain) / static_cast<float>(kGainRampFrames);
     return AudioStatus::Ok;
 }
 
@@ -634,6 +662,22 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
         return;
     }
 
+    auto resetVoice = [](VoiceState& voice) noexcept
+    {
+        voice.active = false;
+        voice.loop = false;
+        voice.stopAfterGainRamp = false;
+        voice.clip = AudioClipId{};
+        voice.frameCursor = 0.0;
+        voice.currentGain = 0.0f;
+        voice.targetGain = 1.0f;
+        voice.gainStepPerFrame = 0.0f;
+        voice.gainRampFramesRemaining = 0;
+        voice.pitch = 1.0f;
+    };
+
+    const double outputSampleRate = static_cast<double>(m_SampleRate);
+
     for (dng::u32 voiceIndex = 0; voiceIndex < kMaxVoices; ++voiceIndex)
     {
         VoiceState& voice = m_Voices[voiceIndex];
@@ -643,57 +687,110 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
         }
 
         const ClipState& clip = m_Clips[voice.clip.value - 1u];
-        if (!clip.valid || clip.channelCount == 0 || clip.sampleRate != m_SampleRate)
+        if (!clip.valid || clip.channelCount == 0 || clip.sampleRate == 0)
         {
-            voice.active = false;
+            resetVoice(voice);
             continue;
         }
 
         const dng::u32 clipFrameCount = clip.sampleCount / static_cast<dng::u32>(clip.channelCount);
         if (clipFrameCount == 0)
         {
-            voice.active = false;
+            resetVoice(voice);
             continue;
         }
 
+        const double sourceStep = static_cast<double>(voice.pitch) *
+            (static_cast<double>(clip.sampleRate) / outputSampleRate);
+        if (!(sourceStep > 0.0))
+        {
+            resetVoice(voice);
+            continue;
+        }
+
+        const double clipFrameCountD = static_cast<double>(clipFrameCount);
         for (dng::u32 frame = 0; frame < requestedFrames; ++frame)
         {
-            if (voice.frameCursor >= static_cast<double>(clipFrameCount))
+            while (voice.frameCursor >= clipFrameCountD)
             {
                 if (voice.loop)
                 {
-                    while (voice.frameCursor >= static_cast<double>(clipFrameCount))
-                    {
-                        voice.frameCursor -= static_cast<double>(clipFrameCount);
-                    }
+                    voice.frameCursor -= clipFrameCountD;
                 }
                 else
                 {
-                    voice.active = false;
+                    resetVoice(voice);
                     break;
                 }
             }
+            if (!voice.active)
+            {
+                break;
+            }
 
-            const dng::u32 srcFrame = static_cast<dng::u32>(voice.frameCursor);
-            const dng::u32 srcBase = clip.sampleOffset + srcFrame * static_cast<dng::u32>(clip.channelCount);
-            const float srcLeft = Pcm16ToFloat(s_ClipSamplePool[srcBase]);
-            const float srcRight = (clip.channelCount > 1u)
-                ? Pcm16ToFloat(s_ClipSamplePool[srcBase + 1u])
-                : srcLeft;
+            dng::u32 srcFrameA = static_cast<dng::u32>(voice.frameCursor);
+            if (srcFrameA >= clipFrameCount)
+            {
+                srcFrameA = clipFrameCount - 1u;
+            }
+            const double fracD = voice.frameCursor - static_cast<double>(srcFrameA);
+            const float frac = static_cast<float>(fracD);
+
+            dng::u32 srcFrameB = srcFrameA + 1u;
+            if (srcFrameB >= clipFrameCount)
+            {
+                srcFrameB = voice.loop ? 0u : srcFrameA;
+            }
+
+            const dng::u32 srcBaseA = clip.sampleOffset + srcFrameA * static_cast<dng::u32>(clip.channelCount);
+            const dng::u32 srcBaseB = clip.sampleOffset + srcFrameB * static_cast<dng::u32>(clip.channelCount);
+
+            const float srcLeftA = Pcm16ToFloat(s_ClipSamplePool[srcBaseA]);
+            const float srcRightA = (clip.channelCount > 1u)
+                ? Pcm16ToFloat(s_ClipSamplePool[srcBaseA + 1u])
+                : srcLeftA;
+
+            const float srcLeftB = Pcm16ToFloat(s_ClipSamplePool[srcBaseB]);
+            const float srcRightB = (clip.channelCount > 1u)
+                ? Pcm16ToFloat(s_ClipSamplePool[srcBaseB + 1u])
+                : srcLeftB;
+
+            const float srcLeft = Lerp(srcLeftA, srcLeftB, frac);
+            const float srcRight = Lerp(srcRightA, srcRightB, frac);
+            const float gain = voice.currentGain;
 
             if (outChannelCount == 1u)
             {
-                const float mono = (srcLeft + srcRight) * 0.5f * voice.gain;
+                const float mono = (srcLeft + srcRight) * 0.5f * gain;
                 outSamples[frame] = ClampUnit(outSamples[frame] + mono);
             }
             else
             {
                 const dng::u32 outBase = frame * static_cast<dng::u32>(outChannelCount);
-                outSamples[outBase] = ClampUnit(outSamples[outBase] + (srcLeft * voice.gain));
-                outSamples[outBase + 1u] = ClampUnit(outSamples[outBase + 1u] + (srcRight * voice.gain));
+                outSamples[outBase] = ClampUnit(outSamples[outBase] + (srcLeft * gain));
+                outSamples[outBase + 1u] = ClampUnit(outSamples[outBase + 1u] + (srcRight * gain));
             }
 
-            voice.frameCursor += static_cast<double>(voice.pitch);
+            if (voice.gainRampFramesRemaining > 0)
+            {
+                voice.currentGain += voice.gainStepPerFrame;
+                --voice.gainRampFramesRemaining;
+                if (voice.gainRampFramesRemaining == 0)
+                {
+                    voice.currentGain = voice.targetGain;
+                    voice.gainStepPerFrame = 0.0f;
+                }
+            }
+
+            if (voice.stopAfterGainRamp &&
+                voice.gainRampFramesRemaining == 0 &&
+                voice.currentGain <= 0.0f)
+            {
+                resetVoice(voice);
+                break;
+            }
+
+            voice.frameCursor += sourceStep;
         }
     }
 }

@@ -8,6 +8,8 @@
 //           buffers. External synchronization is required.
 // Notes   : M2 backend supports loading PCM16 WAV clips and software mixing
 //           of voices before submitting to the default output device.
+//           Uses short gain ramps on play/stop/set-gain to reduce clicks and
+//           linear resampling when clip sample-rate differs from device rate.
 //           Clip samples use a shared static pool, so only one initialized
 //           WinMmAudio instance can own the clip pool at a time.
 // ============================================================================
@@ -75,6 +77,7 @@ namespace dng::audio
         static constexpr dng::u32 kMaxChannels = 2;
         static constexpr dng::u32 kMaxFramesPerBuffer = 4096;
         static constexpr dng::u32 kMaxSamplesPerBuffer = kMaxFramesPerBuffer * kMaxChannels;
+        static constexpr dng::u16 kGainRampFrames = 128;
         static constexpr dng::u32 kWaveHeaderStorageBytes = 128;
         static constexpr dng::u32 kWaveHeaderStorageAlign = 16;
 
@@ -92,12 +95,16 @@ namespace dng::audio
         {
             AudioClipId clip{};
             double      frameCursor = 0.0;
-            float       gain = 1.0f;
+            float       currentGain = 0.0f;
+            float       targetGain = 1.0f;
+            float       gainStepPerFrame = 0.0f;
             float       pitch = 1.0f;
             dng::u32    generation = 1;
+            dng::u16    gainRampFramesRemaining = 0;
+            bool        stopAfterGainRamp = false;
             bool        active = false;
             bool        loop = false;
-            dng::u16    reserved = 0;
+            dng::u8     reserved = 0;
         };
 
         void MixVoicesToBuffer(float* outSamples,
