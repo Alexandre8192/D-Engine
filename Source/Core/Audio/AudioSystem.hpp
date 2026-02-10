@@ -7,7 +7,7 @@
 //           Lifetime of the backend is tied to AudioSystemState.
 //           Thread-safety and determinism follow AudioCaps from the backend;
 //           callers must serialize access per instance.
-// Notes   : Defaults to NullAudio. Platform backend (WinMM M1) can be
+// Notes   : Defaults to NullAudio. Platform backend (WinMM M2) can be
 //           selected via config with optional fallback to NullAudio when
 //           platform initialization fails. Voice control is command-queued
 //           through a fixed-capacity pool to avoid allocations in Mix().
@@ -121,6 +121,27 @@ namespace dng::audio
         return (state.backend == AudioSystemBackend::Platform)
             ? state.platformBackend.GetSubmitErrorCount()
             : 0;
+    }
+
+    [[nodiscard]] inline dng::u32 GetLoadedClipCount(const AudioSystemState& state) noexcept
+    {
+        return (state.backend == AudioSystemBackend::Platform)
+            ? state.platformBackend.GetLoadedClipCount()
+            : 0u;
+    }
+
+    [[nodiscard]] inline dng::u32 GetClipPoolUsageSamples(const AudioSystemState& state) noexcept
+    {
+        return (state.backend == AudioSystemBackend::Platform)
+            ? state.platformBackend.GetClipPoolUsageSamples()
+            : 0u;
+    }
+
+    [[nodiscard]] inline dng::u32 GetClipPoolCapacitySamples(const AudioSystemState& state) noexcept
+    {
+        return (state.backend == AudioSystemBackend::Platform)
+            ? state.platformBackend.GetClipPoolCapacitySamples()
+            : 0u;
     }
 
     [[nodiscard]] inline AudioStatus LoadWavPcm16Clip(AudioSystemState& state,
@@ -344,6 +365,44 @@ namespace dng::audio
     [[nodiscard]] inline AudioCaps QueryCaps(const AudioSystemState& state) noexcept
     {
         return state.isInitialized ? QueryCaps(state.interface) : AudioCaps{};
+    }
+
+    [[nodiscard]] inline AudioStatus UnloadClip(AudioSystemState& state, AudioClipId clip) noexcept
+    {
+        if (!state.isInitialized || !IsValid(clip))
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        if (state.backend != AudioSystemBackend::Platform)
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        const AudioStatus flushStatus = detail::FlushCommands(state);
+
+        for (dng::u32 slot = 0; slot < kAudioSystemMaxVoices; ++slot)
+        {
+            const AudioVoiceState& voiceState = state.voices[slot];
+            if (!voiceState.isActive || voiceState.clip.value != clip.value)
+            {
+                continue;
+            }
+
+            AudioVoiceId voice{};
+            voice.slot = slot;
+            voice.generation = voiceState.generation;
+            (void)dng::audio::Stop(state.interface, voice);
+            detail::ReleaseVoice(state, voice);
+        }
+
+        const AudioStatus unloadStatus = state.platformBackend.UnloadClip(clip);
+        if (unloadStatus != AudioStatus::Ok)
+        {
+            return unloadStatus;
+        }
+
+        return flushStatus;
     }
 
     [[nodiscard]] inline AudioStatus Play(AudioSystemState& state,
