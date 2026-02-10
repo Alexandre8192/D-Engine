@@ -48,6 +48,9 @@
     <ClInclude Include="Source\Core\Audio\NullAudio.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Audio\WinMmAudio.hpp">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Audio\AudioSystem.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
@@ -136,6 +139,9 @@
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp">
       <Filter>Source\Core\Memory</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp">
+      <Filter>Source\Core</Filter>
     </ClCompile>
     <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp">
       <Filter>Source\Core\Memory</Filter>

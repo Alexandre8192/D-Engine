@@ -25,6 +25,7 @@
     <ClInclude Include="Source\Core\Logger.hpp" />
     <ClInclude Include="Source\Core\Contracts\Audio.hpp" />
     <ClInclude Include="Source\Core\Audio\NullAudio.hpp" />
+    <ClInclude Include="Source\Core\Audio\WinMmAudio.hpp" />
     <ClInclude Include="Source\Core\Audio\AudioSystem.hpp" />
     <ClInclude Include="Source\Core\Runtime\CoreRuntime.hpp" />
     <ClInclude Include="Source\Core\Memory\Alignment.hpp" />
@@ -59,6 +60,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp" />
+    <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp" />
     <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp" />
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp" />
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
