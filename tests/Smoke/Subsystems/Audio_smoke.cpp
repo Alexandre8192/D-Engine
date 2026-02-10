@@ -83,5 +83,78 @@ int RunAudioSmoke()
     }
 
     ShutdownAudioSystem(state);
+
+    AudioSystemConfig platformFallbackConfig{};
+    platformFallbackConfig.backend = AudioSystemBackend::Platform;
+    platformFallbackConfig.platform.sampleRate = 0; // Force backend init failure.
+    platformFallbackConfig.fallbackToNullOnInitFailure = true;
+
+    AudioSystemState fallbackState{};
+    if (!InitAudioSystem(fallbackState, platformFallbackConfig))
+    {
+        return 9;
+    }
+
+    if (fallbackState.backend != AudioSystemBackend::Null)
+    {
+        ShutdownAudioSystem(fallbackState);
+        return 10;
+    }
+
+    ShutdownAudioSystem(fallbackState);
+
+    AudioSystemConfig platformStrictConfig{};
+    platformStrictConfig.backend = AudioSystemBackend::Platform;
+    platformStrictConfig.platform.sampleRate = 0; // Force backend init failure.
+    platformStrictConfig.fallbackToNullOnInitFailure = false;
+
+    AudioSystemState strictState{};
+    if (InitAudioSystem(strictState, platformStrictConfig))
+    {
+        ShutdownAudioSystem(strictState);
+        return 11;
+    }
+
+    if (strictState.isInitialized)
+    {
+        ShutdownAudioSystem(strictState);
+        return 12;
+    }
+
+    AudioSystemConfig platformAutoConfig{};
+    platformAutoConfig.backend = AudioSystemBackend::Platform;
+    platformAutoConfig.fallbackToNullOnInitFailure = true;
+
+    AudioSystemState platformAutoState{};
+    if (!InitAudioSystem(platformAutoState, platformAutoConfig))
+    {
+        return 13;
+    }
+
+    if (platformAutoState.backend == AudioSystemBackend::Platform)
+    {
+        float platformBuffer[256]{};
+        AudioMixParams platformMix{};
+        platformMix.outSamples = platformBuffer;
+        platformMix.outputCapacitySamples = 256;
+        platformMix.sampleRate = platformAutoConfig.platform.sampleRate;
+        platformMix.channelCount = platformAutoConfig.platform.channelCount;
+        platformMix.requestedFrames = 64;
+
+        if (Mix(platformAutoState, platformMix) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(platformAutoState);
+            return 14;
+        }
+
+        if (platformMix.writtenSamples != 128)
+        {
+            ShutdownAudioSystem(platformAutoState);
+            return 15;
+        }
+    }
+
+    ShutdownAudioSystem(platformAutoState);
+
     return 0;
 }

@@ -354,5 +354,44 @@ int RunCoreRuntimeSmoke()
         }
     }
 
+    {
+        CoreRuntimeConfig fallbackConfig = config;
+        fallbackConfig.audio.backend = dng::audio::AudioSystemBackend::Platform;
+        fallbackConfig.audio.platform.sampleRate = 0; // Force platform init failure.
+        fallbackConfig.audio.fallbackToNullOnInitFailure = true;
+
+        CoreRuntimeState fallbackState{};
+        if (InitCoreRuntime(fallbackState, fallbackConfig) != CoreRuntimeStatus::Ok)
+        {
+            ShutdownCoreRuntime(fallbackState);
+            return 34;
+        }
+
+        if (fallbackState.audio.backend != dng::audio::AudioSystemBackend::Null)
+        {
+            ShutdownCoreRuntime(fallbackState);
+            return 35;
+        }
+
+        ShutdownCoreRuntime(fallbackState);
+        if (!IsRuntimeReset(fallbackState) || dng::memory::MemorySystem::IsInitialized())
+        {
+            return 36;
+        }
+    }
+
+    {
+        CoreRuntimeConfig strictConfig = config;
+        strictConfig.audio.backend = dng::audio::AudioSystemBackend::Platform;
+        strictConfig.audio.platform.sampleRate = 0; // Force platform init failure.
+        strictConfig.audio.fallbackToNullOnInitFailure = false;
+        const CoreRuntimeInjectedInterfaces injected{};
+        const int result = expectFailureReset(CoreRuntimeStatus::AudioInitFailed, strictConfig, injected, 37);
+        if (result != 0)
+        {
+            return result;
+        }
+    }
+
     return 0;
 }
