@@ -24,6 +24,7 @@ Subsystem status (M0)
 - Jobs_M0_Status.md
 - Input_M0_Status.md
 - FileSystem_M0_Status.md
+- Audio_M0_Status.md
 
 Build and performance
 - BenchProtocol.md

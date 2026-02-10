@@ -109,7 +109,7 @@ Core (Source/Core)
 - Memory/ : allocator suite and runtime override rules.
 - Math/ : foundational math types and functions.
 - Containers/ : engine containers (when used).
-- Contracts/ : subsystem contracts (Window, Renderer, Time, Jobs, Input, FileSystem).
+- Contracts/ : subsystem contracts (Window, Renderer, Time, Jobs, Input, FileSystem, Audio).
 - <Subsystem>/ : per-subsystem orchestrator + Null backend.
 - Abi/ : stable C ABI headers (interop contract surface).
 - Interop/ : dynamic loader and ABI adapters (C++ convenience layer).
@@ -386,7 +386,7 @@ Benchmark rules (CI stability)
 
 Subsystem vision docs
 - Docs/Renderer_Vision.md (renderer direction)
-- Docs/*_M0_Status.md (Window/Renderer/Time/Jobs/Input/FileSystem)
+- Docs/*_M0_Status.md (Window/Renderer/Time/Jobs/Input/FileSystem/Audio)
 
 -------------------------------------------------------------------------------
 
