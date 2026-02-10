@@ -15,6 +15,7 @@ int RunFileSystemSmoke();
 int RunWindowSmoke();
 int RunInputSmoke();
 int RunJobsSmoke();
+int RunAudioSmoke();
 int RunCoreRuntimeSmoke();
 int RunDeterminismReplaySmoke();
 int RunArenaAllocatorSmoke();
@@ -41,6 +42,7 @@ int main()
         {"Window", &RunWindowSmoke},
         {"Input", &RunInputSmoke},
         {"Jobs", &RunJobsSmoke},
+        {"Audio", &RunAudioSmoke},
         {"CoreRuntime", &RunCoreRuntimeSmoke},
         {"DeterminismReplay", &RunDeterminismReplaySmoke},
         {"ArenaAllocator", &RunArenaAllocatorSmoke},

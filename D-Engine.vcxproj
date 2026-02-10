@@ -23,6 +23,9 @@
     <ClInclude Include="Source\Core\Diagnostics\Bench.hpp" />
     <ClInclude Include="Source\Core\Diagnostics\Check.hpp" />
     <ClInclude Include="Source\Core\Logger.hpp" />
+    <ClInclude Include="Source\Core\Contracts\Audio.hpp" />
+    <ClInclude Include="Source\Core\Audio\NullAudio.hpp" />
+    <ClInclude Include="Source\Core\Audio\AudioSystem.hpp" />
     <ClInclude Include="Source\Core\Runtime\CoreRuntime.hpp" />
     <ClInclude Include="Source\Core\Memory\Alignment.hpp" />
     <ClInclude Include="Source\Core\Memory\AllocatorAdapter.hpp" />
@@ -78,6 +81,7 @@
     <ClCompile Include="tests\SelfContain\Renderer_NullRenderer_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\Renderer_BasicForwardRenderer_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\Renderer_RendererSystem_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\Audio_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\CoreRuntime_header_only.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_smoke.cpp" />

@@ -42,6 +42,15 @@
     <ClInclude Include="Source\Core\Logger.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Contracts\Audio.hpp">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Audio\NullAudio.hpp">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Audio\AudioSystem.hpp">
+      <Filter>Source\Core</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Runtime\CoreRuntime.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
@@ -177,6 +186,9 @@
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\SelfContain\Renderer_RendererSystem_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\SelfContain\Audio_header_only.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\SelfContain\CoreRuntime_header_only.cpp">
