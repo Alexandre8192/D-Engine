@@ -4,6 +4,24 @@ int RunFileSystemSmoke()
 {
     using namespace dng::fs;
 
+    FileSystemSystemState uninitialized{};
+    const FileSystemCaps uninitCaps = QueryCaps(uninitialized);
+    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
+        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
+        uninitCaps.stableOrderingRequired)
+    {
+        return 6;
+    }
+
+    NullFileSystem nullBackendForValidation{};
+    FileSystemInterface brokenInterface = MakeNullFileSystemInterface(nullBackendForValidation);
+    brokenInterface.vtable.getCaps = nullptr;
+    FileSystemSystemState rejected{};
+    if (InitFileSystemSystemWithInterface(rejected, brokenInterface, FileSystemSystemBackend::External))
+    {
+        return 7;
+    }
+
     FileSystemSystemState state{};
     FileSystemSystemConfig config{};
 
@@ -17,7 +35,7 @@ int RunFileSystemSmoke()
         caps.threadSafety != dng::ThreadSafetyMode::ExternalSync ||
         !caps.stableOrderingRequired)
     {
-        return 5;
+        return 8;
     }
 
     constexpr char pathData[] = "dummy.txt";

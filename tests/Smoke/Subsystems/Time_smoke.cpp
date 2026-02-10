@@ -4,6 +4,24 @@ int RunTimeSmoke()
 {
     using namespace dng::time;
 
+    TimeSystemState uninitialized{};
+    const TimeCaps uninitCaps = QueryCaps(uninitialized);
+    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
+        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
+        uninitCaps.stableSampleOrder)
+    {
+        return 8;
+    }
+
+    NullTime nullBackendForValidation{};
+    TimeInterface brokenInterface = MakeNullTimeInterface(nullBackendForValidation);
+    brokenInterface.vtable.getCaps = nullptr;
+    TimeSystemState rejected{};
+    if (InitTimeSystemWithInterface(rejected, brokenInterface, TimeSystemBackend::External))
+    {
+        return 9;
+    }
+
     TimeSystemState state{};
     TimeSystemConfig config{};
 

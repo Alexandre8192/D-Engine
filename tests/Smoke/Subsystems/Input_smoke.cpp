@@ -4,6 +4,24 @@ int RunInputSmoke()
 {
     using namespace dng::input;
 
+    InputSystemState uninitialized{};
+    const InputCaps uninitCaps = QueryCaps(uninitialized);
+    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
+        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
+        uninitCaps.stableEventOrder)
+    {
+        return 4;
+    }
+
+    NullInput nullBackendForValidation{};
+    InputInterface brokenInterface = MakeNullInputInterface(nullBackendForValidation);
+    brokenInterface.vtable.getCaps = nullptr;
+    InputSystemState rejected{};
+    if (InitInputSystemWithInterface(rejected, brokenInterface, InputSystemBackend::External))
+    {
+        return 5;
+    }
+
     InputSystemState state{};
     InputSystemConfig config{};
 

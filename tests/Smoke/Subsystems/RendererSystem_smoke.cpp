@@ -5,6 +5,24 @@ int RunRendererSystemSmoke()
 {
     using namespace dng::render;
 
+    RendererSystemState uninitialized{};
+    const RendererCaps uninitCaps = QueryCaps(uninitialized);
+    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
+        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
+        uninitCaps.stableSubmissionRequired)
+    {
+        return 3;
+    }
+
+    NullRenderer nullBackendForValidation{};
+    RendererInterface brokenInterface = MakeNullRendererInterface(nullBackendForValidation);
+    brokenInterface.vtable.getCaps = nullptr;
+    RendererSystemState rejected{};
+    if (InitRendererSystemWithInterface(rejected, brokenInterface, RendererSystemBackend::Forward))
+    {
+        return 4;
+    }
+
     RendererSystemConfig config{};
     config.backend = RendererSystemBackend::Null;
 

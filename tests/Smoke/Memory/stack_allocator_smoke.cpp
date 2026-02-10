@@ -24,6 +24,7 @@
 #endif
 
 #include <cstdint>
+#include <cstddef>
 
 int RunStackAllocatorSmoke()
 {
@@ -43,6 +44,24 @@ int RunStackAllocatorSmoke()
 
     stack.Reset();
     DNG_CHECK(stack.GetStackDepth() == 0);
+
+#ifndef NDEBUG
+    constexpr ::dng::core::usize kMarkerLimit = ::dng::core::CompiledStackAllocatorMaxMarkers();
+    constexpr ::dng::core::usize kOverflowPushes = kMarkerLimit + 8;
+    constexpr ::dng::core::usize kOverflowCapacity =
+        (kOverflowPushes + 2) * alignof(std::max_align_t);
+
+    ::dng::core::StackAllocator overflowStack(&parent, kOverflowCapacity);
+    for (::dng::core::usize i = 0; i < kOverflowPushes; ++i)
+    {
+        const ::dng::core::StackMarker marker = overflowStack.Push(1, 1);
+        DNG_CHECK(marker.IsValid());
+    }
+
+    DNG_CHECK(overflowStack.GetStackDepth() == kMarkerLimit);
+    overflowStack.Reset();
+    DNG_CHECK(overflowStack.GetStackDepth() == 0);
+#endif
 
     return 0;
 }

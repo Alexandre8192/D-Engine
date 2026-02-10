@@ -4,6 +4,24 @@ int RunWindowSmoke()
 {
     using namespace dng::win;
 
+    WindowSystemState uninitialized{};
+    const WindowCaps uninitCaps = QueryCaps(uninitialized);
+    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
+        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
+        uninitCaps.stableEventOrder)
+    {
+        return 7;
+    }
+
+    NullWindow nullBackendForValidation{};
+    WindowInterface brokenInterface = MakeNullWindowInterface(nullBackendForValidation);
+    brokenInterface.vtable.getCaps = nullptr;
+    WindowSystemState rejected{};
+    if (InitWindowSystemWithInterface(rejected, brokenInterface, WindowSystemBackend::External))
+    {
+        return 8;
+    }
+
     WindowSystemState state{};
     WindowSystemConfig config{};
 

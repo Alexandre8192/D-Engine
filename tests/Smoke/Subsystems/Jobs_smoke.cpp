@@ -35,6 +35,24 @@ int RunJobsSmoke()
 {
     using namespace dng::jobs;
 
+    JobsSystemState uninitialized{};
+    const JobsCaps uninitCaps = QueryCaps(uninitialized);
+    if (uninitCaps.determinismMode != dng::DeterminismMode::Unknown ||
+        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
+        uninitCaps.stableSubmissionOrder)
+    {
+        return 7;
+    }
+
+    NullJobs nullBackendForValidation{};
+    JobsInterface brokenInterface = MakeNullJobsInterface(nullBackendForValidation);
+    brokenInterface.vtable.getCaps = nullptr;
+    JobsSystemState rejected{};
+    if (InitJobsSystemWithInterface(rejected, brokenInterface, JobsSystemBackend::External))
+    {
+        return 8;
+    }
+
     JobsSystemState state{};
     JobsSystemConfig config{};
 
