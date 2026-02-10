@@ -46,6 +46,55 @@ int RunAudioSmoke()
         return 5;
     }
 
+    AudioPlayParams play{};
+    play.clip = MakeAudioClipId(7);
+    play.gain = 0.75f;
+    play.pitch = 1.0f;
+    play.loop = true;
+
+    AudioVoiceId voice{};
+    if (Play(state, play, voice) != AudioStatus::Ok || !IsValid(voice))
+    {
+        ShutdownAudioSystem(state);
+        return 16;
+    }
+
+    if (!IsVoiceActive(state, voice) ||
+        GetActiveVoiceCount(state) != 1 ||
+        GetPendingCommandCount(state) != 1)
+    {
+        ShutdownAudioSystem(state);
+        return 17;
+    }
+
+    if (SetGain(state, voice, 0.5f) != AudioStatus::Ok || GetPendingCommandCount(state) != 2)
+    {
+        ShutdownAudioSystem(state);
+        return 18;
+    }
+
+    if (Stop(state, voice) != AudioStatus::Ok ||
+        GetActiveVoiceCount(state) != 0 ||
+        GetPendingCommandCount(state) != 3)
+    {
+        ShutdownAudioSystem(state);
+        return 19;
+    }
+
+    if (SetGain(state, voice, 0.25f) != AudioStatus::InvalidArg)
+    {
+        ShutdownAudioSystem(state);
+        return 20;
+    }
+
+    AudioVoiceId invalidVoice{};
+    AudioPlayParams invalidPlay{};
+    if (Play(state, invalidPlay, invalidVoice) != AudioStatus::InvalidArg)
+    {
+        ShutdownAudioSystem(state);
+        return 21;
+    }
+
     float buffer[256]{};
     for (float& sample : buffer)
     {
@@ -65,6 +114,12 @@ int RunAudioSmoke()
     {
         ShutdownAudioSystem(state);
         return 6;
+    }
+
+    if (GetPendingCommandCount(state) != 0)
+    {
+        ShutdownAudioSystem(state);
+        return 22;
     }
 
     for (dng::u32 i = 0; i < mix.writtenSamples; ++i)
