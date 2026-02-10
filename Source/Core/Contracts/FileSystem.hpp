@@ -2,8 +2,8 @@
 // D-Engine - Source/Core/Contracts/FileSystem.hpp
 // ----------------------------------------------------------------------------
 // Purpose : File system contract describing backend-agnostic, read-only file
-//           queries for existence, size, and simple reads without exposing
-//           platform details or performing allocations.
+//           queries for existence, size, full reads, and range reads without
+//           exposing platform details or performing allocations.
 // Contract: Header-only, no exceptions/RTTI, engine-absolute includes only.
 //           All types are POD or trivially copyable; no allocations occur in
 //           this layer. Thread-safety is delegated to the backend owner.
@@ -55,11 +55,18 @@ namespace dng::fs
         using ExistsFunc   = FsStatus(*)(void* userData, PathView path) noexcept;
         using FileSizeFunc = FsStatus(*)(void* userData, PathView path, dng::u64& outSize) noexcept;
         using ReadFileFunc = FsStatus(*)(void* userData, PathView path, void* dst, dng::u64 dstSize, dng::u64& outRead) noexcept;
+        using ReadFileRangeFunc = FsStatus(*)(void* userData,
+                                              PathView path,
+                                              dng::u64 offsetBytes,
+                                              void* dst,
+                                              dng::u64 dstSize,
+                                              dng::u64& outRead) noexcept;
         using GetCapsFunc  = FileSystemCaps(*)(const void* userData) noexcept;
 
         ExistsFunc   exists   = nullptr;
         FileSizeFunc fileSize = nullptr;
         ReadFileFunc readFile = nullptr;
+        ReadFileRangeFunc readFileRange = nullptr;
         GetCapsFunc  getCaps  = nullptr;
     };
 
@@ -99,6 +106,19 @@ namespace dng::fs
             : FsStatus::InvalidArg;
     }
 
+    [[nodiscard]] inline FsStatus ReadFileRange(FileSystemInterface& fs,
+                                                PathView path,
+                                                dng::u64 offsetBytes,
+                                                void* dst,
+                                                dng::u64 dstSize,
+                                                dng::u64& outRead) noexcept
+    {
+        outRead = 0;
+        return (fs.vtable.readFileRange && fs.userData)
+            ? fs.vtable.readFileRange(fs.userData, path, offsetBytes, dst, dstSize, outRead)
+            : FsStatus::InvalidArg;
+    }
+
     // ------------------------------------------------------------------------
     // Static face (concept + adapter to dynamic v-table)
     // ------------------------------------------------------------------------
@@ -107,6 +127,7 @@ namespace dng::fs
     concept FileSystemBackend = requires(Backend& backend,
                                          const Backend& constBackend,
                                          const PathView path,
+                                         dng::u64 offsetBytes,
                                          void* dst,
                                          dng::u64 dstSize,
                                          dng::u64& outSize,
@@ -116,6 +137,7 @@ namespace dng::fs
         { backend.Exists(path) } noexcept -> std::same_as<FsStatus>;
         { backend.FileSize(path, outSize) } noexcept -> std::same_as<FsStatus>;
         { backend.ReadFile(path, dst, dstSize, outRead) } noexcept -> std::same_as<FsStatus>;
+        { backend.ReadFileRange(path, offsetBytes, dst, dstSize, outRead) } noexcept -> std::same_as<FsStatus>;
     };
 
     namespace detail
@@ -142,6 +164,16 @@ namespace dng::fs
             {
                 return static_cast<Backend*>(userData)->ReadFile(path, dst, dstSize, outRead);
             }
+
+            static FsStatus ReadFileRange(void* userData,
+                                          PathView path,
+                                          dng::u64 offsetBytes,
+                                          void* dst,
+                                          dng::u64 dstSize,
+                                          dng::u64& outRead) noexcept
+            {
+                return static_cast<Backend*>(userData)->ReadFileRange(path, offsetBytes, dst, dstSize, outRead);
+            }
         };
     } // namespace detail
 
@@ -156,6 +188,7 @@ namespace dng::fs
         iface.vtable.exists    = &detail::FileSystemInterfaceAdapter<Backend>::Exists;
         iface.vtable.fileSize  = &detail::FileSystemInterfaceAdapter<Backend>::FileSize;
         iface.vtable.readFile  = &detail::FileSystemInterfaceAdapter<Backend>::ReadFile;
+        iface.vtable.readFileRange = &detail::FileSystemInterfaceAdapter<Backend>::ReadFileRange;
         return iface;
     }
 

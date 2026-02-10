@@ -10,12 +10,14 @@
 // Notes   : Defaults to NullAudio. Platform backend (WinMM M2) can be
 //           selected via config with optional fallback to NullAudio when
 //           platform initialization fails. Voice control is command-queued
-//           through a fixed-capacity pool to avoid allocations in Mix().
+//           through a fixed-capacity pool to avoid allocations in Mix(). WAV
+//           loading supports in-memory clips and streamed clips via FileSystem.
 // ============================================================================
 
 #pragma once
 
 #include "Core/Contracts/Audio.hpp"
+#include "Core/Contracts/FileSystem.hpp"
 #include "Core/Audio/NullAudio.hpp"
 #include "Core/Audio/WinMmAudio.hpp"
 
@@ -23,6 +25,8 @@ namespace dng::audio
 {
     inline constexpr dng::u32 kAudioSystemMaxVoices = 64;
     inline constexpr dng::u32 kAudioSystemMaxCommands = 256;
+    inline constexpr dng::u32 kAudioSystemWavLoadScratchBytes =
+        (WinMmAudio::GetClipPoolCapacitySamples() * static_cast<dng::u32>(sizeof(dng::i16))) + 4096u;
 
     enum class AudioSystemBackend : dng::u8
     {
@@ -130,6 +134,13 @@ namespace dng::audio
             : 0u;
     }
 
+    [[nodiscard]] inline dng::u32 GetLoadedStreamClipCount(const AudioSystemState& state) noexcept
+    {
+        return (state.backend == AudioSystemBackend::Platform)
+            ? state.platformBackend.GetLoadedStreamClipCount()
+            : 0u;
+    }
+
     [[nodiscard]] inline dng::u32 GetClipPoolUsageSamples(const AudioSystemState& state) noexcept
     {
         return (state.backend == AudioSystemBackend::Platform)
@@ -144,26 +155,31 @@ namespace dng::audio
             : 0u;
     }
 
-    [[nodiscard]] inline AudioStatus LoadWavPcm16Clip(AudioSystemState& state,
-                                                      const char* path,
-                                                      AudioClipId& outClip) noexcept
+    [[nodiscard]] inline dng::u32 GetMaxClipCount(const AudioSystemState& state) noexcept
     {
-        outClip = AudioClipId{};
-        if (!state.isInitialized || path == nullptr)
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        if (state.backend != AudioSystemBackend::Platform)
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        return state.platformBackend.LoadWavPcm16Clip(path, outClip);
+        return (state.backend == AudioSystemBackend::Platform)
+            ? state.platformBackend.GetMaxClipCount()
+            : 0u;
     }
 
     namespace detail
     {
+        inline dng::u8 g_AudioWavLoadScratch[kAudioSystemWavLoadScratchBytes]{};
+
+        [[nodiscard]] inline AudioStatus MapFsStatus(fs::FsStatus status) noexcept
+        {
+            switch (status)
+            {
+                case fs::FsStatus::Ok:           return AudioStatus::Ok;
+                case fs::FsStatus::InvalidArg:   return AudioStatus::InvalidArg;
+                case fs::FsStatus::NotSupported: return AudioStatus::NotSupported;
+                case fs::FsStatus::UnknownError: return AudioStatus::UnknownError;
+                case fs::FsStatus::NotFound:
+                case fs::FsStatus::AccessDenied: return AudioStatus::NotSupported;
+                default:                         return AudioStatus::UnknownError;
+            }
+        }
+
         [[nodiscard]] inline bool EnqueueCommand(AudioSystemState& state, const AudioCommand& command) noexcept
         {
             if (state.commandCount >= kAudioSystemMaxCommands)
@@ -290,7 +306,125 @@ namespace dng::audio
 
             return firstFailure;
         }
+
+        [[nodiscard]] inline bool MakePathView(const char* path, fs::PathView& outPath) noexcept
+        {
+            outPath = fs::PathView{};
+            if (path == nullptr)
+            {
+                return false;
+            }
+
+            dng::u32 length = 0;
+            while (path[length] != '\0')
+            {
+                ++length;
+            }
+            if (length == 0)
+            {
+                return false;
+            }
+
+            outPath.data = path;
+            outPath.size = length;
+            return true;
+        }
     } // namespace detail
+
+    [[nodiscard]] inline AudioStatus LoadWavPcm16Clip(AudioSystemState& state,
+                                                      fs::FileSystemInterface& fileSystem,
+                                                      fs::PathView path,
+                                                      AudioClipId& outClip) noexcept
+    {
+        outClip = AudioClipId{};
+        if (!state.isInitialized || path.data == nullptr || path.size == 0)
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        if (state.backend != AudioSystemBackend::Platform)
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        dng::u64 fileSize = 0;
+        const fs::FsStatus sizeStatus = fs::FileSize(fileSystem, path, fileSize);
+        if (sizeStatus != fs::FsStatus::Ok)
+        {
+            return detail::MapFsStatus(sizeStatus);
+        }
+
+        if (fileSize == 0 ||
+            fileSize > static_cast<dng::u64>(kAudioSystemWavLoadScratchBytes) ||
+            fileSize > static_cast<dng::u64>(~dng::u32{0}))
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        dng::u64 bytesRead = 0;
+        const fs::FsStatus readStatus =
+            fs::ReadFile(fileSystem, path, detail::g_AudioWavLoadScratch, fileSize, bytesRead);
+        if (readStatus != fs::FsStatus::Ok)
+        {
+            return detail::MapFsStatus(readStatus);
+        }
+
+        if (bytesRead != fileSize)
+        {
+            return AudioStatus::UnknownError;
+        }
+
+        return state.platformBackend.LoadWavPcm16Clip(detail::g_AudioWavLoadScratch,
+                                                      static_cast<dng::u32>(bytesRead),
+                                                      outClip);
+    }
+
+    [[nodiscard]] inline AudioStatus LoadWavPcm16Clip(AudioSystemState& state,
+                                                      fs::FileSystemInterface& fileSystem,
+                                                      const char* path,
+                                                      AudioClipId& outClip) noexcept
+    {
+        outClip = AudioClipId{};
+        fs::PathView pathView{};
+        if (!detail::MakePathView(path, pathView))
+        {
+            return AudioStatus::InvalidArg;
+        }
+        return LoadWavPcm16Clip(state, fileSystem, pathView, outClip);
+    }
+
+    [[nodiscard]] inline AudioStatus LoadWavPcm16StreamClip(AudioSystemState& state,
+                                                            fs::FileSystemInterface& fileSystem,
+                                                            fs::PathView path,
+                                                            AudioClipId& outClip) noexcept
+    {
+        outClip = AudioClipId{};
+        if (!state.isInitialized || path.data == nullptr || path.size == 0u)
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        if (state.backend != AudioSystemBackend::Platform)
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        return state.platformBackend.LoadWavPcm16StreamClip(fileSystem, path, outClip);
+    }
+
+    [[nodiscard]] inline AudioStatus LoadWavPcm16StreamClip(AudioSystemState& state,
+                                                            fs::FileSystemInterface& fileSystem,
+                                                            const char* path,
+                                                            AudioClipId& outClip) noexcept
+    {
+        outClip = AudioClipId{};
+        fs::PathView pathView{};
+        if (!detail::MakePathView(path, pathView))
+        {
+            return AudioStatus::InvalidArg;
+        }
+        return LoadWavPcm16StreamClip(state, fileSystem, pathView, outClip);
+    }
 
     [[nodiscard]] inline bool InitAudioSystemWithInterface(AudioSystemState& state,
                                                            AudioInterface interface,

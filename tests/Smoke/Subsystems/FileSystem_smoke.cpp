@@ -61,6 +61,11 @@ int RunFileSystemSmoke()
         return 4;
     }
 
+    if (ReadFileRange(state, path, 2, buffer, sizeof(buffer), read) != FsStatus::NotFound || read != 0)
+    {
+        return 5;
+    }
+
     ShutdownFileSystemSystem(state);
     return 0;
 }

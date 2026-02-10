@@ -45,7 +45,8 @@ namespace dng::fs
             interface.vtable.getCaps == nullptr ||
             interface.vtable.exists == nullptr ||
             interface.vtable.fileSize == nullptr ||
-            interface.vtable.readFile == nullptr)
+            interface.vtable.readFile == nullptr ||
+            interface.vtable.readFileRange == nullptr)
         {
             return false;
         }
@@ -119,6 +120,21 @@ namespace dng::fs
             return FsStatus::InvalidArg;
         }
         return ReadFile(state.interface, path, dst, dstSize, outRead);
+    }
+
+    [[nodiscard]] inline FsStatus ReadFileRange(FileSystemSystemState& state,
+                                                PathView path,
+                                                dng::u64 offsetBytes,
+                                                void* dst,
+                                                dng::u64 dstSize,
+                                                dng::u64& outRead) noexcept
+    {
+        if (!state.isInitialized)
+        {
+            outRead = 0;
+            return FsStatus::InvalidArg;
+        }
+        return ReadFileRange(state.interface, path, offsetBytes, dst, dstSize, outRead);
     }
 
 } // namespace dng::fs

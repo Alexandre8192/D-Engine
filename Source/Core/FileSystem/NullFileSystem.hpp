@@ -41,6 +41,16 @@ namespace dng::fs
             outRead = 0;
             return FsStatus::NotFound;
         }
+
+        [[nodiscard]] FsStatus ReadFileRange(PathView,
+                                             dng::u64,
+                                             void*,
+                                             dng::u64,
+                                             dng::u64& outRead) noexcept
+        {
+            outRead = 0;
+            return FsStatus::NotFound;
+        }
     };
 
     static_assert(FileSystemBackend<NullFileSystem>, "NullFileSystem must satisfy file system backend concept.");

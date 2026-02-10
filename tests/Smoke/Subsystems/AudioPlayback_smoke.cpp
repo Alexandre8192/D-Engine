@@ -1,7 +1,9 @@
 #include "Core/Audio/AudioSystem.hpp"
+#include "Core/Contracts/FileSystem.hpp"
 
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 namespace
 {
@@ -116,16 +118,226 @@ namespace
         }
         return hash;
     }
+
+    struct LocalFileSystemForSmoke
+    {
+        [[nodiscard]] dng::fs::FileSystemCaps GetCaps() const noexcept
+        {
+            dng::fs::FileSystemCaps caps{};
+            caps.determinism = dng::DeterminismMode::Off;
+            caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableOrderingRequired = false;
+            return caps;
+        }
+
+        [[nodiscard]] static bool PathToCString(dng::fs::PathView path,
+                                                char* dst,
+                                                dng::u32 dstCapacity) noexcept
+        {
+            if (dst == nullptr || dstCapacity == 0 || path.data == nullptr || path.size == 0)
+            {
+                return false;
+            }
+
+            if (path.size >= dstCapacity)
+            {
+                return false;
+            }
+
+            std::memcpy(dst, path.data, static_cast<size_t>(path.size));
+            dst[path.size] = '\0';
+            return true;
+        }
+
+        [[nodiscard]] dng::fs::FsStatus Exists(dng::fs::PathView path) noexcept
+        {
+            char cPath[512]{};
+            if (!PathToCString(path, cPath, static_cast<dng::u32>(sizeof(cPath))))
+            {
+                return dng::fs::FsStatus::InvalidArg;
+            }
+
+            std::FILE* file = nullptr;
+#if defined(_MSC_VER)
+            if (fopen_s(&file, cPath, "rb") != 0)
+            {
+                file = nullptr;
+            }
+#else
+            file = std::fopen(cPath, "rb");
+#endif
+            if (file == nullptr)
+            {
+                return dng::fs::FsStatus::NotFound;
+            }
+
+            std::fclose(file);
+            return dng::fs::FsStatus::Ok;
+        }
+
+        [[nodiscard]] dng::fs::FsStatus FileSize(dng::fs::PathView path, dng::u64& outSize) noexcept
+        {
+            outSize = 0;
+            char cPath[512]{};
+            if (!PathToCString(path, cPath, static_cast<dng::u32>(sizeof(cPath))))
+            {
+                return dng::fs::FsStatus::InvalidArg;
+            }
+
+            std::FILE* file = nullptr;
+#if defined(_MSC_VER)
+            if (fopen_s(&file, cPath, "rb") != 0)
+            {
+                file = nullptr;
+            }
+#else
+            file = std::fopen(cPath, "rb");
+#endif
+            if (file == nullptr)
+            {
+                return dng::fs::FsStatus::NotFound;
+            }
+
+            if (std::fseek(file, 0, SEEK_END) != 0)
+            {
+                std::fclose(file);
+                return dng::fs::FsStatus::UnknownError;
+            }
+
+            const long endPos = std::ftell(file);
+            std::fclose(file);
+            if (endPos < 0)
+            {
+                return dng::fs::FsStatus::UnknownError;
+            }
+
+            outSize = static_cast<dng::u64>(endPos);
+            return dng::fs::FsStatus::Ok;
+        }
+
+        [[nodiscard]] dng::fs::FsStatus ReadFile(dng::fs::PathView path,
+                                                 void* dst,
+                                                 dng::u64 dstSize,
+                                                 dng::u64& outRead) noexcept
+        {
+            outRead = 0;
+            if (dst == nullptr)
+            {
+                return dng::fs::FsStatus::InvalidArg;
+            }
+
+            char cPath[512]{};
+            if (!PathToCString(path, cPath, static_cast<dng::u32>(sizeof(cPath))))
+            {
+                return dng::fs::FsStatus::InvalidArg;
+            }
+
+            std::FILE* file = nullptr;
+#if defined(_MSC_VER)
+            if (fopen_s(&file, cPath, "rb") != 0)
+            {
+                file = nullptr;
+            }
+#else
+            file = std::fopen(cPath, "rb");
+#endif
+            if (file == nullptr)
+            {
+                return dng::fs::FsStatus::NotFound;
+            }
+
+            if (dstSize > static_cast<dng::u64>(~size_t{0}))
+            {
+                std::fclose(file);
+                return dng::fs::FsStatus::InvalidArg;
+            }
+
+            const size_t toRead = static_cast<size_t>(dstSize);
+            const size_t readCount = std::fread(dst, 1, toRead, file);
+            if (std::ferror(file) != 0)
+            {
+                std::fclose(file);
+                return dng::fs::FsStatus::UnknownError;
+            }
+
+            std::fclose(file);
+            outRead = static_cast<dng::u64>(readCount);
+            return dng::fs::FsStatus::Ok;
+        }
+
+        [[nodiscard]] dng::fs::FsStatus ReadFileRange(dng::fs::PathView path,
+                                                      dng::u64 offsetBytes,
+                                                      void* dst,
+                                                      dng::u64 dstSize,
+                                                      dng::u64& outRead) noexcept
+        {
+            outRead = 0;
+            if (dst == nullptr)
+            {
+                return dng::fs::FsStatus::InvalidArg;
+            }
+
+            char cPath[512]{};
+            if (!PathToCString(path, cPath, static_cast<dng::u32>(sizeof(cPath))))
+            {
+                return dng::fs::FsStatus::InvalidArg;
+            }
+
+            std::FILE* file = nullptr;
+#if defined(_MSC_VER)
+            if (fopen_s(&file, cPath, "rb") != 0)
+            {
+                file = nullptr;
+            }
+#else
+            file = std::fopen(cPath, "rb");
+#endif
+            if (file == nullptr)
+            {
+                return dng::fs::FsStatus::NotFound;
+            }
+
+            if (offsetBytes > static_cast<dng::u64>(std::numeric_limits<long>::max()) ||
+                dstSize > static_cast<dng::u64>(~size_t{0}))
+            {
+                std::fclose(file);
+                return dng::fs::FsStatus::InvalidArg;
+            }
+
+            if (std::fseek(file, static_cast<long>(offsetBytes), SEEK_SET) != 0)
+            {
+                std::fclose(file);
+                return dng::fs::FsStatus::UnknownError;
+            }
+
+            const size_t toRead = static_cast<size_t>(dstSize);
+            const size_t readCount = std::fread(dst, 1, toRead, file);
+            if (std::ferror(file) != 0)
+            {
+                std::fclose(file);
+                return dng::fs::FsStatus::UnknownError;
+            }
+
+            std::fclose(file);
+            outRead = static_cast<dng::u64>(readCount);
+            return dng::fs::FsStatus::Ok;
+        }
+    };
 }
 
 int RunAudioPlaybackSmoke()
 {
     using namespace dng::audio;
 
+    LocalFileSystemForSmoke localFileSystem{};
+    dng::fs::FileSystemInterface fileSystem = dng::fs::MakeFileSystemInterface(localFileSystem);
+
     constexpr const char* kTestWavPath = "AudioPlayback_test.wav";
     constexpr const char* kResampledWavPath = "AudioPlayback_test_24k.wav";
+    constexpr const char* kStreamedWavPath = "AudioPlayback_stream_long.wav";
     if (!WritePcm16WavForSmoke(kTestWavPath, 48000u, 16u) ||
-        !WritePcm16WavForSmoke(kResampledWavPath, 24000u, 32u))
+        !WritePcm16WavForSmoke(kResampledWavPath, 24000u, 32u) ||
+        !WritePcm16WavForSmoke(kStreamedWavPath, 48000u, 48000u))
     {
         return 1;
     }
@@ -136,6 +348,7 @@ int RunAudioPlaybackSmoke()
         AudioSystemState* state = nullptr;
         const char* wavPathA = nullptr;
         const char* wavPathB = nullptr;
+        const char* wavPathC = nullptr;
         ~SmokeCleanup() noexcept
         {
             if (state != nullptr)
@@ -150,8 +363,12 @@ int RunAudioPlaybackSmoke()
             {
                 (void)std::remove(wavPathB);
             }
+            if (wavPathC != nullptr)
+            {
+                (void)std::remove(wavPathC);
+            }
         }
-    } cleanup{&state, kTestWavPath, kResampledWavPath};
+    } cleanup{&state, kTestWavPath, kResampledWavPath, kStreamedWavPath};
     (void)cleanup;
 
     AudioSystemConfig config{};
@@ -170,9 +387,15 @@ int RunAudioPlaybackSmoke()
     }
 
     AudioClipId clip{};
-    if (LoadWavPcm16Clip(state, kTestWavPath, clip) != AudioStatus::Ok || !IsValid(clip))
+    if (LoadWavPcm16Clip(state, fileSystem, kTestWavPath, clip) != AudioStatus::Ok || !IsValid(clip))
     {
         return 3;
+    }
+
+    AudioClipId missingClip{};
+    if (LoadWavPcm16Clip(state, fileSystem, "AudioPlayback_missing.wav", missingClip) != AudioStatus::NotSupported)
+    {
+        return 39;
     }
 
     const dng::u32 clipPoolCapacity = GetClipPoolCapacitySamples(state);
@@ -383,7 +606,8 @@ int RunAudioPlaybackSmoke()
 
     {
         AudioClipId resampledClip{};
-        if (LoadWavPcm16Clip(state, kResampledWavPath, resampledClip) != AudioStatus::Ok || !IsValid(resampledClip))
+        if (LoadWavPcm16Clip(state, fileSystem, kResampledWavPath, resampledClip) != AudioStatus::Ok ||
+            !IsValid(resampledClip))
         {
             return 31;
         }
@@ -525,7 +749,8 @@ int RunAudioPlaybackSmoke()
     }
 
     AudioClipId clipReloaded{};
-    if (LoadWavPcm16Clip(state, kTestWavPath, clipReloaded) != AudioStatus::Ok || !IsValid(clipReloaded))
+    if (LoadWavPcm16Clip(state, fileSystem, kTestWavPath, clipReloaded) != AudioStatus::Ok ||
+        !IsValid(clipReloaded))
     {
         return 25;
     }
@@ -540,6 +765,115 @@ int RunAudioPlaybackSmoke()
         GetClipPoolUsageSamples(state) != 0)
     {
         return 27;
+    }
+
+    {
+        AudioClipId oversizedClip{};
+        if (LoadWavPcm16Clip(state, fileSystem, kStreamedWavPath, oversizedClip) != AudioStatus::NotSupported)
+        {
+            return 46;
+        }
+
+        AudioClipId streamClip{};
+        if (LoadWavPcm16StreamClip(state, fileSystem, kStreamedWavPath, streamClip) != AudioStatus::Ok ||
+            !IsValid(streamClip))
+        {
+            return 47;
+        }
+
+        if (GetLoadedStreamClipCount(state) != 1u || GetClipPoolUsageSamples(state) != 0u)
+        {
+            return 48;
+        }
+
+        AudioPlayParams streamPlay{};
+        streamPlay.clip = streamClip;
+        streamPlay.gain = 1.0f;
+        streamPlay.pitch = 1.0f;
+        streamPlay.loop = false;
+
+        AudioVoiceId streamVoice{};
+        if (Play(state, streamPlay, streamVoice) != AudioStatus::Ok)
+        {
+            return 49;
+        }
+
+        float streamOut[512]{};
+        AudioMixParams streamMix{};
+        streamMix.outSamples = streamOut;
+        streamMix.outputCapacitySamples = 512;
+        streamMix.sampleRate = config.platform.sampleRate;
+        streamMix.channelCount = config.platform.channelCount;
+        streamMix.requestedFrames = 64;
+
+        if (Mix(state, streamMix) != AudioStatus::Ok || streamMix.writtenSamples != 128)
+        {
+            return 50;
+        }
+
+        if (!HasNonZero(streamOut, streamMix.writtenSamples))
+        {
+            return 51;
+        }
+
+        if (Stop(state, streamVoice) != AudioStatus::Ok || Mix(state, streamMix) != AudioStatus::Ok)
+        {
+            return 52;
+        }
+
+        if (UnloadClip(state, streamClip) != AudioStatus::Ok ||
+            GetLoadedStreamClipCount(state) != 0u ||
+            GetLoadedClipCount(state) != 0u ||
+            GetClipPoolUsageSamples(state) != 0u)
+        {
+            return 53;
+        }
+    }
+
+    {
+        constexpr dng::u32 kMaxSmokeClips = 128;
+        AudioClipId loadedClips[kMaxSmokeClips]{};
+        dng::u32 loadedCount = 0;
+
+        const dng::u32 maxClipCount = GetMaxClipCount(state);
+        if (maxClipCount == 0 || maxClipCount > kMaxSmokeClips)
+        {
+            return 40;
+        }
+
+        for (; loadedCount < maxClipCount; ++loadedCount)
+        {
+            AudioClipId loaded{};
+            if (LoadWavPcm16Clip(state, fileSystem, kTestWavPath, loaded) != AudioStatus::Ok || !IsValid(loaded))
+            {
+                return 41;
+            }
+            loadedClips[loadedCount] = loaded;
+        }
+
+        if (GetLoadedClipCount(state) != maxClipCount)
+        {
+            return 42;
+        }
+
+        AudioClipId overflowClip{};
+        if (LoadWavPcm16Clip(state, fileSystem, kTestWavPath, overflowClip) != AudioStatus::NotSupported)
+        {
+            return 43;
+        }
+
+        for (dng::u32 i = 0; i < loadedCount; ++i)
+        {
+            if (UnloadClip(state, loadedClips[i]) != AudioStatus::Ok)
+            {
+                return 44;
+            }
+        }
+
+        if (GetLoadedClipCount(state) != 0 || GetClipPoolUsageSamples(state) != 0)
+        {
+            return 45;
+        }
     }
 
     return 0;

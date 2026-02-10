@@ -12,7 +12,6 @@
 
 #include "Core/Platform/PlatformDefines.hpp"
 
-#include <cstdio>
 #include <cstring>
 
 #if DNG_PLATFORM_WINDOWS
@@ -30,6 +29,7 @@
 namespace dng::audio
 {
 dng::i16 WinMmAudio::s_ClipSamplePool[WinMmAudio::kMaxClipSamplePool]{};
+WinMmAudio::StreamClipState WinMmAudio::s_StreamClips[WinMmAudio::kMaxStreamClips]{};
 bool WinMmAudio::s_GlobalClipPoolInUse = false;
 
 namespace
@@ -51,16 +51,6 @@ namespace
                static_cast<dng::u32>(static_cast<dng::u32>(data[1]) << 8u) |
                static_cast<dng::u32>(static_cast<dng::u32>(data[2]) << 16u) |
                static_cast<dng::u32>(static_cast<dng::u32>(data[3]) << 24u);
-    }
-
-    [[nodiscard]] inline bool SkipFileBytes(std::FILE* file, dng::u32 byteCount) noexcept
-    {
-        if (file == nullptr || byteCount == 0)
-        {
-            return true;
-        }
-
-        return std::fseek(file, static_cast<long>(byteCount), SEEK_CUR) == 0;
     }
 
     [[nodiscard]] inline dng::i16 FloatToPcm16(float value) noexcept
@@ -103,6 +93,256 @@ namespace
     {
         return a + ((b - a) * t);
     }
+
+    struct WavPcm16Info
+    {
+        dng::u16 channelCount = 0;
+        dng::u32 sampleRate = 0;
+        dng::u64 dataOffsetBytes = 0;
+        dng::u32 dataSizeBytes = 0;
+    };
+
+    [[nodiscard]] inline AudioStatus MapFsStatusToAudioStatus(fs::FsStatus status) noexcept
+    {
+        switch (status)
+        {
+            case fs::FsStatus::Ok:           return AudioStatus::Ok;
+            case fs::FsStatus::InvalidArg:   return AudioStatus::InvalidArg;
+            case fs::FsStatus::NotSupported: return AudioStatus::NotSupported;
+            case fs::FsStatus::UnknownError: return AudioStatus::UnknownError;
+            case fs::FsStatus::NotFound:
+            case fs::FsStatus::AccessDenied: return AudioStatus::NotSupported;
+            default:                         return AudioStatus::UnknownError;
+        }
+    }
+
+    [[nodiscard]] inline bool IsSupportedPcmFormat(dng::u16 fmtTag,
+                                                   dng::u16 channels,
+                                                   dng::u32 sampleRate,
+                                                   dng::u16 bitsPerSample) noexcept
+    {
+        return fmtTag == 1u &&
+               bitsPerSample == 16u &&
+               (channels == 1u || channels == 2u) &&
+               sampleRate != 0u;
+    }
+
+    [[nodiscard]] inline AudioStatus ParseWavPcm16FromMemory(const dng::u8* fileData,
+                                                             dng::u32 fileSizeBytes,
+                                                             WavPcm16Info& outInfo) noexcept
+    {
+        outInfo = WavPcm16Info{};
+        if (fileData == nullptr || fileSizeBytes < 12u)
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        if (std::memcmp(fileData, "RIFF", 4) != 0 ||
+            std::memcmp(&fileData[8], "WAVE", 4) != 0)
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        bool fmtFound = false;
+        dng::u16 fmtTag = 0;
+        dng::u16 fmtChannels = 0;
+        dng::u32 fmtSampleRate = 0;
+        dng::u16 fmtBitsPerSample = 0;
+
+        dng::u32 cursor = 12u;
+        while (cursor + 8u <= fileSizeBytes)
+        {
+            const dng::u8* chunkHeader = &fileData[cursor];
+            const dng::u32 chunkSize = ReadLe32(&chunkHeader[4]);
+            cursor += 8u;
+
+            if (chunkSize > (fileSizeBytes - cursor))
+            {
+                return AudioStatus::InvalidArg;
+            }
+
+            const dng::u8* chunkData = &fileData[cursor];
+            const bool hasPadByte = (chunkSize & 1u) != 0u;
+
+            if (std::memcmp(chunkHeader, "fmt ", 4) == 0)
+            {
+                if (chunkSize < 16u)
+                {
+                    return AudioStatus::InvalidArg;
+                }
+
+                fmtTag = ReadLe16(&chunkData[0]);
+                fmtChannels = ReadLe16(&chunkData[2]);
+                fmtSampleRate = ReadLe32(&chunkData[4]);
+                fmtBitsPerSample = ReadLe16(&chunkData[14]);
+                fmtFound = true;
+            }
+            else if (std::memcmp(chunkHeader, "data", 4) == 0)
+            {
+                if (!fmtFound ||
+                    !IsSupportedPcmFormat(fmtTag, fmtChannels, fmtSampleRate, fmtBitsPerSample) ||
+                    (chunkSize % 2u) != 0u)
+                {
+                    return AudioStatus::InvalidArg;
+                }
+
+                const dng::u32 sampleCount = chunkSize / 2u;
+                if (sampleCount == 0u ||
+                    (sampleCount % static_cast<dng::u32>(fmtChannels)) != 0u)
+                {
+                    return AudioStatus::InvalidArg;
+                }
+
+                outInfo.channelCount = fmtChannels;
+                outInfo.sampleRate = fmtSampleRate;
+                outInfo.dataOffsetBytes = cursor;
+                outInfo.dataSizeBytes = chunkSize;
+                return AudioStatus::Ok;
+            }
+
+            const dng::u32 nextCursor = cursor + chunkSize + (hasPadByte ? 1u : 0u);
+            if (nextCursor < cursor || nextCursor > fileSizeBytes)
+            {
+                return AudioStatus::InvalidArg;
+            }
+            cursor = nextCursor;
+        }
+
+        return AudioStatus::InvalidArg;
+    }
+
+    [[nodiscard]] inline bool ReadFileRangeExact(fs::FileSystemInterface& fileSystem,
+                                                 fs::PathView path,
+                                                 dng::u64 offsetBytes,
+                                                 void* dst,
+                                                 dng::u64 dstSizeBytes,
+                                                 fs::FsStatus& outStatus) noexcept
+    {
+        outStatus = fs::FsStatus::UnknownError;
+        if (dst == nullptr && dstSizeBytes != 0u)
+        {
+            outStatus = fs::FsStatus::InvalidArg;
+            return false;
+        }
+
+        dng::u64 bytesRead = 0;
+        outStatus = fs::ReadFileRange(fileSystem, path, offsetBytes, dst, dstSizeBytes, bytesRead);
+        return outStatus == fs::FsStatus::Ok && bytesRead == dstSizeBytes;
+    }
+
+    [[nodiscard]] inline AudioStatus ParseWavPcm16FromFile(fs::FileSystemInterface& fileSystem,
+                                                           fs::PathView path,
+                                                           WavPcm16Info& outInfo) noexcept
+    {
+        outInfo = WavPcm16Info{};
+
+        dng::u64 fileSize = 0;
+        const fs::FsStatus sizeStatus = fs::FileSize(fileSystem, path, fileSize);
+        if (sizeStatus != fs::FsStatus::Ok)
+        {
+            return MapFsStatusToAudioStatus(sizeStatus);
+        }
+
+        if (fileSize < 12u)
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        dng::u8 riffHeader[12]{};
+        fs::FsStatus readStatus = fs::FsStatus::UnknownError;
+        if (!ReadFileRangeExact(fileSystem, path, 0u, riffHeader, sizeof(riffHeader), readStatus))
+        {
+            return (readStatus == fs::FsStatus::Ok)
+                ? AudioStatus::InvalidArg
+                : MapFsStatusToAudioStatus(readStatus);
+        }
+
+        if (std::memcmp(riffHeader, "RIFF", 4) != 0 ||
+            std::memcmp(&riffHeader[8], "WAVE", 4) != 0)
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        bool fmtFound = false;
+        dng::u16 fmtTag = 0;
+        dng::u16 fmtChannels = 0;
+        dng::u32 fmtSampleRate = 0;
+        dng::u16 fmtBitsPerSample = 0;
+
+        dng::u64 cursor = 12u;
+        while (cursor + 8u <= fileSize)
+        {
+            dng::u8 chunkHeader[8]{};
+            if (!ReadFileRangeExact(fileSystem, path, cursor, chunkHeader, sizeof(chunkHeader), readStatus))
+            {
+                return (readStatus == fs::FsStatus::Ok)
+                    ? AudioStatus::InvalidArg
+                    : MapFsStatusToAudioStatus(readStatus);
+            }
+            cursor += 8u;
+
+            const dng::u32 chunkSize = ReadLe32(&chunkHeader[4]);
+            if (static_cast<dng::u64>(chunkSize) > (fileSize - cursor))
+            {
+                return AudioStatus::InvalidArg;
+            }
+
+            const bool hasPadByte = (chunkSize & 1u) != 0u;
+
+            if (std::memcmp(chunkHeader, "fmt ", 4) == 0)
+            {
+                if (chunkSize < 16u)
+                {
+                    return AudioStatus::InvalidArg;
+                }
+
+                dng::u8 fmtChunk[16]{};
+                if (!ReadFileRangeExact(fileSystem, path, cursor, fmtChunk, sizeof(fmtChunk), readStatus))
+                {
+                    return (readStatus == fs::FsStatus::Ok)
+                        ? AudioStatus::InvalidArg
+                        : MapFsStatusToAudioStatus(readStatus);
+                }
+
+                fmtTag = ReadLe16(&fmtChunk[0]);
+                fmtChannels = ReadLe16(&fmtChunk[2]);
+                fmtSampleRate = ReadLe32(&fmtChunk[4]);
+                fmtBitsPerSample = ReadLe16(&fmtChunk[14]);
+                fmtFound = true;
+            }
+            else if (std::memcmp(chunkHeader, "data", 4) == 0)
+            {
+                if (!fmtFound ||
+                    !IsSupportedPcmFormat(fmtTag, fmtChannels, fmtSampleRate, fmtBitsPerSample) ||
+                    (chunkSize % 2u) != 0u)
+                {
+                    return AudioStatus::InvalidArg;
+                }
+
+                const dng::u64 sampleCount = static_cast<dng::u64>(chunkSize / 2u);
+                if (sampleCount == 0u ||
+                    (sampleCount % static_cast<dng::u64>(fmtChannels)) != 0u)
+                {
+                    return AudioStatus::InvalidArg;
+                }
+
+                outInfo.channelCount = fmtChannels;
+                outInfo.sampleRate = fmtSampleRate;
+                outInfo.dataOffsetBytes = cursor;
+                outInfo.dataSizeBytes = chunkSize;
+                return AudioStatus::Ok;
+            }
+
+            const dng::u64 nextCursor = cursor + static_cast<dng::u64>(chunkSize) + (hasPadByte ? 1u : 0u);
+            if (nextCursor < cursor || nextCursor > fileSize)
+            {
+                return AudioStatus::InvalidArg;
+            }
+            cursor = nextCursor;
+        }
+
+        return AudioStatus::InvalidArg;
+    }
 } // namespace
 
 AudioClipId WinMmAudio::AllocateClipId() noexcept
@@ -121,6 +361,90 @@ AudioClipId WinMmAudio::AllocateClipId() noexcept
     return AudioClipId{};
 }
 
+void WinMmAudio::ResetVoiceForInvalidClip(VoiceState& voice) noexcept
+{
+    voice.active = false;
+    voice.loop = false;
+    voice.stopAfterGainRamp = false;
+    voice.clip = AudioClipId{};
+    voice.frameCursor = 0.0;
+    voice.currentGain = 0.0f;
+    voice.targetGain = 1.0f;
+    voice.gainStepPerFrame = 0.0f;
+    voice.gainRampFramesRemaining = 0;
+    voice.pitch = 1.0f;
+}
+
+dng::u16 WinMmAudio::AllocateStreamSlot() noexcept
+{
+    for (dng::u16 i = 0; i < kMaxStreamClips; ++i)
+    {
+        if (!s_StreamClips[i].valid)
+        {
+            return i;
+        }
+    }
+    return kInvalidStreamSlot;
+}
+
+bool WinMmAudio::EnsureStreamCache(StreamClipState& streamState,
+                                   dng::u32 sourceFrame) noexcept
+{
+    if (!streamState.valid ||
+        streamState.channelCount == 0u ||
+        streamState.sampleRate == 0u ||
+        streamState.frameCount == 0u ||
+        sourceFrame >= streamState.frameCount)
+    {
+        return false;
+    }
+
+    if (streamState.cacheValid &&
+        sourceFrame >= streamState.cacheStartFrame &&
+        sourceFrame < (streamState.cacheStartFrame + streamState.cacheFrameCount))
+    {
+        return true;
+    }
+
+    const dng::u32 framesToCache = kStreamCacheFrames;
+    const dng::u32 loadStartFrame = (sourceFrame / framesToCache) * framesToCache;
+    dng::u32 loadFrameCount = streamState.frameCount - loadStartFrame;
+    if (loadFrameCount > framesToCache)
+    {
+        loadFrameCount = framesToCache;
+    }
+    if (loadFrameCount == 0u)
+    {
+        return false;
+    }
+
+    const dng::u64 bytesPerFrame = static_cast<dng::u64>(streamState.channelCount) * sizeof(dng::i16);
+    const dng::u64 byteOffset = streamState.dataOffsetBytes +
+        (static_cast<dng::u64>(loadStartFrame) * bytesPerFrame);
+    const dng::u64 byteCount = static_cast<dng::u64>(loadFrameCount) * bytesPerFrame;
+
+    fs::PathView path{};
+    path.data = streamState.path;
+    path.size = streamState.pathSize;
+
+    dng::u64 bytesRead = 0;
+    const fs::FsStatus readStatus = fs::ReadFileRange(streamState.fileSystem,
+                                                      path,
+                                                      byteOffset,
+                                                      streamState.cacheSamples,
+                                                      byteCount,
+                                                      bytesRead);
+    if (readStatus != fs::FsStatus::Ok || bytesRead != byteCount)
+    {
+        return false;
+    }
+
+    streamState.cacheStartFrame = loadStartFrame;
+    streamState.cacheFrameCount = loadFrameCount;
+    streamState.cacheValid = true;
+    return true;
+}
+
 bool WinMmAudio::HasClip(AudioClipId clip) const noexcept
 {
     if (!IsValid(clip) || clip.value > kMaxClips)
@@ -132,177 +456,133 @@ bool WinMmAudio::HasClip(AudioClipId clip) const noexcept
     return m_Clips[index].valid;
 }
 
-AudioStatus WinMmAudio::LoadWavPcm16Clip(const char* path, AudioClipId& outClip) noexcept
+AudioStatus WinMmAudio::LoadWavPcm16Clip(const dng::u8* fileData,
+                                         dng::u32 fileSizeBytes,
+                                         AudioClipId& outClip) noexcept
 {
     outClip = AudioClipId{};
-    if (!m_IsInitialized || path == nullptr)
+    if (!m_IsInitialized || fileData == nullptr || fileSizeBytes < 12u)
     {
         return AudioStatus::InvalidArg;
     }
 
-    std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-    if (fopen_s(&file, path, "rb") != 0)
+    WavPcm16Info info{};
+    const AudioStatus parseStatus = ParseWavPcm16FromMemory(fileData, fileSizeBytes, info);
+    if (parseStatus != AudioStatus::Ok)
     {
-        file = nullptr;
+        return parseStatus;
     }
-#else
-    file = std::fopen(path, "rb");
-#endif
-    if (file == nullptr)
+
+    const dng::u32 sampleCount = info.dataSizeBytes / 2u;
+    AudioClipId clip = AllocateClipId();
+    if (!IsValid(clip))
     {
         return AudioStatus::NotSupported;
     }
 
-    AudioStatus status = AudioStatus::UnknownError;
-    do
+    const dng::u32 clipIndex = clip.value - 1u;
+    if (sampleCount > (kMaxClipSamplePool - m_NextClipSample))
     {
-        dng::u8 riffHeader[12]{};
-        if (std::fread(riffHeader, 1, sizeof(riffHeader), file) != sizeof(riffHeader))
-        {
-            status = AudioStatus::InvalidArg;
-            break;
-        }
+        return AudioStatus::NotSupported;
+    }
 
-        if (std::memcmp(riffHeader, "RIFF", 4) != 0 ||
-            std::memcmp(&riffHeader[8], "WAVE", 4) != 0)
-        {
-            status = AudioStatus::InvalidArg;
-            break;
-        }
+    const dng::u32 sampleOffset = m_NextClipSample;
+    const dng::u64 endOffset = info.dataOffsetBytes + info.dataSizeBytes;
+    if (endOffset > static_cast<dng::u64>(fileSizeBytes))
+    {
+        return AudioStatus::InvalidArg;
+    }
 
-        bool fmtFound = false;
-        dng::u16 fmtTag = 0;
-        dng::u16 fmtChannels = 0;
-        dng::u32 fmtSampleRate = 0;
-        dng::u16 fmtBitsPerSample = 0;
+    const dng::u8* pcmData = fileData + static_cast<size_t>(info.dataOffsetBytes);
+    std::memcpy(&s_ClipSamplePool[sampleOffset], pcmData, static_cast<size_t>(info.dataSizeBytes));
 
-        bool done = false;
-        while (!done)
-        {
-            dng::u8 chunkHeader[8]{};
-            const size_t headerRead = std::fread(chunkHeader, 1, sizeof(chunkHeader), file);
-            if (headerRead != sizeof(chunkHeader))
-            {
-                status = AudioStatus::InvalidArg;
-                break;
-            }
+    ClipState& clipState = m_Clips[clipIndex];
+    clipState.valid = true;
+    clipState.storage = ClipStorageKind::Memory;
+    clipState.channelCount = info.channelCount;
+    clipState.streamSlot = kInvalidStreamSlot;
+    clipState.sampleRate = info.sampleRate;
+    clipState.sampleOffset = sampleOffset;
+    clipState.sampleCount = sampleCount;
+    clipState.streamFrameCount = 0;
+    m_NextClipSample += sampleCount;
+    ++m_LoadedClipCount;
 
-            const dng::u32 chunkSize = ReadLe32(&chunkHeader[4]);
-            const bool hasPadByte = (chunkSize & 1u) != 0u;
+    outClip = clip;
+    return AudioStatus::Ok;
+}
 
-            if (std::memcmp(chunkHeader, "fmt ", 4) == 0)
-            {
-                if (chunkSize < 16u)
-                {
-                    status = AudioStatus::InvalidArg;
-                    break;
-                }
+AudioStatus WinMmAudio::LoadWavPcm16StreamClip(fs::FileSystemInterface& fileSystem,
+                                               fs::PathView path,
+                                               AudioClipId& outClip) noexcept
+{
+    outClip = AudioClipId{};
+    if (!m_IsInitialized || path.data == nullptr || path.size == 0u)
+    {
+        return AudioStatus::InvalidArg;
+    }
+    if (path.size >= kMaxStreamPathBytes)
+    {
+        return AudioStatus::NotSupported;
+    }
 
-                dng::u8 fmtData[40]{};
-                const dng::u32 readSize = (chunkSize < static_cast<dng::u32>(sizeof(fmtData)))
-                    ? chunkSize
-                    : static_cast<dng::u32>(sizeof(fmtData));
+    WavPcm16Info info{};
+    const AudioStatus parseStatus = ParseWavPcm16FromFile(fileSystem, path, info);
+    if (parseStatus != AudioStatus::Ok)
+    {
+        return parseStatus;
+    }
 
-                if (std::fread(fmtData, 1, readSize, file) != readSize)
-                {
-                    status = AudioStatus::InvalidArg;
-                    break;
-                }
+    const dng::u64 sampleCount64 = static_cast<dng::u64>(info.dataSizeBytes / 2u);
+    const dng::u64 frameCount64 = sampleCount64 / static_cast<dng::u64>(info.channelCount);
+    if (frameCount64 == 0u || frameCount64 > static_cast<dng::u64>(MaxU32()))
+    {
+        return AudioStatus::NotSupported;
+    }
 
-                if (chunkSize > readSize && !SkipFileBytes(file, chunkSize - readSize))
-                {
-                    status = AudioStatus::InvalidArg;
-                    break;
-                }
+    const dng::u16 streamSlot = AllocateStreamSlot();
+    if (streamSlot == kInvalidStreamSlot)
+    {
+        return AudioStatus::NotSupported;
+    }
 
-                if (hasPadByte && !SkipFileBytes(file, 1u))
-                {
-                    status = AudioStatus::InvalidArg;
-                    break;
-                }
+    AudioClipId clip = AllocateClipId();
+    if (!IsValid(clip))
+    {
+        return AudioStatus::NotSupported;
+    }
 
-                fmtTag = ReadLe16(&fmtData[0]);
-                fmtChannels = ReadLe16(&fmtData[2]);
-                fmtSampleRate = ReadLe32(&fmtData[4]);
-                fmtBitsPerSample = ReadLe16(&fmtData[14]);
-                fmtFound = true;
-                continue;
-            }
+    StreamClipState& streamState = s_StreamClips[streamSlot];
+    streamState = StreamClipState{};
+    streamState.valid = true;
+    streamState.channelCount = info.channelCount;
+    streamState.pathSize = static_cast<dng::u16>(path.size);
+    streamState.sampleRate = info.sampleRate;
+    streamState.frameCount = static_cast<dng::u32>(frameCount64);
+    streamState.dataOffsetBytes = info.dataOffsetBytes;
+    streamState.dataSizeBytes = info.dataSizeBytes;
+    streamState.cacheStartFrame = 0;
+    streamState.cacheFrameCount = 0;
+    streamState.cacheValid = false;
+    streamState.fileSystem = fileSystem;
+    std::memcpy(streamState.path, path.data, static_cast<size_t>(path.size));
+    streamState.path[path.size] = '\0';
 
-            if (std::memcmp(chunkHeader, "data", 4) == 0)
-            {
-                if (!fmtFound ||
-                    fmtTag != 1u ||
-                    fmtBitsPerSample != 16u ||
-                    (fmtChannels != 1u && fmtChannels != 2u) ||
-                    fmtSampleRate == 0u ||
-                    (chunkSize % 2u) != 0u)
-                {
-                    status = AudioStatus::InvalidArg;
-                    break;
-                }
+    const dng::u32 clipIndex = clip.value - 1u;
+    ClipState& clipState = m_Clips[clipIndex];
+    clipState.valid = true;
+    clipState.storage = ClipStorageKind::Stream;
+    clipState.channelCount = info.channelCount;
+    clipState.streamSlot = streamSlot;
+    clipState.sampleRate = info.sampleRate;
+    clipState.sampleOffset = 0;
+    clipState.sampleCount = 0;
+    clipState.streamFrameCount = static_cast<dng::u32>(frameCount64);
 
-                const dng::u32 sampleCount = chunkSize / 2u;
-                if (sampleCount == 0u ||
-                    (sampleCount % static_cast<dng::u32>(fmtChannels)) != 0u)
-                {
-                    status = AudioStatus::InvalidArg;
-                    break;
-                }
-
-                AudioClipId clip = AllocateClipId();
-                if (!IsValid(clip))
-                {
-                    status = AudioStatus::NotSupported;
-                    break;
-                }
-
-                const dng::u32 clipIndex = clip.value - 1u;
-                if (sampleCount > (kMaxClipSamplePool - m_NextClipSample))
-                {
-                    status = AudioStatus::NotSupported;
-                    break;
-                }
-
-                const dng::u32 sampleOffset = m_NextClipSample;
-                if (std::fread(&s_ClipSamplePool[sampleOffset], 1, chunkSize, file) != chunkSize)
-                {
-                    status = AudioStatus::InvalidArg;
-                    break;
-                }
-
-                if (hasPadByte && !SkipFileBytes(file, 1u))
-                {
-                    status = AudioStatus::InvalidArg;
-                    break;
-                }
-
-                ClipState& clipState = m_Clips[clipIndex];
-                clipState.valid = true;
-                clipState.channelCount = fmtChannels;
-                clipState.sampleRate = fmtSampleRate;
-                clipState.sampleOffset = sampleOffset;
-                clipState.sampleCount = sampleCount;
-                m_NextClipSample += sampleCount;
-                ++m_LoadedClipCount;
-
-                outClip = clip;
-                status = AudioStatus::Ok;
-                done = true;
-                continue;
-            }
-
-            if (!SkipFileBytes(file, chunkSize) || (hasPadByte && !SkipFileBytes(file, 1u)))
-            {
-                status = AudioStatus::InvalidArg;
-                break;
-            }
-        }
-    } while (false);
-
-    std::fclose(file);
-    return status;
+    ++m_LoadedStreamClipCount;
+    ++m_LoadedClipCount;
+    outClip = clip;
+    return AudioStatus::Ok;
 }
 
 AudioStatus WinMmAudio::UnloadClip(AudioClipId clip) noexcept
@@ -332,16 +612,7 @@ AudioStatus WinMmAudio::UnloadClip(AudioClipId clip) noexcept
             continue;
         }
 
-        voice.active = false;
-        voice.loop = false;
-        voice.clip = AudioClipId{};
-        voice.frameCursor = 0.0;
-        voice.currentGain = 0.0f;
-        voice.targetGain = 1.0f;
-        voice.gainStepPerFrame = 0.0f;
-        voice.gainRampFramesRemaining = 0;
-        voice.stopAfterGainRamp = false;
-        voice.pitch = 1.0f;
+        ResetVoiceForInvalidClip(voice);
         ++voice.generation;
         if (voice.generation == 0)
         {
@@ -349,41 +620,61 @@ AudioStatus WinMmAudio::UnloadClip(AudioClipId clip) noexcept
         }
     }
 
-    const dng::u32 removeOffset = removedClip.sampleOffset;
-    const dng::u32 removeSamples = removedClip.sampleCount;
-    const dng::u32 tailOffset = removeOffset + removeSamples;
-    if (tailOffset > m_NextClipSample)
+    if (removedClip.storage == ClipStorageKind::Memory)
     {
-        return AudioStatus::UnknownError;
-    }
-
-    const dng::u32 tailSamples = m_NextClipSample - tailOffset;
-    if (tailSamples > 0)
-    {
-        std::memmove(&s_ClipSamplePool[removeOffset],
-                     &s_ClipSamplePool[tailOffset],
-                     static_cast<size_t>(tailSamples) * sizeof(dng::i16));
-    }
-
-    if (removeSamples > 0 && m_NextClipSample >= removeSamples)
-    {
-        std::memset(&s_ClipSamplePool[m_NextClipSample - removeSamples],
-                    0,
-                    static_cast<size_t>(removeSamples) * sizeof(dng::i16));
-    }
-
-    for (dng::u32 i = 0; i < kMaxClips; ++i)
-    {
-        ClipState& clipState = m_Clips[i];
-        if (!clipState.valid || clipState.sampleOffset <= removeOffset)
+        const dng::u32 removeOffset = removedClip.sampleOffset;
+        const dng::u32 removeSamples = removedClip.sampleCount;
+        const dng::u32 tailOffset = removeOffset + removeSamples;
+        if (tailOffset > m_NextClipSample)
         {
-            continue;
+            return AudioStatus::UnknownError;
         }
-        clipState.sampleOffset -= removeSamples;
+
+        const dng::u32 tailSamples = m_NextClipSample - tailOffset;
+        if (tailSamples > 0)
+        {
+            std::memmove(&s_ClipSamplePool[removeOffset],
+                         &s_ClipSamplePool[tailOffset],
+                         static_cast<size_t>(tailSamples) * sizeof(dng::i16));
+        }
+
+        if (removeSamples > 0 && m_NextClipSample >= removeSamples)
+        {
+            std::memset(&s_ClipSamplePool[m_NextClipSample - removeSamples],
+                        0,
+                        static_cast<size_t>(removeSamples) * sizeof(dng::i16));
+        }
+
+        for (dng::u32 i = 0; i < kMaxClips; ++i)
+        {
+            ClipState& clipState = m_Clips[i];
+            if (!clipState.valid ||
+                clipState.storage != ClipStorageKind::Memory ||
+                clipState.sampleOffset <= removeOffset)
+            {
+                continue;
+            }
+            clipState.sampleOffset -= removeSamples;
+        }
+
+        m_NextClipSample -= removeSamples;
+    }
+    else if (removedClip.storage == ClipStorageKind::Stream)
+    {
+        if (removedClip.streamSlot >= kMaxStreamClips ||
+            !s_StreamClips[removedClip.streamSlot].valid)
+        {
+            return AudioStatus::UnknownError;
+        }
+
+        s_StreamClips[removedClip.streamSlot] = StreamClipState{};
+        if (m_LoadedStreamClipCount > 0)
+        {
+            --m_LoadedStreamClipCount;
+        }
     }
 
     m_Clips[clipIndex] = ClipState{};
-    m_NextClipSample -= removeSamples;
     if (m_LoadedClipCount > 0)
     {
         --m_LoadedClipCount;
@@ -436,6 +727,7 @@ bool WinMmAudio::Init(const WinMmAudioConfig& config) noexcept
     s_GlobalClipPoolInUse = true;
     m_OwnsGlobalClipPool = true;
     std::memset(s_ClipSamplePool, 0, sizeof(s_ClipSamplePool));
+    std::memset(s_StreamClips, 0, sizeof(s_StreamClips));
 
     m_Device = device;
     m_SampleRate = config.sampleRate;
@@ -446,6 +738,7 @@ bool WinMmAudio::Init(const WinMmAudioConfig& config) noexcept
     m_NextClipValue = 1;
     m_NextClipSample = 0;
     m_LoadedClipCount = 0;
+    m_LoadedStreamClipCount = 0;
 
     const dng::u32 bytesPerBuffer =
         m_FramesPerBuffer * static_cast<dng::u32>(m_ChannelCount) * static_cast<dng::u32>(sizeof(dng::i16));
@@ -502,6 +795,7 @@ void WinMmAudio::Shutdown() noexcept
     m_NextClipValue = 1;
     m_NextClipSample = 0;
     m_LoadedClipCount = 0;
+    m_LoadedStreamClipCount = 0;
     m_FramesPerBuffer = 1024;
     m_SampleRate = 48000;
     m_ChannelCount = 2;
@@ -514,6 +808,7 @@ void WinMmAudio::Shutdown() noexcept
     if (m_OwnsGlobalClipPool)
     {
         std::memset(s_ClipSamplePool, 0, sizeof(s_ClipSamplePool));
+        std::memset(s_StreamClips, 0, sizeof(s_StreamClips));
         s_GlobalClipPoolInUse = false;
         m_OwnsGlobalClipPool = false;
     }
@@ -610,15 +905,7 @@ AudioStatus WinMmAudio::Stop(AudioVoiceId voice) noexcept
     voiceState.targetGain = 0.0f;
     if (voiceState.currentGain <= 0.0f)
     {
-        voiceState.active = false;
-        voiceState.loop = false;
-        voiceState.clip = AudioClipId{};
-        voiceState.frameCursor = 0.0;
-        voiceState.currentGain = 0.0f;
-        voiceState.gainStepPerFrame = 0.0f;
-        voiceState.gainRampFramesRemaining = 0;
-        voiceState.pitch = 1.0f;
-        voiceState.stopAfterGainRamp = false;
+        ResetVoiceForInvalidClip(voiceState);
         return AudioStatus::Ok;
     }
 
@@ -662,18 +949,28 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
         return;
     }
 
-    auto resetVoice = [](VoiceState& voice) noexcept
+    auto sampleStreamFrame = [this](StreamClipState& streamClip,
+                                    dng::u32 frameIndex,
+                                    float& outLeft,
+                                    float& outRight) noexcept -> bool
     {
-        voice.active = false;
-        voice.loop = false;
-        voice.stopAfterGainRamp = false;
-        voice.clip = AudioClipId{};
-        voice.frameCursor = 0.0;
-        voice.currentGain = 0.0f;
-        voice.targetGain = 1.0f;
-        voice.gainStepPerFrame = 0.0f;
-        voice.gainRampFramesRemaining = 0;
-        voice.pitch = 1.0f;
+        if (!EnsureStreamCache(streamClip, frameIndex))
+        {
+            return false;
+        }
+
+        const dng::u32 localFrame = frameIndex - streamClip.cacheStartFrame;
+        if (localFrame >= streamClip.cacheFrameCount)
+        {
+            return false;
+        }
+
+        const dng::u32 base = localFrame * static_cast<dng::u32>(streamClip.channelCount);
+        outLeft = Pcm16ToFloat(streamClip.cacheSamples[base]);
+        outRight = (streamClip.channelCount > 1u)
+            ? Pcm16ToFloat(streamClip.cacheSamples[base + 1u])
+            : outLeft;
+        return true;
     };
 
     const double outputSampleRate = static_cast<double>(m_SampleRate);
@@ -689,14 +986,44 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
         const ClipState& clip = m_Clips[voice.clip.value - 1u];
         if (!clip.valid || clip.channelCount == 0 || clip.sampleRate == 0)
         {
-            resetVoice(voice);
+            ResetVoiceForInvalidClip(voice);
             continue;
         }
 
-        const dng::u32 clipFrameCount = clip.sampleCount / static_cast<dng::u32>(clip.channelCount);
+        StreamClipState* streamState = nullptr;
+        dng::u32 clipFrameCount = 0;
+        if (clip.storage == ClipStorageKind::Memory)
+        {
+            clipFrameCount = clip.sampleCount / static_cast<dng::u32>(clip.channelCount);
+        }
+        else if (clip.storage == ClipStorageKind::Stream)
+        {
+            if (clip.streamSlot >= kMaxStreamClips)
+            {
+                ResetVoiceForInvalidClip(voice);
+                continue;
+            }
+
+            streamState = &s_StreamClips[clip.streamSlot];
+            if (!streamState->valid ||
+                streamState->channelCount != clip.channelCount ||
+                streamState->sampleRate != clip.sampleRate)
+            {
+                ResetVoiceForInvalidClip(voice);
+                continue;
+            }
+
+            clipFrameCount = streamState->frameCount;
+        }
+        else
+        {
+            ResetVoiceForInvalidClip(voice);
+            continue;
+        }
+
         if (clipFrameCount == 0)
         {
-            resetVoice(voice);
+            ResetVoiceForInvalidClip(voice);
             continue;
         }
 
@@ -704,7 +1031,7 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
             (static_cast<double>(clip.sampleRate) / outputSampleRate);
         if (!(sourceStep > 0.0))
         {
-            resetVoice(voice);
+            ResetVoiceForInvalidClip(voice);
             continue;
         }
 
@@ -719,7 +1046,7 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
                 }
                 else
                 {
-                    resetVoice(voice);
+                    ResetVoiceForInvalidClip(voice);
                     break;
                 }
             }
@@ -742,18 +1069,38 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
                 srcFrameB = voice.loop ? 0u : srcFrameA;
             }
 
-            const dng::u32 srcBaseA = clip.sampleOffset + srcFrameA * static_cast<dng::u32>(clip.channelCount);
-            const dng::u32 srcBaseB = clip.sampleOffset + srcFrameB * static_cast<dng::u32>(clip.channelCount);
+            float srcLeftA = 0.0f;
+            float srcRightA = 0.0f;
+            float srcLeftB = 0.0f;
+            float srcRightB = 0.0f;
+            bool sampleOk = true;
 
-            const float srcLeftA = Pcm16ToFloat(s_ClipSamplePool[srcBaseA]);
-            const float srcRightA = (clip.channelCount > 1u)
-                ? Pcm16ToFloat(s_ClipSamplePool[srcBaseA + 1u])
-                : srcLeftA;
+            if (clip.storage == ClipStorageKind::Memory)
+            {
+                const dng::u32 srcBaseA = clip.sampleOffset + srcFrameA * static_cast<dng::u32>(clip.channelCount);
+                const dng::u32 srcBaseB = clip.sampleOffset + srcFrameB * static_cast<dng::u32>(clip.channelCount);
 
-            const float srcLeftB = Pcm16ToFloat(s_ClipSamplePool[srcBaseB]);
-            const float srcRightB = (clip.channelCount > 1u)
-                ? Pcm16ToFloat(s_ClipSamplePool[srcBaseB + 1u])
-                : srcLeftB;
+                srcLeftA = Pcm16ToFloat(s_ClipSamplePool[srcBaseA]);
+                srcRightA = (clip.channelCount > 1u)
+                    ? Pcm16ToFloat(s_ClipSamplePool[srcBaseA + 1u])
+                    : srcLeftA;
+
+                srcLeftB = Pcm16ToFloat(s_ClipSamplePool[srcBaseB]);
+                srcRightB = (clip.channelCount > 1u)
+                    ? Pcm16ToFloat(s_ClipSamplePool[srcBaseB + 1u])
+                    : srcLeftB;
+            }
+            else
+            {
+                sampleOk = sampleStreamFrame(*streamState, srcFrameA, srcLeftA, srcRightA) &&
+                           sampleStreamFrame(*streamState, srcFrameB, srcLeftB, srcRightB);
+            }
+
+            if (!sampleOk)
+            {
+                ResetVoiceForInvalidClip(voice);
+                break;
+            }
 
             const float srcLeft = Lerp(srcLeftA, srcLeftB, frac);
             const float srcRight = Lerp(srcRightA, srcRightB, frac);
@@ -786,7 +1133,7 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
                 voice.gainRampFramesRemaining == 0 &&
                 voice.currentGain <= 0.0f)
             {
-                resetVoice(voice);
+                ResetVoiceForInvalidClip(voice);
                 break;
             }
 
