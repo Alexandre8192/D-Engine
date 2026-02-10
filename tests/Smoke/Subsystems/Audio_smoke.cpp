@@ -109,6 +109,69 @@ int RunAudioSmoke()
         return 21;
     }
 
+    {
+        // Saturate the command queue with SetGain commands on one active voice.
+        AudioPlayParams queuePlay{};
+        queuePlay.clip = MakeAudioClipId(9);
+        queuePlay.gain = 1.0f;
+        queuePlay.pitch = 1.0f;
+        queuePlay.loop = true;
+
+        AudioVoiceId queueVoice{};
+        if (Play(state, queuePlay, queueVoice) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(state);
+            return 25;
+        }
+
+        float flushBuffer[4]{};
+        AudioMixParams flushMix{};
+        flushMix.outSamples = flushBuffer;
+        flushMix.outputCapacitySamples = 4;
+        flushMix.sampleRate = 48000;
+        flushMix.channelCount = 2;
+        flushMix.requestedFrames = 1;
+        if (Mix(state, flushMix) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(state);
+            return 26;
+        }
+
+        for (dng::u32 i = 0; i < kAudioSystemMaxCommands; ++i)
+        {
+            const float gain = ((i & 1u) == 0u) ? 0.25f : 0.75f;
+            if (SetGain(state, queueVoice, gain) != AudioStatus::Ok)
+            {
+                ShutdownAudioSystem(state);
+                return 27;
+            }
+        }
+
+        if (SetGain(state, queueVoice, 0.5f) != AudioStatus::NotSupported)
+        {
+            ShutdownAudioSystem(state);
+            return 28;
+        }
+
+        if (GetPendingCommandCount(state) != kAudioSystemMaxCommands)
+        {
+            ShutdownAudioSystem(state);
+            return 29;
+        }
+
+        if (Mix(state, flushMix) != AudioStatus::Ok || GetPendingCommandCount(state) != 0)
+        {
+            ShutdownAudioSystem(state);
+            return 30;
+        }
+
+        if (Stop(state, queueVoice) != AudioStatus::Ok || Mix(state, flushMix) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(state);
+            return 31;
+        }
+    }
+
     float buffer[256]{};
     for (float& sample : buffer)
     {
@@ -220,6 +283,25 @@ int RunAudioSmoke()
         {
             ShutdownAudioSystem(platformAutoState);
             return 15;
+        }
+
+        AudioSystemConfig secondPlatformConfig{};
+        secondPlatformConfig.backend = AudioSystemBackend::Platform;
+        secondPlatformConfig.fallbackToNullOnInitFailure = false;
+
+        AudioSystemState secondPlatformState{};
+        if (InitAudioSystem(secondPlatformState, secondPlatformConfig))
+        {
+            ShutdownAudioSystem(secondPlatformState);
+            ShutdownAudioSystem(platformAutoState);
+            return 32;
+        }
+
+        if (secondPlatformState.isInitialized)
+        {
+            ShutdownAudioSystem(secondPlatformState);
+            ShutdownAudioSystem(platformAutoState);
+            return 33;
         }
     }
 

@@ -5,6 +5,8 @@
 // Notes   : No exceptions/RTTI. Small registry of microbenches with steady_clock timing.
 // ============================================================================
 
+#include "Core/Audio/AudioSystem.hpp"
+
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -215,6 +217,43 @@ namespace
         sink ^= acc;
     }
 
+    void Bench_AudioMixNull1024fStereo(int iterations, volatile std::uint64_t& sink)
+    {
+        static dng::audio::AudioSystemState state{};
+        static bool initialized = false;
+        if (!initialized)
+        {
+            dng::audio::AudioSystemConfig config{};
+            config.backend = dng::audio::AudioSystemBackend::Null;
+            initialized = dng::audio::InitAudioSystem(state, config);
+        }
+        if (!initialized)
+        {
+            return;
+        }
+
+        float buffer[2048]{};
+        dng::audio::AudioMixParams mix{};
+        mix.outSamples = buffer;
+        mix.outputCapacitySamples = 2048;
+        mix.sampleRate = 48000;
+        mix.channelCount = 2;
+        mix.requestedFrames = 1024;
+        mix.deltaTimeSec = 1.0f / 60.0f;
+
+        std::uint64_t acc = 0;
+        for (int i = 0; i < iterations; ++i)
+        {
+            mix.frameIndex = static_cast<dng::u64>(i);
+            if (dng::audio::Mix(state, mix) == dng::audio::AudioStatus::Ok)
+            {
+                acc += mix.writtenSamples;
+                acc += (buffer[0] == 0.0f) ? 1ull : 2ull;
+            }
+        }
+        sink ^= acc;
+    }
+
     void WriteJson(const std::filesystem::path& outPath, const std::vector<BenchSample>& samples)
     {
         std::ofstream os(outPath.string(), std::ios::binary);
@@ -262,11 +301,13 @@ int main(int argc, char** argv)
     const int baseIter = args.iterations;
     const int vecIter = args.iterations > 1 ? args.iterations / 2 : 1;
     const int memcpyIter = args.iterations > 1 ? args.iterations / 2 : 1;
+    const int audioMixIter = args.iterations > 1000 ? args.iterations / 1000 : 1000;
 
-    const std::array<Benchmark, 3> benches = {{
+    const std::array<Benchmark, 4> benches = {{
         {"baseline_loop", baseIter, 0.0, 0.0, &Bench_BaselineLoop},
         {"vec3_dot", vecIter, 12.0, 0.0, &Bench_Vec3Dot},
         {"memcpy_64", memcpyIter, 512.0, 0.0, &Bench_Memcpy64},
+        {"audio_mix_null_1024f_stereo", audioMixIter, 8192.0, 0.0, &Bench_AudioMixNull1024fStereo},
     }};
 
     std::vector<BenchSample> results;
