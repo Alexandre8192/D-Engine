@@ -5,7 +5,8 @@
 //           producing audible output. Useful for tests, tools, and CI.
 // Contract: Header-only, no exceptions/RTTI, no allocations, deterministic.
 //           Writes zeroed samples when a valid output buffer is provided.
-// Notes   : Behaves as a pull-only mixer stub and validates basic arguments.
+// Notes   : Behaves as a pull-only mixer stub and validates basic arguments,
+//           including pause/resume/seek and simple bus gains.
 // ============================================================================
 
 #pragma once
@@ -29,7 +30,7 @@ namespace dng::audio
 
         [[nodiscard]] AudioStatus Play(AudioVoiceId voice, const AudioPlayParams& params) noexcept
         {
-            if (!IsValid(voice) || !IsValid(params.clip))
+            if (!IsValid(voice) || !IsValid(params.clip) || !IsValid(params.bus))
             {
                 return AudioStatus::InvalidArg;
             }
@@ -47,9 +48,33 @@ namespace dng::audio
             return IsValid(voice) ? AudioStatus::Ok : AudioStatus::InvalidArg;
         }
 
+        [[nodiscard]] AudioStatus Pause(AudioVoiceId voice) noexcept
+        {
+            return IsValid(voice) ? AudioStatus::Ok : AudioStatus::InvalidArg;
+        }
+
+        [[nodiscard]] AudioStatus Resume(AudioVoiceId voice) noexcept
+        {
+            return IsValid(voice) ? AudioStatus::Ok : AudioStatus::InvalidArg;
+        }
+
+        [[nodiscard]] AudioStatus Seek(AudioVoiceId voice, dng::u32) noexcept
+        {
+            return IsValid(voice) ? AudioStatus::Ok : AudioStatus::InvalidArg;
+        }
+
         [[nodiscard]] AudioStatus SetGain(AudioVoiceId voice, float gain) noexcept
         {
             if (!IsValid(voice) || !(gain >= 0.0f))
+            {
+                return AudioStatus::InvalidArg;
+            }
+            return AudioStatus::Ok;
+        }
+
+        [[nodiscard]] AudioStatus SetBusGain(AudioBus bus, float gain) noexcept
+        {
+            if (!IsValid(bus) || !(gain >= 0.0f))
             {
                 return AudioStatus::InvalidArg;
             }

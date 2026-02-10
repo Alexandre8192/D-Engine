@@ -11,8 +11,10 @@
 //           mixes voices before submitting to the default output device.
 //           Uses short gain ramps on play/stop/set-gain to reduce clicks and
 //           linear resampling when clip sample-rate differs from device rate.
-//           Clip samples use a shared static pool, so only one initialized
-//           WinMmAudio instance can own the clip pool at a time.
+//           Clip samples and stream caches use shared static pools, so only one
+//           initialized WinMmAudio instance can own those pools at a time.
+//           Streamed clips require a bound FileSystem interface that remains
+//           valid until streamed clips are unloaded and unbound.
 // ============================================================================
 
 #pragma once
@@ -45,19 +47,28 @@ namespace dng::audio
         [[nodiscard]] AudioCaps GetCaps() const noexcept;
         [[nodiscard]] AudioStatus Play(AudioVoiceId voice, const AudioPlayParams& params) noexcept;
         [[nodiscard]] AudioStatus Stop(AudioVoiceId voice) noexcept;
+        [[nodiscard]] AudioStatus Pause(AudioVoiceId voice) noexcept;
+        [[nodiscard]] AudioStatus Resume(AudioVoiceId voice) noexcept;
+        [[nodiscard]] AudioStatus Seek(AudioVoiceId voice, dng::u32 frameIndex) noexcept;
         [[nodiscard]] AudioStatus SetGain(AudioVoiceId voice, float gain) noexcept;
+        [[nodiscard]] AudioStatus SetBusGain(AudioBus bus, float gain) noexcept;
         [[nodiscard]] AudioStatus Mix(AudioMixParams& params) noexcept;
+        [[nodiscard]] AudioStatus BindStreamFileSystem(fs::FileSystemInterface& fileSystem) noexcept;
+        [[nodiscard]] AudioStatus UnbindStreamFileSystem() noexcept;
         [[nodiscard]] AudioStatus LoadWavPcm16Clip(const dng::u8* fileData,
                                                    dng::u32 fileSizeBytes,
                                                    AudioClipId& outClip) noexcept;
-        [[nodiscard]] AudioStatus LoadWavPcm16StreamClip(fs::FileSystemInterface& fileSystem,
-                                                         fs::PathView path,
+        [[nodiscard]] AudioStatus LoadWavPcm16StreamClip(fs::PathView path,
                                                          AudioClipId& outClip) noexcept;
         [[nodiscard]] AudioStatus UnloadClip(AudioClipId clip) noexcept;
         [[nodiscard]] bool HasClip(AudioClipId clip) const noexcept;
         [[nodiscard]] static constexpr dng::u32 GetMaxClipCount() noexcept
         {
             return kMaxClips;
+        }
+        [[nodiscard]] static constexpr dng::u32 GetMaxStreamClipCount() noexcept
+        {
+            return kMaxStreamClips;
         }
         [[nodiscard]] constexpr dng::u32 GetLoadedStreamClipCount() const noexcept
         {
@@ -96,6 +107,7 @@ namespace dng::audio
         static constexpr dng::u32 kStreamCacheFrames = 2048;
         static constexpr dng::u32 kStreamCacheSamples = kStreamCacheFrames * kMaxChannels;
         static constexpr dng::u32 kMaxStreamPathBytes = 260;
+        static constexpr dng::u32 kAudioBusCount = static_cast<dng::u32>(AudioBus::Count);
         static constexpr dng::u16 kGainRampFrames = 128;
         static constexpr dng::u16 kInvalidStreamSlot = 0xFFFFu;
         static constexpr dng::u32 kWaveHeaderStorageBytes = 128;
@@ -132,8 +144,7 @@ namespace dng::audio
             dng::u32                cacheStartFrame = 0;
             dng::u32                cacheFrameCount = 0;
             bool                    cacheValid = false;
-            dng::u8                 reserved[3]{};
-            fs::FileSystemInterface fileSystem{};
+            dng::u8                 reserved[7]{};
             char                    path[kMaxStreamPathBytes]{};
             dng::i16                cacheSamples[kStreamCacheSamples]{};
         };
@@ -148,10 +159,12 @@ namespace dng::audio
             float       pitch = 1.0f;
             dng::u32    generation = 1;
             dng::u16    gainRampFramesRemaining = 0;
+            AudioBus    bus = AudioBus::Master;
             bool        stopAfterGainRamp = false;
             bool        active = false;
+            bool        paused = false;
             bool        loop = false;
-            dng::u8     reserved = 0;
+            dng::u8     reserved[3]{};
         };
 
         void MixVoicesToBuffer(float* outSamples,
@@ -162,6 +175,8 @@ namespace dng::audio
         [[nodiscard]] dng::u16 AllocateStreamSlot() noexcept;
         [[nodiscard]] bool EnsureStreamCache(StreamClipState& streamState,
                                              dng::u32 sourceFrame) noexcept;
+        [[nodiscard]] bool IsSameInterface(const fs::FileSystemInterface& fileSystem) const noexcept;
+        [[nodiscard]] dng::u32 ToBusIndex(AudioBus bus) const noexcept;
         static void ResetVoiceForInvalidClip(VoiceState& voice) noexcept;
 
         void* m_Device = nullptr;
@@ -180,9 +195,12 @@ namespace dng::audio
         dng::u32 m_SampleRate = 48000;
         dng::u16 m_ChannelCount = 2;
         dng::u16 m_Reserved = 0;
+        fs::FileSystemInterface m_StreamFileSystem{};
+        float    m_BusGains[kAudioBusCount]{1.0f, 1.0f, 1.0f};
         bool     m_IsInitialized = false;
+        bool     m_HasStreamFileSystem = false;
         bool     m_OwnsGlobalClipPool = false;
-        dng::u8  m_Padding[6]{};
+        dng::u8  m_Padding[5]{};
         dng::u64 m_UnderrunCount = 0;
         dng::u64 m_SubmitErrorCount = 0;
 

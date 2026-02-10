@@ -361,9 +361,29 @@ AudioClipId WinMmAudio::AllocateClipId() noexcept
     return AudioClipId{};
 }
 
+bool WinMmAudio::IsSameInterface(const fs::FileSystemInterface& fileSystem) const noexcept
+{
+    return m_StreamFileSystem.userData == fileSystem.userData &&
+           m_StreamFileSystem.vtable.exists == fileSystem.vtable.exists &&
+           m_StreamFileSystem.vtable.fileSize == fileSystem.vtable.fileSize &&
+           m_StreamFileSystem.vtable.readFile == fileSystem.vtable.readFile &&
+           m_StreamFileSystem.vtable.readFileRange == fileSystem.vtable.readFileRange &&
+           m_StreamFileSystem.vtable.getCaps == fileSystem.vtable.getCaps;
+}
+
+dng::u32 WinMmAudio::ToBusIndex(AudioBus bus) const noexcept
+{
+    if (!IsValid(bus))
+    {
+        return static_cast<dng::u32>(AudioBus::Master);
+    }
+    return static_cast<dng::u32>(bus);
+}
+
 void WinMmAudio::ResetVoiceForInvalidClip(VoiceState& voice) noexcept
 {
     voice.active = false;
+    voice.paused = false;
     voice.loop = false;
     voice.stopAfterGainRamp = false;
     voice.clip = AudioClipId{};
@@ -373,6 +393,7 @@ void WinMmAudio::ResetVoiceForInvalidClip(VoiceState& voice) noexcept
     voice.gainStepPerFrame = 0.0f;
     voice.gainRampFramesRemaining = 0;
     voice.pitch = 1.0f;
+    voice.bus = AudioBus::Master;
 }
 
 dng::u16 WinMmAudio::AllocateStreamSlot() noexcept
@@ -391,6 +412,7 @@ bool WinMmAudio::EnsureStreamCache(StreamClipState& streamState,
                                    dng::u32 sourceFrame) noexcept
 {
     if (!streamState.valid ||
+        !m_HasStreamFileSystem ||
         streamState.channelCount == 0u ||
         streamState.sampleRate == 0u ||
         streamState.frameCount == 0u ||
@@ -428,7 +450,7 @@ bool WinMmAudio::EnsureStreamCache(StreamClipState& streamState,
     path.size = streamState.pathSize;
 
     dng::u64 bytesRead = 0;
-    const fs::FsStatus readStatus = fs::ReadFileRange(streamState.fileSystem,
+    const fs::FsStatus readStatus = fs::ReadFileRange(m_StreamFileSystem,
                                                       path,
                                                       byteOffset,
                                                       streamState.cacheSamples,
@@ -512,12 +534,57 @@ AudioStatus WinMmAudio::LoadWavPcm16Clip(const dng::u8* fileData,
     return AudioStatus::Ok;
 }
 
-AudioStatus WinMmAudio::LoadWavPcm16StreamClip(fs::FileSystemInterface& fileSystem,
-                                               fs::PathView path,
+AudioStatus WinMmAudio::BindStreamFileSystem(fs::FileSystemInterface& fileSystem) noexcept
+{
+    if (!m_IsInitialized)
+    {
+        return AudioStatus::NotSupported;
+    }
+
+    if (fileSystem.userData == nullptr ||
+        fileSystem.vtable.getCaps == nullptr ||
+        fileSystem.vtable.exists == nullptr ||
+        fileSystem.vtable.fileSize == nullptr ||
+        fileSystem.vtable.readFile == nullptr ||
+        fileSystem.vtable.readFileRange == nullptr)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    if (m_HasStreamFileSystem && !IsSameInterface(fileSystem))
+    {
+        // Stream FS cannot be swapped while backend is active.
+        return AudioStatus::NotSupported;
+    }
+
+    m_StreamFileSystem = fileSystem;
+    m_HasStreamFileSystem = true;
+    return AudioStatus::Ok;
+}
+
+AudioStatus WinMmAudio::UnbindStreamFileSystem() noexcept
+{
+    if (!m_IsInitialized)
+    {
+        return AudioStatus::NotSupported;
+    }
+
+    if (m_LoadedStreamClipCount != 0u)
+    {
+        // Keep FS alive while streamed clips still reference its paths.
+        return AudioStatus::NotSupported;
+    }
+
+    m_StreamFileSystem = fs::FileSystemInterface{};
+    m_HasStreamFileSystem = false;
+    return AudioStatus::Ok;
+}
+
+AudioStatus WinMmAudio::LoadWavPcm16StreamClip(fs::PathView path,
                                                AudioClipId& outClip) noexcept
 {
     outClip = AudioClipId{};
-    if (!m_IsInitialized || path.data == nullptr || path.size == 0u)
+    if (!m_IsInitialized || !m_HasStreamFileSystem || path.data == nullptr || path.size == 0u)
     {
         return AudioStatus::InvalidArg;
     }
@@ -527,7 +594,7 @@ AudioStatus WinMmAudio::LoadWavPcm16StreamClip(fs::FileSystemInterface& fileSyst
     }
 
     WavPcm16Info info{};
-    const AudioStatus parseStatus = ParseWavPcm16FromFile(fileSystem, path, info);
+    const AudioStatus parseStatus = ParseWavPcm16FromFile(m_StreamFileSystem, path, info);
     if (parseStatus != AudioStatus::Ok)
     {
         return parseStatus;
@@ -564,7 +631,6 @@ AudioStatus WinMmAudio::LoadWavPcm16StreamClip(fs::FileSystemInterface& fileSyst
     streamState.cacheStartFrame = 0;
     streamState.cacheFrameCount = 0;
     streamState.cacheValid = false;
-    streamState.fileSystem = fileSystem;
     std::memcpy(streamState.path, path.data, static_cast<size_t>(path.size));
     streamState.path[path.size] = '\0';
 
@@ -739,6 +805,11 @@ bool WinMmAudio::Init(const WinMmAudioConfig& config) noexcept
     m_NextClipSample = 0;
     m_LoadedClipCount = 0;
     m_LoadedStreamClipCount = 0;
+    m_StreamFileSystem = fs::FileSystemInterface{};
+    m_HasStreamFileSystem = false;
+    m_BusGains[0] = 1.0f;
+    m_BusGains[1] = 1.0f;
+    m_BusGains[2] = 1.0f;
 
     const dng::u32 bytesPerBuffer =
         m_FramesPerBuffer * static_cast<dng::u32>(m_ChannelCount) * static_cast<dng::u32>(sizeof(dng::i16));
@@ -799,6 +870,11 @@ void WinMmAudio::Shutdown() noexcept
     m_FramesPerBuffer = 1024;
     m_SampleRate = 48000;
     m_ChannelCount = 2;
+    m_StreamFileSystem = fs::FileSystemInterface{};
+    m_HasStreamFileSystem = false;
+    m_BusGains[0] = 1.0f;
+    m_BusGains[1] = 1.0f;
+    m_BusGains[2] = 1.0f;
     m_IsInitialized = false;
     m_UnderrunCount = 0;
     m_SubmitErrorCount = 0;
@@ -855,6 +931,7 @@ AudioStatus WinMmAudio::Play(AudioVoiceId voice, const AudioPlayParams& params) 
         voice.slot >= kMaxVoices ||
         !IsValid(params.clip) ||
         !HasClip(params.clip) ||
+        !IsValid(params.bus) ||
         !(params.gain >= 0.0f) ||
         !(params.pitch > 0.0f))
     {
@@ -879,7 +956,9 @@ AudioStatus WinMmAudio::Play(AudioVoiceId voice, const AudioPlayParams& params) 
     voiceState.generation = voice.generation;
     voiceState.stopAfterGainRamp = false;
     voiceState.active = true;
+    voiceState.paused = false;
     voiceState.loop = params.loop;
+    voiceState.bus = params.bus;
     return AudioStatus::Ok;
 }
 
@@ -898,9 +977,12 @@ AudioStatus WinMmAudio::Stop(AudioVoiceId voice) noexcept
     VoiceState& voiceState = m_Voices[voice.slot];
     if (!voiceState.active || voiceState.generation != voice.generation)
     {
-        return AudioStatus::InvalidArg;
+        // Stop is idempotent for stale handles because async stream faults can
+        // retire a voice before the queued stop command is flushed.
+        return AudioStatus::Ok;
     }
 
+    voiceState.paused = false;
     voiceState.stopAfterGainRamp = true;
     voiceState.targetGain = 0.0f;
     if (voiceState.currentGain <= 0.0f)
@@ -911,6 +993,106 @@ AudioStatus WinMmAudio::Stop(AudioVoiceId voice) noexcept
 
     voiceState.gainRampFramesRemaining = kGainRampFrames;
     voiceState.gainStepPerFrame = -voiceState.currentGain / static_cast<float>(kGainRampFrames);
+    return AudioStatus::Ok;
+}
+
+AudioStatus WinMmAudio::Pause(AudioVoiceId voice) noexcept
+{
+    if (!m_IsInitialized)
+    {
+        return AudioStatus::NotSupported;
+    }
+
+    if (!IsValid(voice) || voice.slot >= kMaxVoices)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    VoiceState& voiceState = m_Voices[voice.slot];
+    if (!voiceState.active || voiceState.generation != voice.generation)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    voiceState.paused = true;
+    return AudioStatus::Ok;
+}
+
+AudioStatus WinMmAudio::Resume(AudioVoiceId voice) noexcept
+{
+    if (!m_IsInitialized)
+    {
+        return AudioStatus::NotSupported;
+    }
+
+    if (!IsValid(voice) || voice.slot >= kMaxVoices)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    VoiceState& voiceState = m_Voices[voice.slot];
+    if (!voiceState.active || voiceState.generation != voice.generation)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    voiceState.paused = false;
+    return AudioStatus::Ok;
+}
+
+AudioStatus WinMmAudio::Seek(AudioVoiceId voice, dng::u32 frameIndex) noexcept
+{
+    if (!m_IsInitialized)
+    {
+        return AudioStatus::NotSupported;
+    }
+
+    if (!IsValid(voice) || voice.slot >= kMaxVoices)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    VoiceState& voiceState = m_Voices[voice.slot];
+    if (!voiceState.active || voiceState.generation != voice.generation)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    if (!IsValid(voiceState.clip) || voiceState.clip.value > kMaxClips)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    const ClipState& clip = m_Clips[voiceState.clip.value - 1u];
+    if (!clip.valid || clip.channelCount == 0u)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    dng::u32 clipFrameCount = 0;
+    if (clip.storage == ClipStorageKind::Memory)
+    {
+        clipFrameCount = clip.sampleCount / static_cast<dng::u32>(clip.channelCount);
+    }
+    else if (clip.storage == ClipStorageKind::Stream)
+    {
+        if (clip.streamSlot >= kMaxStreamClips || !s_StreamClips[clip.streamSlot].valid)
+        {
+            return AudioStatus::InvalidArg;
+        }
+        clipFrameCount = s_StreamClips[clip.streamSlot].frameCount;
+    }
+    else
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    if (clipFrameCount == 0u || frameIndex >= clipFrameCount)
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    voiceState.frameCursor = static_cast<double>(frameIndex);
     return AudioStatus::Ok;
 }
 
@@ -937,6 +1119,22 @@ AudioStatus WinMmAudio::SetGain(AudioVoiceId voice, float gain) noexcept
     voiceState.gainRampFramesRemaining = kGainRampFrames;
     voiceState.gainStepPerFrame =
         (voiceState.targetGain - voiceState.currentGain) / static_cast<float>(kGainRampFrames);
+    return AudioStatus::Ok;
+}
+
+AudioStatus WinMmAudio::SetBusGain(AudioBus bus, float gain) noexcept
+{
+    if (!m_IsInitialized)
+    {
+        return AudioStatus::NotSupported;
+    }
+
+    if (!IsValid(bus) || !(gain >= 0.0f))
+    {
+        return AudioStatus::InvalidArg;
+    }
+
+    m_BusGains[ToBusIndex(bus)] = gain;
     return AudioStatus::Ok;
 }
 
@@ -978,7 +1176,7 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
     for (dng::u32 voiceIndex = 0; voiceIndex < kMaxVoices; ++voiceIndex)
     {
         VoiceState& voice = m_Voices[voiceIndex];
-        if (!voice.active || !IsValid(voice.clip) || voice.clip.value > kMaxClips)
+        if (!voice.active || voice.paused || !IsValid(voice.clip) || voice.clip.value > kMaxClips)
         {
             continue;
         }
@@ -1104,7 +1302,13 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
 
             const float srcLeft = Lerp(srcLeftA, srcLeftB, frac);
             const float srcRight = Lerp(srcRightA, srcRightB, frac);
-            const float gain = voice.currentGain;
+            const float masterGain = m_BusGains[ToBusIndex(AudioBus::Master)];
+            float scopedBusGain = 1.0f;
+            if (voice.bus != AudioBus::Master)
+            {
+                scopedBusGain = m_BusGains[ToBusIndex(voice.bus)];
+            }
+            const float gain = voice.currentGain * scopedBusGain * masterGain;
 
             if (outChannelCount == 1u)
             {

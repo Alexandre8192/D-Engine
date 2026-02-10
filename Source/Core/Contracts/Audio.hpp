@@ -6,9 +6,10 @@
 // Contract: Header-only, no exceptions/RTTI, engine-absolute includes only.
 //           All public data is POD/trivially copyable. Caller owns output
 //           buffers; backends only write within declared capacity.
-// Notes   : M0+ exposes deterministic pull-mix plus minimal voice controls
-//           (Play/Stop/SetGain) so systems can queue commands while keeping
-//           backend APIs hidden. Real backends can map this to WASAPI/XAudio/etc.
+// Notes   : M0+ exposes deterministic pull-mix plus voice controls
+//           (Play/Stop/Pause/Resume/Seek/SetGain) and simple bus gains
+//           (Master/Music/Sfx) while keeping backend APIs hidden. Real
+//           backends can map this to WASAPI/XAudio/etc.
 // ============================================================================
 
 #pragma once
@@ -56,6 +57,21 @@ namespace dng::audio
         UnknownError
     };
 
+    enum class AudioBus : dng::u8
+    {
+        Master = 0,
+        Music  = 1,
+        Sfx    = 2,
+        Count  = 3
+    };
+
+    [[nodiscard]] constexpr bool IsValid(AudioBus bus) noexcept
+    {
+        return bus == AudioBus::Master ||
+               bus == AudioBus::Music ||
+               bus == AudioBus::Sfx;
+    }
+
     struct AudioCaps
     {
         dng::DeterminismMode determinism = dng::DeterminismMode::Unknown;
@@ -81,8 +97,9 @@ namespace dng::audio
         AudioClipId clip{};
         float       gain = 1.0f;
         float       pitch = 1.0f;
+        AudioBus    bus = AudioBus::Master;
         bool        loop = false;
-        dng::u8     reserved[3]{};
+        dng::u8     reserved[2]{};
     };
 
     static_assert(std::is_trivially_copyable_v<AudioClipId>);
@@ -95,13 +112,21 @@ namespace dng::audio
     {
         using PlayFunc    = AudioStatus(*)(void* userData, AudioVoiceId voice, const AudioPlayParams& params) noexcept;
         using StopFunc    = AudioStatus(*)(void* userData, AudioVoiceId voice) noexcept;
+        using PauseFunc   = AudioStatus(*)(void* userData, AudioVoiceId voice) noexcept;
+        using ResumeFunc  = AudioStatus(*)(void* userData, AudioVoiceId voice) noexcept;
+        using SeekFunc    = AudioStatus(*)(void* userData, AudioVoiceId voice, dng::u32 frameIndex) noexcept;
         using SetGainFunc = AudioStatus(*)(void* userData, AudioVoiceId voice, float gain) noexcept;
+        using SetBusGainFunc = AudioStatus(*)(void* userData, AudioBus bus, float gain) noexcept;
         using GetCapsFunc = AudioCaps(*)(const void* userData) noexcept;
         using MixFunc     = AudioStatus(*)(void* userData, AudioMixParams& params) noexcept;
 
         PlayFunc    play    = nullptr;
         StopFunc    stop    = nullptr;
+        PauseFunc   pause   = nullptr;
+        ResumeFunc  resume  = nullptr;
+        SeekFunc    seek    = nullptr;
         SetGainFunc setGain = nullptr;
+        SetBusGainFunc setBusGain = nullptr;
         GetCapsFunc getCaps = nullptr;
         MixFunc     mix     = nullptr;
     };
@@ -152,18 +177,56 @@ namespace dng::audio
             : AudioStatus::InvalidArg;
     }
 
+    [[nodiscard]] inline AudioStatus Pause(AudioInterface& iface, AudioVoiceId voice) noexcept
+    {
+        return (iface.vtable.pause && iface.userData)
+            ? iface.vtable.pause(iface.userData, voice)
+            : AudioStatus::InvalidArg;
+    }
+
+    [[nodiscard]] inline AudioStatus Resume(AudioInterface& iface, AudioVoiceId voice) noexcept
+    {
+        return (iface.vtable.resume && iface.userData)
+            ? iface.vtable.resume(iface.userData, voice)
+            : AudioStatus::InvalidArg;
+    }
+
+    [[nodiscard]] inline AudioStatus Seek(AudioInterface& iface,
+                                          AudioVoiceId voice,
+                                          dng::u32 frameIndex) noexcept
+    {
+        return (iface.vtable.seek && iface.userData)
+            ? iface.vtable.seek(iface.userData, voice, frameIndex)
+            : AudioStatus::InvalidArg;
+    }
+
+    [[nodiscard]] inline AudioStatus SetBusGain(AudioInterface& iface,
+                                                AudioBus bus,
+                                                float gain) noexcept
+    {
+        return (iface.vtable.setBusGain && iface.userData)
+            ? iface.vtable.setBusGain(iface.userData, bus, gain)
+            : AudioStatus::InvalidArg;
+    }
+
     template <typename Backend>
     concept AudioBackend = requires(Backend& backend,
                                     const Backend& constBackend,
                                     AudioVoiceId voice,
                                     const AudioPlayParams& playParams,
+                                    AudioBus bus,
                                     float gain,
+                                    dng::u32 frameIndex,
                                     AudioMixParams& params)
     {
         { constBackend.GetCaps() } noexcept -> std::same_as<AudioCaps>;
         { backend.Play(voice, playParams) } noexcept -> std::same_as<AudioStatus>;
         { backend.Stop(voice) } noexcept -> std::same_as<AudioStatus>;
+        { backend.Pause(voice) } noexcept -> std::same_as<AudioStatus>;
+        { backend.Resume(voice) } noexcept -> std::same_as<AudioStatus>;
+        { backend.Seek(voice, frameIndex) } noexcept -> std::same_as<AudioStatus>;
         { backend.SetGain(voice, gain) } noexcept -> std::same_as<AudioStatus>;
+        { backend.SetBusGain(bus, gain) } noexcept -> std::same_as<AudioStatus>;
         { backend.Mix(params) } noexcept -> std::same_as<AudioStatus>;
     };
 
@@ -187,9 +250,29 @@ namespace dng::audio
                 return static_cast<Backend*>(userData)->Stop(voice);
             }
 
+            static AudioStatus Pause(void* userData, AudioVoiceId voice) noexcept
+            {
+                return static_cast<Backend*>(userData)->Pause(voice);
+            }
+
+            static AudioStatus Resume(void* userData, AudioVoiceId voice) noexcept
+            {
+                return static_cast<Backend*>(userData)->Resume(voice);
+            }
+
+            static AudioStatus Seek(void* userData, AudioVoiceId voice, dng::u32 frameIndex) noexcept
+            {
+                return static_cast<Backend*>(userData)->Seek(voice, frameIndex);
+            }
+
             static AudioStatus SetGain(void* userData, AudioVoiceId voice, float gain) noexcept
             {
                 return static_cast<Backend*>(userData)->SetGain(voice, gain);
+            }
+
+            static AudioStatus SetBusGain(void* userData, AudioBus bus, float gain) noexcept
+            {
+                return static_cast<Backend*>(userData)->SetBusGain(bus, gain);
             }
 
             static AudioStatus Mix(void* userData, AudioMixParams& params) noexcept
@@ -208,7 +291,11 @@ namespace dng::audio
         iface.userData       = &backend;
         iface.vtable.play    = &detail::AudioInterfaceAdapter<Backend>::Play;
         iface.vtable.stop    = &detail::AudioInterfaceAdapter<Backend>::Stop;
+        iface.vtable.pause   = &detail::AudioInterfaceAdapter<Backend>::Pause;
+        iface.vtable.resume  = &detail::AudioInterfaceAdapter<Backend>::Resume;
+        iface.vtable.seek    = &detail::AudioInterfaceAdapter<Backend>::Seek;
         iface.vtable.setGain = &detail::AudioInterfaceAdapter<Backend>::SetGain;
+        iface.vtable.setBusGain = &detail::AudioInterfaceAdapter<Backend>::SetBusGain;
         iface.vtable.getCaps = &detail::AudioInterfaceAdapter<Backend>::GetCaps;
         iface.vtable.mix     = &detail::AudioInterfaceAdapter<Backend>::Mix;
         return iface;

@@ -172,6 +172,74 @@ int RunAudioSmoke()
         }
     }
 
+    {
+        AudioPlayParams controlPlay{};
+        controlPlay.clip = MakeAudioClipId(11);
+        controlPlay.gain = 1.0f;
+        controlPlay.pitch = 1.0f;
+        controlPlay.bus = AudioBus::Music;
+        controlPlay.loop = true;
+
+        AudioVoiceId controlVoice{};
+        if (Play(state, controlPlay, controlVoice) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(state);
+            return 34;
+        }
+
+        if (Pause(state, controlVoice) != AudioStatus::Ok ||
+            Seek(state, controlVoice, 7u) != AudioStatus::Ok ||
+            Resume(state, controlVoice) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(state);
+            return 35;
+        }
+
+        if (SetBusGain(state, AudioBus::Music, 0.35f) != AudioStatus::Ok ||
+            SetMasterGain(state, 0.85f) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(state);
+            return 36;
+        }
+
+        if (GetBusGain(state, AudioBus::Music) != 0.35f || GetBusGain(state, AudioBus::Master) != 0.85f)
+        {
+            ShutdownAudioSystem(state);
+            return 37;
+        }
+
+        float flushBuffer[4]{};
+        AudioMixParams flushMix{};
+        flushMix.outSamples = flushBuffer;
+        flushMix.outputCapacitySamples = 4;
+        flushMix.sampleRate = 48000;
+        flushMix.channelCount = 2;
+        flushMix.requestedFrames = 1;
+        if (Mix(state, flushMix) != AudioStatus::Ok || GetPendingCommandCount(state) != 0)
+        {
+            ShutdownAudioSystem(state);
+            return 38;
+        }
+
+        if (SetBusGain(state, static_cast<AudioBus>(99), 1.0f) != AudioStatus::InvalidArg)
+        {
+            ShutdownAudioSystem(state);
+            return 39;
+        }
+
+        if (Stop(state, controlVoice) != AudioStatus::Ok || Mix(state, flushMix) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(state);
+            return 40;
+        }
+
+        if (SetMasterGain(state, 1.0f) != AudioStatus::Ok || Mix(state, flushMix) != AudioStatus::Ok)
+        {
+            ShutdownAudioSystem(state);
+            return 41;
+        }
+    }
+
     float buffer[256]{};
     for (float& sample : buffer)
     {

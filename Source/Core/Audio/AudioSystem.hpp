@@ -12,6 +12,8 @@
 //           platform initialization fails. Voice control is command-queued
 //           through a fixed-capacity pool to avoid allocations in Mix(). WAV
 //           loading supports in-memory clips and streamed clips via FileSystem.
+//           Streamed clips require an explicit `BindStreamFileSystem()` and
+//           the bound FileSystem must outlive loaded streamed clips.
 // ============================================================================
 
 #pragma once
@@ -25,6 +27,7 @@ namespace dng::audio
 {
     inline constexpr dng::u32 kAudioSystemMaxVoices = 64;
     inline constexpr dng::u32 kAudioSystemMaxCommands = 256;
+    inline constexpr dng::u32 kAudioSystemBusCount = static_cast<dng::u32>(AudioBus::Count);
     inline constexpr dng::u32 kAudioSystemWavLoadScratchBytes =
         (WinMmAudio::GetClipPoolCapacitySamples() * static_cast<dng::u32>(sizeof(dng::i16))) + 4096u;
 
@@ -46,7 +49,11 @@ namespace dng::audio
     {
         Play = 0,
         Stop,
-        SetGain
+        Pause,
+        Resume,
+        Seek,
+        SetGain,
+        SetBusGain
     };
 
     struct AudioCommand
@@ -55,15 +62,19 @@ namespace dng::audio
         AudioVoiceId     voice{};
         AudioPlayParams  play{};
         float            gain = 1.0f;
+        AudioBus         bus = AudioBus::Master;
+        dng::u32         seekFrameIndex = 0;
     };
 
     struct AudioVoiceState
     {
         AudioClipId clip{};
         float       gain = 1.0f;
+        AudioBus    bus = AudioBus::Master;
         bool        isActive = false;
+        bool        isPaused = false;
         bool        loop = false;
-        dng::u16    reserved = 0;
+        dng::u8     reserved[2]{};
         dng::u32    generation = 1;
     };
 
@@ -82,6 +93,9 @@ namespace dng::audio
         dng::u32           commandWriteIndex = 0;
         dng::u32           commandCount = 0;
         dng::u32           activeVoiceCount = 0;
+        fs::FileSystemInterface streamFileSystem{};
+        float              busGains[kAudioSystemBusCount]{1.0f, 1.0f, 1.0f};
+        bool               hasStreamFileSystem = false;
         bool               isInitialized = false;
     };
 
@@ -141,6 +155,13 @@ namespace dng::audio
             : 0u;
     }
 
+    [[nodiscard]] inline dng::u32 GetMaxStreamClipCount(const AudioSystemState& state) noexcept
+    {
+        return (state.backend == AudioSystemBackend::Platform)
+            ? state.platformBackend.GetMaxStreamClipCount()
+            : 0u;
+    }
+
     [[nodiscard]] inline dng::u32 GetClipPoolUsageSamples(const AudioSystemState& state) noexcept
     {
         return (state.backend == AudioSystemBackend::Platform)
@@ -162,8 +183,23 @@ namespace dng::audio
             : 0u;
     }
 
+    [[nodiscard]] inline bool HasBoundStreamFileSystem(const AudioSystemState& state) noexcept
+    {
+        return state.hasStreamFileSystem;
+    }
+
+    [[nodiscard]] inline float GetBusGain(const AudioSystemState& state, AudioBus bus) noexcept
+    {
+        if (!IsValid(bus))
+        {
+            return 0.0f;
+        }
+        return state.busGains[static_cast<dng::u32>(bus)];
+    }
+
     namespace detail
     {
+        // Shared static scratch for WAV file loads (external sync required).
         inline dng::u8 g_AudioWavLoadScratch[kAudioSystemWavLoadScratchBytes]{};
 
         [[nodiscard]] inline AudioStatus MapFsStatus(fs::FsStatus status) noexcept
@@ -178,6 +214,17 @@ namespace dng::audio
                 case fs::FsStatus::AccessDenied: return AudioStatus::NotSupported;
                 default:                         return AudioStatus::UnknownError;
             }
+        }
+
+        [[nodiscard]] inline bool IsSameFileSystemInterface(const fs::FileSystemInterface& a,
+                                                            const fs::FileSystemInterface& b) noexcept
+        {
+            return a.userData == b.userData &&
+                   a.vtable.exists == b.vtable.exists &&
+                   a.vtable.fileSize == b.vtable.fileSize &&
+                   a.vtable.readFile == b.vtable.readFile &&
+                   a.vtable.readFileRange == b.vtable.readFileRange &&
+                   a.vtable.getCaps == b.vtable.getCaps;
         }
 
         [[nodiscard]] inline bool EnqueueCommand(AudioSystemState& state, const AudioCommand& command) noexcept
@@ -225,7 +272,9 @@ namespace dng::audio
 
                 voiceState.clip = params.clip;
                 voiceState.gain = params.gain;
+                voiceState.bus = params.bus;
                 voiceState.isActive = true;
+                voiceState.isPaused = false;
                 voiceState.loop = params.loop;
 
                 outVoice.slot = slot;
@@ -253,7 +302,9 @@ namespace dng::audio
 
             voiceState.clip = AudioClipId{};
             voiceState.gain = 1.0f;
+            voiceState.bus = AudioBus::Master;
             voiceState.isActive = false;
+            voiceState.isPaused = false;
             voiceState.loop = false;
             ++voiceState.generation;
             if (voiceState.generation == 0)
@@ -286,9 +337,29 @@ namespace dng::audio
                         commandStatus = dng::audio::Stop(state.interface, command.voice);
                         break;
                     }
+                    case AudioCommandType::Pause:
+                    {
+                        commandStatus = dng::audio::Pause(state.interface, command.voice);
+                        break;
+                    }
+                    case AudioCommandType::Resume:
+                    {
+                        commandStatus = dng::audio::Resume(state.interface, command.voice);
+                        break;
+                    }
+                    case AudioCommandType::Seek:
+                    {
+                        commandStatus = dng::audio::Seek(state.interface, command.voice, command.seekFrameIndex);
+                        break;
+                    }
                     case AudioCommandType::SetGain:
                     {
                         commandStatus = dng::audio::SetGain(state.interface, command.voice, command.gain);
+                        break;
+                    }
+                    case AudioCommandType::SetBusGain:
+                    {
+                        commandStatus = dng::audio::SetBusGain(state.interface, command.bus, command.gain);
                         break;
                     }
                     default:
@@ -393,6 +464,53 @@ namespace dng::audio
         return LoadWavPcm16Clip(state, fileSystem, pathView, outClip);
     }
 
+    [[nodiscard]] inline AudioStatus BindStreamFileSystem(AudioSystemState& state,
+                                                          fs::FileSystemInterface& fileSystem) noexcept
+    {
+        if (!state.isInitialized)
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        if (state.backend != AudioSystemBackend::Platform)
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        const AudioStatus bindStatus = state.platformBackend.BindStreamFileSystem(fileSystem);
+        if (bindStatus != AudioStatus::Ok)
+        {
+            return bindStatus;
+        }
+
+        state.streamFileSystem = fileSystem;
+        state.hasStreamFileSystem = true;
+        return AudioStatus::Ok;
+    }
+
+    [[nodiscard]] inline AudioStatus UnbindStreamFileSystem(AudioSystemState& state) noexcept
+    {
+        if (!state.isInitialized)
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        if (state.backend != AudioSystemBackend::Platform)
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        const AudioStatus unbindStatus = state.platformBackend.UnbindStreamFileSystem();
+        if (unbindStatus != AudioStatus::Ok)
+        {
+            return unbindStatus;
+        }
+
+        state.streamFileSystem = fs::FileSystemInterface{};
+        state.hasStreamFileSystem = false;
+        return AudioStatus::Ok;
+    }
+
     [[nodiscard]] inline AudioStatus LoadWavPcm16StreamClip(AudioSystemState& state,
                                                             fs::FileSystemInterface& fileSystem,
                                                             fs::PathView path,
@@ -409,7 +527,13 @@ namespace dng::audio
             return AudioStatus::NotSupported;
         }
 
-        return state.platformBackend.LoadWavPcm16StreamClip(fileSystem, path, outClip);
+        if (!state.hasStreamFileSystem ||
+            !detail::IsSameFileSystemInterface(state.streamFileSystem, fileSystem))
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        return state.platformBackend.LoadWavPcm16StreamClip(path, outClip);
     }
 
     [[nodiscard]] inline AudioStatus LoadWavPcm16StreamClip(AudioSystemState& state,
@@ -438,7 +562,11 @@ namespace dng::audio
         if (interface.userData == nullptr ||
             interface.vtable.play == nullptr ||
             interface.vtable.stop == nullptr ||
+            interface.vtable.pause == nullptr ||
+            interface.vtable.resume == nullptr ||
+            interface.vtable.seek == nullptr ||
             interface.vtable.setGain == nullptr ||
+            interface.vtable.setBusGain == nullptr ||
             interface.vtable.getCaps == nullptr ||
             interface.vtable.mix == nullptr)
         {
@@ -549,7 +677,7 @@ namespace dng::audio
             return AudioStatus::InvalidArg;
         }
 
-        if (!IsValid(params.clip) || !(params.gain >= 0.0f) || !(params.pitch > 0.0f))
+        if (!IsValid(params.clip) || !IsValid(params.bus) || !(params.gain >= 0.0f) || !(params.pitch > 0.0f))
         {
             return AudioStatus::InvalidArg;
         }
@@ -619,6 +747,92 @@ namespace dng::audio
 
         state.voices[voice.slot].gain = gain;
         return AudioStatus::Ok;
+    }
+
+    [[nodiscard]] inline AudioStatus Pause(AudioSystemState& state, AudioVoiceId voice) noexcept
+    {
+        if (!state.isInitialized || !IsVoiceActive(state, voice))
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        AudioCommand command{};
+        command.type = AudioCommandType::Pause;
+        command.voice = voice;
+        if (!detail::EnqueueCommand(state, command))
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        state.voices[voice.slot].isPaused = true;
+        return AudioStatus::Ok;
+    }
+
+    [[nodiscard]] inline AudioStatus Resume(AudioSystemState& state, AudioVoiceId voice) noexcept
+    {
+        if (!state.isInitialized || !IsVoiceActive(state, voice))
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        AudioCommand command{};
+        command.type = AudioCommandType::Resume;
+        command.voice = voice;
+        if (!detail::EnqueueCommand(state, command))
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        state.voices[voice.slot].isPaused = false;
+        return AudioStatus::Ok;
+    }
+
+    [[nodiscard]] inline AudioStatus Seek(AudioSystemState& state,
+                                          AudioVoiceId voice,
+                                          dng::u32 frameIndex) noexcept
+    {
+        if (!state.isInitialized || !IsVoiceActive(state, voice))
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        AudioCommand command{};
+        command.type = AudioCommandType::Seek;
+        command.voice = voice;
+        command.seekFrameIndex = frameIndex;
+        if (!detail::EnqueueCommand(state, command))
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        return AudioStatus::Ok;
+    }
+
+    [[nodiscard]] inline AudioStatus SetBusGain(AudioSystemState& state,
+                                                AudioBus bus,
+                                                float gain) noexcept
+    {
+        if (!state.isInitialized || !IsValid(bus) || !(gain >= 0.0f))
+        {
+            return AudioStatus::InvalidArg;
+        }
+
+        AudioCommand command{};
+        command.type = AudioCommandType::SetBusGain;
+        command.bus = bus;
+        command.gain = gain;
+        if (!detail::EnqueueCommand(state, command))
+        {
+            return AudioStatus::NotSupported;
+        }
+
+        state.busGains[static_cast<dng::u32>(bus)] = gain;
+        return AudioStatus::Ok;
+    }
+
+    [[nodiscard]] inline AudioStatus SetMasterGain(AudioSystemState& state, float gain) noexcept
+    {
+        return SetBusGain(state, AudioBus::Master, gain);
     }
 
     [[nodiscard]] inline AudioStatus Mix(AudioSystemState& state, AudioMixParams& params) noexcept

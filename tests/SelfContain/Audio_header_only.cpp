@@ -28,9 +28,35 @@ namespace
             return AudioStatus::Ok;
         }
 
+        [[nodiscard]] AudioStatus Pause(AudioVoiceId voice) noexcept
+        {
+            (void)voice;
+            return AudioStatus::Ok;
+        }
+
+        [[nodiscard]] AudioStatus Resume(AudioVoiceId voice) noexcept
+        {
+            (void)voice;
+            return AudioStatus::Ok;
+        }
+
+        [[nodiscard]] AudioStatus Seek(AudioVoiceId voice, dng::u32 frameIndex) noexcept
+        {
+            (void)voice;
+            (void)frameIndex;
+            return AudioStatus::Ok;
+        }
+
         [[nodiscard]] AudioStatus SetGain(AudioVoiceId voice, float gain) noexcept
         {
             (void)voice;
+            (void)gain;
+            return AudioStatus::Ok;
+        }
+
+        [[nodiscard]] AudioStatus SetBusGain(AudioBus bus, float gain) noexcept
+        {
+            (void)bus;
             (void)gain;
             return AudioStatus::Ok;
         }
@@ -57,7 +83,12 @@ namespace
         play.clip = MakeAudioClipId(1);
         AudioVoiceId voice{};
         (void)Play(state, play, voice);
+        (void)Pause(state, voice);
+        (void)Seek(state, voice, 0);
+        (void)Resume(state, voice);
         (void)SetGain(state, voice, 0.5f);
+        (void)SetBusGain(state, AudioBus::Music, 0.75f);
+        (void)SetMasterGain(state, 1.0f);
         (void)Stop(state, voice);
         (void)Mix(state, params);
         ShutdownAudioSystem(state);
