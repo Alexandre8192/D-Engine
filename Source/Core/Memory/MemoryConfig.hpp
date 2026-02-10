@@ -200,6 +200,14 @@ static_assert((DNG_SOALLOC_BATCH) >= 1, "SmallObject batch must be >= 1");
 #   define DNG_SOA_SHARD_COUNT 8u
 #endif
 
+#ifndef DNG_STACK_ALLOC_MAX_MARKERS
+#   define DNG_STACK_ALLOC_MAX_MARKERS 1024u
+#endif
+
+#if (DNG_STACK_ALLOC_MAX_MARKERS) < 1
+#   error "DNG_STACK_ALLOC_MAX_MARKERS must be >= 1"
+#endif
+
 // ============================================================================
 // Compile-time "capabilities" view (constexpr booleans)
 // These are the **ground truth** used throughout the engine.
@@ -219,6 +227,10 @@ namespace dng::core
     constexpr bool CompiledReportOnExit() noexcept { return DNG_MEM_REPORT_ON_EXIT != 0; }
     constexpr bool CompiledThreadSafe() noexcept { return DNG_MEM_THREAD_SAFE != 0; }
     constexpr int  CompiledThreadPolicy() noexcept { return DNG_MEM_THREAD_POLICY; }
+    constexpr std::size_t CompiledStackAllocatorMaxMarkers() noexcept
+    {
+        return static_cast<std::size_t>(DNG_STACK_ALLOC_MAX_MARKERS);
+    }
     // clang-format on
 
     // Invariants:

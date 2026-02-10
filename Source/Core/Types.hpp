@@ -80,7 +80,13 @@ enum class ThreadSafetyMode : u8
 #endif
 
 #ifndef DE_FORCEINLINE
+#if defined(_MSC_VER)
+#define DE_FORCEINLINE __forceinline
+#elif defined(__clang__) || defined(__GNUC__)
 #define DE_FORCEINLINE inline __attribute__((always_inline))
+#else
+#define DE_FORCEINLINE inline
+#endif
 #endif
 
 #ifndef DE_ALIGN

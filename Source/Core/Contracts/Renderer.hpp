@@ -57,9 +57,9 @@ namespace dng::render
         bool supportsIndirectSubmission = false;
         bool supportsGpuDrivenCulling   = false;
         bool supportsSoftwareOcclusion  = false;
-        dng::DeterminismMode determinism = dng::DeterminismMode::Replay;
-        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
-        bool stableSubmissionRequired = true;
+        dng::DeterminismMode determinism = dng::DeterminismMode::Unknown;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::Unknown;
+        bool stableSubmissionRequired = false;
     };
 
 

@@ -39,9 +39,9 @@ namespace dng::fs
 
     struct FileSystemCaps
     {
-        dng::DeterminismMode determinism = dng::DeterminismMode::Replay;
-        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
-        bool stableOrderingRequired = true;
+        dng::DeterminismMode determinism = dng::DeterminismMode::Unknown;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::Unknown;
+        bool stableOrderingRequired = false;
     };
 
     static_assert(std::is_trivially_copyable_v<FileSystemCaps>);

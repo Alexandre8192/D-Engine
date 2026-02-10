@@ -48,9 +48,9 @@ namespace dng::input
 
     struct InputCaps
     {
-        dng::DeterminismMode determinism = dng::DeterminismMode::Replay;
-        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
-        bool stableEventOrder = true;
+        dng::DeterminismMode determinism = dng::DeterminismMode::Unknown;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::Unknown;
+        bool stableEventOrder = false;
     };
 
     static_assert(std::is_trivially_copyable_v<InputEvent>);

@@ -53,9 +53,9 @@ namespace dng::jobs
     {
         bool deterministic = false;
         bool multithreaded = false;
-        dng::DeterminismMode determinismMode = dng::DeterminismMode::Replay;
-        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::ExternalSync;
-        bool stableSubmissionOrder = true;
+        dng::DeterminismMode determinismMode = dng::DeterminismMode::Unknown;
+        dng::ThreadSafetyMode threadSafety = dng::ThreadSafetyMode::Unknown;
+        bool stableSubmissionOrder = false;
     };
 
     static_assert(std::is_trivially_copyable_v<JobsCaps>);

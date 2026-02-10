@@ -82,7 +82,7 @@ namespace dng::core {
         //           but allocations still work; a warning is logged once.
         struct MarkerStack
         {
-            static constexpr usize kMaxMarkers = 1024; // TODO: consider exposing via MemoryConfig
+            static constexpr usize kMaxMarkers = CompiledStackAllocatorMaxMarkers();
 
             StackMarker markers[kMaxMarkers]{};
             usize       size{ 0 };

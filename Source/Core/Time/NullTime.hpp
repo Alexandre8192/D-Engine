@@ -27,6 +27,7 @@ namespace dng::time
             caps.high_res  = false;
             caps.determinism = dng::DeterminismMode::Replay;
             caps.threadSafety = dng::ThreadSafetyMode::ExternalSync;
+            caps.stableSampleOrder = true;
             return caps;
         }
 
