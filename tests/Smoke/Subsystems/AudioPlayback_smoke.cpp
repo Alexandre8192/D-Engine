@@ -121,6 +121,10 @@ namespace
 
     struct LocalFileSystemForSmoke
     {
+        bool readRangeSupported = true;
+        dng::u32 failAfterReadRangeCalls = ~dng::u32{0};
+        dng::u32 readRangeCallCount = 0;
+
         [[nodiscard]] dng::fs::FileSystemCaps GetCaps() const noexcept
         {
             dng::fs::FileSystemCaps caps{};
@@ -272,6 +276,17 @@ namespace
                                                       dng::u64& outRead) noexcept
         {
             outRead = 0;
+            if (!readRangeSupported)
+            {
+                return dng::fs::FsStatus::NotSupported;
+            }
+
+            if (readRangeCallCount >= failAfterReadRangeCalls)
+            {
+                return dng::fs::FsStatus::UnknownError;
+            }
+            ++readRangeCallCount;
+
             if (dst == nullptr)
             {
                 return dng::fs::FsStatus::InvalidArg;
@@ -528,6 +543,101 @@ int RunAudioPlaybackSmoke()
         }
     }
 
+    {
+        AudioPlayParams controlled{};
+        controlled.clip = clip;
+        controlled.gain = 1.0f;
+        controlled.pitch = 1.0f;
+        controlled.bus = AudioBus::Music;
+        controlled.loop = true;
+
+        AudioVoiceId voice{};
+        if (Play(state, controlled, voice) != AudioStatus::Ok)
+        {
+            return 54;
+        }
+
+        float out[512]{};
+        AudioMixParams mix{};
+        mix.outSamples = out;
+        mix.outputCapacitySamples = 512;
+        mix.sampleRate = config.platform.sampleRate;
+        mix.channelCount = config.platform.channelCount;
+        mix.requestedFrames = 64;
+
+        if (Mix(state, mix) != AudioStatus::Ok || !HasNonZero(out, mix.writtenSamples))
+        {
+            return 55;
+        }
+
+        if (Pause(state, voice) != AudioStatus::Ok || Mix(state, mix) != AudioStatus::Ok)
+        {
+            return 56;
+        }
+
+        if (HasNonZero(out, mix.writtenSamples))
+        {
+            return 57;
+        }
+
+        if (Resume(state, voice) != AudioStatus::Ok || Mix(state, mix) != AudioStatus::Ok)
+        {
+            return 58;
+        }
+
+        if (!HasNonZero(out, mix.writtenSamples))
+        {
+            return 59;
+        }
+
+        if (Seek(state, voice, 0u) != AudioStatus::Ok || Mix(state, mix) != AudioStatus::Ok)
+        {
+            return 60;
+        }
+
+        if (!HasNonZero(out, mix.writtenSamples))
+        {
+            return 61;
+        }
+
+        if (SetBusGain(state, AudioBus::Music, 0.0f) != AudioStatus::Ok || Mix(state, mix) != AudioStatus::Ok)
+        {
+            return 62;
+        }
+
+        if (HasNonZero(out, mix.writtenSamples))
+        {
+            return 63;
+        }
+
+        if (SetBusGain(state, AudioBus::Music, 1.0f) != AudioStatus::Ok ||
+            SetMasterGain(state, 0.0f) != AudioStatus::Ok ||
+            Mix(state, mix) != AudioStatus::Ok)
+        {
+            return 64;
+        }
+
+        if (HasNonZero(out, mix.writtenSamples))
+        {
+            return 65;
+        }
+
+        if (SetMasterGain(state, 1.0f) != AudioStatus::Ok || Mix(state, mix) != AudioStatus::Ok)
+        {
+            return 66;
+        }
+
+        if (!HasNonZero(out, mix.writtenSamples))
+        {
+            return 67;
+        }
+
+        if (Stop(state, voice) != AudioStatus::Ok || Mix(state, mix) != AudioStatus::Ok)
+        {
+            return 68;
+        }
+    }
+
     auto runDeterministicPass = [&](dng::u64& outHash) -> bool
     {
         AudioPlayParams voiceA{};
@@ -768,10 +878,107 @@ int RunAudioPlaybackSmoke()
     }
 
     {
+        if (HasBoundStreamFileSystem(state))
+        {
+            return 69;
+        }
+
+        AudioClipId unboundStreamClip{};
+        if (LoadWavPcm16StreamClip(state, fileSystem, kStreamedWavPath, unboundStreamClip) != AudioStatus::NotSupported)
+        {
+            return 70;
+        }
+
+        if (BindStreamFileSystem(state, fileSystem) != AudioStatus::Ok || !HasBoundStreamFileSystem(state))
+        {
+            return 71;
+        }
+
+        if (BindStreamFileSystem(state, fileSystem) != AudioStatus::Ok)
+        {
+            return 72;
+        }
+
+        LocalFileSystemForSmoke otherFileSystem{};
+        dng::fs::FileSystemInterface otherInterface = dng::fs::MakeFileSystemInterface(otherFileSystem);
+        AudioClipId mismatchedStreamClip{};
+        if (LoadWavPcm16StreamClip(state, otherInterface, kStreamedWavPath, mismatchedStreamClip) != AudioStatus::NotSupported)
+        {
+            return 73;
+        }
+
+        localFileSystem.readRangeSupported = false;
+        AudioClipId unsupportedRangeClip{};
+        if (LoadWavPcm16StreamClip(state, fileSystem, kStreamedWavPath, unsupportedRangeClip) != AudioStatus::NotSupported)
+        {
+            return 74;
+        }
+        localFileSystem.readRangeSupported = true;
+        localFileSystem.failAfterReadRangeCalls = ~dng::u32{0};
+
         AudioClipId oversizedClip{};
         if (LoadWavPcm16Clip(state, fileSystem, kStreamedWavPath, oversizedClip) != AudioStatus::NotSupported)
         {
             return 46;
+        }
+
+        constexpr dng::u32 kMaxSmokeStreamClips = 16;
+        AudioClipId streamClips[kMaxSmokeStreamClips]{};
+        dng::u32 streamClipCount = 0;
+        const dng::u32 maxStreamClipCount = GetMaxStreamClipCount(state);
+        if (maxStreamClipCount == 0u || maxStreamClipCount > kMaxSmokeStreamClips)
+        {
+            return 75;
+        }
+
+        for (; streamClipCount < maxStreamClipCount; ++streamClipCount)
+        {
+            AudioClipId streamClip{};
+            if (LoadWavPcm16StreamClip(state, fileSystem, kStreamedWavPath, streamClip) != AudioStatus::Ok ||
+                !IsValid(streamClip))
+            {
+                return 76;
+            }
+            streamClips[streamClipCount] = streamClip;
+        }
+
+        if (GetLoadedStreamClipCount(state) != maxStreamClipCount)
+        {
+            return 77;
+        }
+
+        AudioClipId overflowStreamClip{};
+        if (LoadWavPcm16StreamClip(state, fileSystem, kStreamedWavPath, overflowStreamClip) != AudioStatus::NotSupported)
+        {
+            return 78;
+        }
+
+        if (UnbindStreamFileSystem(state) != AudioStatus::NotSupported)
+        {
+            return 79;
+        }
+
+        for (dng::u32 i = 0; i < streamClipCount; ++i)
+        {
+            if (UnloadClip(state, streamClips[i]) != AudioStatus::Ok)
+            {
+                return 80;
+            }
+        }
+
+        if (GetLoadedStreamClipCount(state) != 0u)
+        {
+            return 81;
+        }
+
+        if (UnbindStreamFileSystem(state) != AudioStatus::Ok || HasBoundStreamFileSystem(state))
+        {
+            return 82;
+        }
+
+        if (BindStreamFileSystem(state, fileSystem) != AudioStatus::Ok)
+        {
+            return 83;
         }
 
         AudioClipId streamClip{};
@@ -816,7 +1023,25 @@ int RunAudioPlaybackSmoke()
             return 51;
         }
 
-        if (Stop(state, streamVoice) != AudioStatus::Ok || Mix(state, streamMix) != AudioStatus::Ok)
+        localFileSystem.failAfterReadRangeCalls = localFileSystem.readRangeCallCount;
+        if (Seek(state, streamVoice, 3000u) != AudioStatus::Ok || Mix(state, streamMix) != AudioStatus::Ok)
+        {
+            return 84;
+        }
+
+        if (HasNonZero(streamOut, streamMix.writtenSamples))
+        {
+            return 85;
+        }
+
+        localFileSystem.failAfterReadRangeCalls = ~dng::u32{0};
+        const AudioStatus stopStatus = Stop(state, streamVoice);
+        if (stopStatus != AudioStatus::Ok && stopStatus != AudioStatus::InvalidArg)
+        {
+            return 86;
+        }
+
+        if (Mix(state, streamMix) != AudioStatus::Ok)
         {
             return 52;
         }
@@ -827,6 +1052,11 @@ int RunAudioPlaybackSmoke()
             GetClipPoolUsageSamples(state) != 0u)
         {
             return 53;
+        }
+
+        if (UnbindStreamFileSystem(state) != AudioStatus::Ok || HasBoundStreamFileSystem(state))
+        {
+            return 87;
         }
     }
 
