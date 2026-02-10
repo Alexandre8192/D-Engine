@@ -6,10 +6,8 @@
 // Contract: No exceptions/RTTI. Caller supplies output buffers through
 //           AudioMixParams. Backend owns device handle and fixed-size queue
 //           buffers. External synchronization is required.
-// Notes   : M1 backend intended for bring-up and validation. It can generate
-//           a low-amplitude sine tone and submit it to the default output
-//           device. If queue buffers are busy, samples are still written to
-//           caller output and device submit is skipped for that mix call.
+// Notes   : M2 backend supports loading PCM16 WAV clips and software mixing
+//           of voices before submitting to the default output device.
 // ============================================================================
 
 #pragma once
@@ -40,28 +38,86 @@ namespace dng::audio
         }
 
         [[nodiscard]] AudioCaps GetCaps() const noexcept;
+        [[nodiscard]] AudioStatus Play(AudioVoiceId voice, const AudioPlayParams& params) noexcept;
+        [[nodiscard]] AudioStatus Stop(AudioVoiceId voice) noexcept;
+        [[nodiscard]] AudioStatus SetGain(AudioVoiceId voice, float gain) noexcept;
         [[nodiscard]] AudioStatus Mix(AudioMixParams& params) noexcept;
+        [[nodiscard]] AudioStatus LoadWavPcm16Clip(const char* path, AudioClipId& outClip) noexcept;
+        [[nodiscard]] bool HasClip(AudioClipId clip) const noexcept;
+        [[nodiscard]] constexpr dng::u64 GetUnderrunCount() const noexcept
+        {
+            return m_UnderrunCount;
+        }
+        [[nodiscard]] constexpr dng::u64 GetSubmitErrorCount() const noexcept
+        {
+            return m_SubmitErrorCount;
+        }
 
     private:
         static constexpr dng::u32 kBufferCount = 3;
+        static constexpr dng::u32 kMaxVoices = 64;
+        static constexpr dng::u32 kMaxClips = 64;
+        static constexpr dng::u32 kMaxClipSamplePool = 65536;
         static constexpr dng::u32 kMaxChannels = 2;
         static constexpr dng::u32 kMaxFramesPerBuffer = 4096;
         static constexpr dng::u32 kMaxSamplesPerBuffer = kMaxFramesPerBuffer * kMaxChannels;
         static constexpr dng::u32 kWaveHeaderStorageBytes = 128;
         static constexpr dng::u32 kWaveHeaderStorageAlign = 16;
 
+        struct ClipState
+        {
+            bool     valid = false;
+            dng::u16 channelCount = 0;
+            dng::u16 reserved = 0;
+            dng::u32 sampleRate = 0;
+            dng::u32 sampleOffset = 0;
+            dng::u32 sampleCount = 0;
+        };
+
+        struct VoiceState
+        {
+            AudioClipId clip{};
+            double      frameCursor = 0.0;
+            float       gain = 1.0f;
+            float       pitch = 1.0f;
+            dng::u32    generation = 1;
+            bool        active = false;
+            bool        loop = false;
+            dng::u16    reserved = 0;
+        };
+
+        [[nodiscard]] AudioStatus RegisterClipPcm16(AudioClipId clip,
+                                                    const dng::i16* samples,
+                                                    dng::u32 sampleCount,
+                                                    dng::u32 sampleRate,
+                                                    dng::u16 channelCount) noexcept;
+
+        void MixVoicesToBuffer(float* outSamples,
+                               dng::u16 outChannelCount,
+                               dng::u32 requestedFrames) noexcept;
+
+        [[nodiscard]] AudioClipId AllocateClipId() noexcept;
+
         void* m_Device = nullptr;
         alignas(kWaveHeaderStorageAlign) dng::u8 m_WaveHeaders[kBufferCount][kWaveHeaderStorageBytes]{};
         dng::i16 m_PcmBuffers[kBufferCount][kMaxSamplesPerBuffer]{};
+        ClipState m_Clips[kMaxClips]{};
+        VoiceState m_Voices[kMaxVoices]{};
         bool     m_HeaderPrepared[kBufferCount]{};
         bool     m_InFlight[kBufferCount]{};
         dng::u32 m_NextBufferIndex = 0;
+        dng::u32 m_NextClipValue = 1;
+        dng::u32 m_NextClipSample = 0;
         dng::u32 m_FramesPerBuffer = 1024;
         dng::u32 m_SampleRate = 48000;
         dng::u16 m_ChannelCount = 2;
-        bool     m_EnableTone = true;
+        dng::u16 m_Reserved = 0;
         bool     m_IsInitialized = false;
-        double   m_Phase = 0.0;
+        dng::u8  m_Padding[7]{};
+        dng::u64 m_UnderrunCount = 0;
+        dng::u64 m_SubmitErrorCount = 0;
+
+        static dng::i16 s_ClipSamplePool[kMaxClipSamplePool];
     };
 
     static_assert(AudioBackend<WinMmAudio>, "WinMmAudio must satisfy audio backend concept.");
@@ -72,4 +128,3 @@ namespace dng::audio
     }
 
 } // namespace dng::audio
-

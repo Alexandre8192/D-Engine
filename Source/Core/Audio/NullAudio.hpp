@@ -27,6 +27,35 @@ namespace dng::audio
             return caps;
         }
 
+        [[nodiscard]] AudioStatus Play(AudioVoiceId voice, const AudioPlayParams& params) noexcept
+        {
+            if (!IsValid(voice) || !IsValid(params.clip))
+            {
+                return AudioStatus::InvalidArg;
+            }
+
+            if (!(params.gain >= 0.0f) || !(params.pitch > 0.0f))
+            {
+                return AudioStatus::InvalidArg;
+            }
+
+            return AudioStatus::Ok;
+        }
+
+        [[nodiscard]] AudioStatus Stop(AudioVoiceId voice) noexcept
+        {
+            return IsValid(voice) ? AudioStatus::Ok : AudioStatus::InvalidArg;
+        }
+
+        [[nodiscard]] AudioStatus SetGain(AudioVoiceId voice, float gain) noexcept
+        {
+            if (!IsValid(voice) || !(gain >= 0.0f))
+            {
+                return AudioStatus::InvalidArg;
+            }
+            return AudioStatus::Ok;
+        }
+
         [[nodiscard]] AudioStatus Mix(AudioMixParams& params) noexcept
         {
             params.writtenSamples = 0;

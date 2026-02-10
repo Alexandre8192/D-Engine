@@ -6,8 +6,9 @@
 // Contract: Header-only, no exceptions/RTTI, engine-absolute includes only.
 //           All public data is POD/trivially copyable. Caller owns output
 //           buffers; backends only write within declared capacity.
-// Notes   : M0 focuses on deterministic, pull-based mixing (caller requests
-//           samples each frame). Real backends can map this to WASAPI/XAudio/etc.
+// Notes   : M0+ exposes deterministic pull-mix plus minimal voice controls
+//           (Play/Stop/SetGain) so systems can queue commands while keeping
+//           backend APIs hidden. Real backends can map this to WASAPI/XAudio/etc.
 // ============================================================================
 
 #pragma once
@@ -19,6 +20,34 @@
 
 namespace dng::audio
 {
+    struct AudioClipId
+    {
+        dng::u32 value = 0;
+    };
+
+    struct AudioVoiceId
+    {
+        dng::u32 slot = 0;
+        dng::u32 generation = 0;
+    };
+
+    [[nodiscard]] constexpr AudioClipId MakeAudioClipId(dng::u32 value) noexcept
+    {
+        AudioClipId id{};
+        id.value = value;
+        return id;
+    }
+
+    [[nodiscard]] constexpr bool IsValid(AudioClipId id) noexcept
+    {
+        return id.value != 0;
+    }
+
+    [[nodiscard]] constexpr bool IsValid(AudioVoiceId id) noexcept
+    {
+        return id.generation != 0;
+    }
+
     enum class AudioStatus : dng::u8
     {
         Ok = 0,
@@ -47,14 +76,32 @@ namespace dng::audio
         dng::u32 writtenSamples = 0;        // Out: number of float samples produced.
     };
 
+    struct AudioPlayParams
+    {
+        AudioClipId clip{};
+        float       gain = 1.0f;
+        float       pitch = 1.0f;
+        bool        loop = false;
+        dng::u8     reserved[3]{};
+    };
+
+    static_assert(std::is_trivially_copyable_v<AudioClipId>);
+    static_assert(std::is_trivially_copyable_v<AudioVoiceId>);
     static_assert(std::is_trivially_copyable_v<AudioCaps>);
     static_assert(std::is_trivially_copyable_v<AudioMixParams>);
+    static_assert(std::is_trivially_copyable_v<AudioPlayParams>);
 
     struct AudioVTable
     {
+        using PlayFunc    = AudioStatus(*)(void* userData, AudioVoiceId voice, const AudioPlayParams& params) noexcept;
+        using StopFunc    = AudioStatus(*)(void* userData, AudioVoiceId voice) noexcept;
+        using SetGainFunc = AudioStatus(*)(void* userData, AudioVoiceId voice, float gain) noexcept;
         using GetCapsFunc = AudioCaps(*)(const void* userData) noexcept;
         using MixFunc     = AudioStatus(*)(void* userData, AudioMixParams& params) noexcept;
 
+        PlayFunc    play    = nullptr;
+        StopFunc    stop    = nullptr;
+        SetGainFunc setGain = nullptr;
         GetCapsFunc getCaps = nullptr;
         MixFunc     mix     = nullptr;
     };
@@ -80,12 +127,43 @@ namespace dng::audio
             : AudioStatus::InvalidArg;
     }
 
+    [[nodiscard]] inline AudioStatus Play(AudioInterface& iface,
+                                          AudioVoiceId voice,
+                                          const AudioPlayParams& params) noexcept
+    {
+        return (iface.vtable.play && iface.userData)
+            ? iface.vtable.play(iface.userData, voice, params)
+            : AudioStatus::InvalidArg;
+    }
+
+    [[nodiscard]] inline AudioStatus Stop(AudioInterface& iface, AudioVoiceId voice) noexcept
+    {
+        return (iface.vtable.stop && iface.userData)
+            ? iface.vtable.stop(iface.userData, voice)
+            : AudioStatus::InvalidArg;
+    }
+
+    [[nodiscard]] inline AudioStatus SetGain(AudioInterface& iface,
+                                             AudioVoiceId voice,
+                                             float gain) noexcept
+    {
+        return (iface.vtable.setGain && iface.userData)
+            ? iface.vtable.setGain(iface.userData, voice, gain)
+            : AudioStatus::InvalidArg;
+    }
+
     template <typename Backend>
     concept AudioBackend = requires(Backend& backend,
                                     const Backend& constBackend,
+                                    AudioVoiceId voice,
+                                    const AudioPlayParams& playParams,
+                                    float gain,
                                     AudioMixParams& params)
     {
         { constBackend.GetCaps() } noexcept -> std::same_as<AudioCaps>;
+        { backend.Play(voice, playParams) } noexcept -> std::same_as<AudioStatus>;
+        { backend.Stop(voice) } noexcept -> std::same_as<AudioStatus>;
+        { backend.SetGain(voice, gain) } noexcept -> std::same_as<AudioStatus>;
         { backend.Mix(params) } noexcept -> std::same_as<AudioStatus>;
     };
 
@@ -97,6 +175,21 @@ namespace dng::audio
             static AudioCaps GetCaps(const void* userData) noexcept
             {
                 return static_cast<const Backend*>(userData)->GetCaps();
+            }
+
+            static AudioStatus Play(void* userData, AudioVoiceId voice, const AudioPlayParams& params) noexcept
+            {
+                return static_cast<Backend*>(userData)->Play(voice, params);
+            }
+
+            static AudioStatus Stop(void* userData, AudioVoiceId voice) noexcept
+            {
+                return static_cast<Backend*>(userData)->Stop(voice);
+            }
+
+            static AudioStatus SetGain(void* userData, AudioVoiceId voice, float gain) noexcept
+            {
+                return static_cast<Backend*>(userData)->SetGain(voice, gain);
             }
 
             static AudioStatus Mix(void* userData, AudioMixParams& params) noexcept
@@ -113,6 +206,9 @@ namespace dng::audio
 
         AudioInterface iface{};
         iface.userData       = &backend;
+        iface.vtable.play    = &detail::AudioInterfaceAdapter<Backend>::Play;
+        iface.vtable.stop    = &detail::AudioInterfaceAdapter<Backend>::Stop;
+        iface.vtable.setGain = &detail::AudioInterfaceAdapter<Backend>::SetGain;
         iface.vtable.getCaps = &detail::AudioInterfaceAdapter<Backend>::GetCaps;
         iface.vtable.mix     = &detail::AudioInterfaceAdapter<Backend>::Mix;
         return iface;
