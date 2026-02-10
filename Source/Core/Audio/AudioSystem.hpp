@@ -7,26 +7,31 @@
 //           Lifetime of the backend is tied to AudioSystemState.
 //           Thread-safety and determinism follow AudioCaps from the backend;
 //           callers must serialize access per instance.
-// Notes   : Defaults to the NullAudio backend but accepts external backends
-//           via interface injection.
+// Notes   : Defaults to NullAudio. Platform backend (WinMM M1) can be
+//           selected via config with optional fallback to NullAudio when
+//           platform initialization fails.
 // ============================================================================
 
 #pragma once
 
 #include "Core/Contracts/Audio.hpp"
 #include "Core/Audio/NullAudio.hpp"
+#include "Core/Audio/WinMmAudio.hpp"
 
 namespace dng::audio
 {
     enum class AudioSystemBackend : dng::u8
     {
         Null,
+        Platform,
         External
     };
 
     struct AudioSystemConfig
     {
         AudioSystemBackend backend = AudioSystemBackend::Null;
+        WinMmAudioConfig   platform{};
+        bool               fallbackToNullOnInitFailure = true;
     };
 
     struct AudioSystemState
@@ -34,13 +39,21 @@ namespace dng::audio
         AudioInterface     interface{};
         AudioSystemBackend backend = AudioSystemBackend::Null;
         NullAudio          nullBackend{};
+        WinMmAudio         platformBackend{};
         bool               isInitialized = false;
     };
+
+    inline void ShutdownAudioSystem(AudioSystemState& state) noexcept;
 
     [[nodiscard]] inline bool InitAudioSystemWithInterface(AudioSystemState& state,
                                                            AudioInterface interface,
                                                            AudioSystemBackend backend) noexcept
     {
+        if (state.isInitialized)
+        {
+            ShutdownAudioSystem(state);
+        }
+
         if (interface.userData == nullptr ||
             interface.vtable.getCaps == nullptr ||
             interface.vtable.mix == nullptr)
@@ -57,7 +70,7 @@ namespace dng::audio
     [[nodiscard]] inline bool InitAudioSystem(AudioSystemState& state,
                                               const AudioSystemConfig& config) noexcept
     {
-        state = AudioSystemState{};
+        ShutdownAudioSystem(state);
 
         switch (config.backend)
         {
@@ -65,6 +78,22 @@ namespace dng::audio
             {
                 AudioInterface iface = MakeNullAudioInterface(state.nullBackend);
                 return InitAudioSystemWithInterface(state, iface, AudioSystemBackend::Null);
+            }
+            case AudioSystemBackend::Platform:
+            {
+                if (state.platformBackend.Init(config.platform))
+                {
+                    AudioInterface iface = MakeWinMmAudioInterface(state.platformBackend);
+                    return InitAudioSystemWithInterface(state, iface, AudioSystemBackend::Platform);
+                }
+
+                if (config.fallbackToNullOnInitFailure)
+                {
+                    AudioInterface iface = MakeNullAudioInterface(state.nullBackend);
+                    return InitAudioSystemWithInterface(state, iface, AudioSystemBackend::Null);
+                }
+
+                return false;
             }
             case AudioSystemBackend::External:
             {
@@ -79,9 +108,11 @@ namespace dng::audio
 
     inline void ShutdownAudioSystem(AudioSystemState& state) noexcept
     {
+        state.platformBackend.Shutdown();
         state.interface = AudioInterface{};
         state.backend = AudioSystemBackend::Null;
         state.nullBackend = NullAudio{};
+        state.platformBackend = WinMmAudio{};
         state.isInitialized = false;
     }
 
