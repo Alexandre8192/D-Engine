@@ -16,7 +16,9 @@
 #include "Core/Memory/MemorySystem.hpp"
 #include "Core/Memory/PoolAllocator.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <cmath>
@@ -77,7 +79,10 @@ namespace
         int iterations = kDefaultIterations;
         bool cpuInfo = false;
         bool strictStability = false;
+        bool memoryOnly = false;
+        bool memoryMatrix = false;
         bool showHelp = false;
+        std::string benchFilter{};
     };
 
     struct BenchSample
@@ -108,7 +113,47 @@ namespace
         std::string_view name;
         int iterations = 1;
         BenchFn fn = nullptr;
+        bool isMemory = false;
     };
+
+    [[nodiscard]] char ToAsciiLower(char c) noexcept
+    {
+        if (c >= 'A' && c <= 'Z')
+        {
+            return static_cast<char>(c - 'A' + 'a');
+        }
+        return c;
+    }
+
+    [[nodiscard]] bool ContainsCaseInsensitive(std::string_view text, std::string_view needle) noexcept
+    {
+        if (needle.empty())
+        {
+            return true;
+        }
+        if (needle.size() > text.size())
+        {
+            return false;
+        }
+
+        for (std::size_t i = 0; i + needle.size() <= text.size(); ++i)
+        {
+            bool match = true;
+            for (std::size_t j = 0; j < needle.size(); ++j)
+            {
+                if (ToAsciiLower(text[i + j]) != ToAsciiLower(needle[j]))
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     std::string GetEnv(const char* name)
     {
@@ -213,6 +258,9 @@ namespace
         std::printf("  --iterations K        Base iteration budget (default: %d)\n", kDefaultIterations);
         std::printf("  --cpu-info            Print runtime CPU/affinity/priority info\n");
         std::printf("  --strict-stability    Return non-zero when any benchmark is unstable\n");
+        std::printf("  --memory-only         Run only memory benchmarks\n");
+        std::printf("  --memory-matrix       Add extended memory size/alignment benchmarks\n");
+        std::printf("  --bench-filter TEXT   Run only benchmarks whose name contains TEXT (case-insensitive)\n");
         std::printf("  --help                Show this help message\n");
     }
     bool ParseArgs(int argc, char** argv, BenchArgs& args, std::string& outError)
@@ -231,6 +279,24 @@ namespace
             else if (a == "--strict-stability")
             {
                 args.strictStability = true;
+            }
+            else if (a == "--memory-only")
+            {
+                args.memoryOnly = true;
+            }
+            else if (a == "--memory-matrix")
+            {
+                args.memoryMatrix = true;
+            }
+            else if (a == "--bench-filter")
+            {
+                if (i + 1 >= argc)
+                {
+                    outError = "Missing value for --bench-filter";
+                    return false;
+                }
+                args.benchFilter = argv[i + 1];
+                ++i;
             }
             else if (a == "--warmup")
             {
@@ -422,7 +488,12 @@ namespace
         }
     };
 
-    bool Bench_ArenaAllocReset(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    bool Bench_ArenaAllocResetSized(int iterations,
+                                    volatile std::uint64_t& sink,
+                                    const char*& outReason,
+                                    dng::usize allocSize,
+                                    dng::usize allocAlign,
+                                    int allocsPerIter) noexcept
     {
         outReason = nullptr;
         if (iterations < 0)
@@ -438,17 +509,25 @@ namespace
             return false;
         }
 
-        constexpr int kAllocsPerIter = 32;
-        constexpr dng::usize kAllocSize = 64u;
-        constexpr dng::usize kAllocAlign = alignof(std::max_align_t);
+        if (allocsPerIter <= 0)
+        {
+            outReason = "arena bench allocsPerIter must be positive";
+            return false;
+        }
+
+        if (allocSize == 0u)
+        {
+            outReason = "arena bench allocSize must be > 0";
+            return false;
+        }
 
         std::uint64_t acc = 0;
         for (int i = 0; i < iterations; ++i)
         {
             context.arena.Reset();
-            for (int n = 0; n < kAllocsPerIter; ++n)
+            for (int n = 0; n < allocsPerIter; ++n)
             {
-                void* p = context.arena.Allocate(kAllocSize, kAllocAlign);
+                void* p = context.arena.Allocate(allocSize, allocAlign);
                 if (p == nullptr)
                 {
                     outReason = "arena bench allocation failed";
@@ -457,13 +536,33 @@ namespace
 
                 auto* bytes = static_cast<std::uint8_t*>(p);
                 bytes[0] = static_cast<std::uint8_t>(n);
-                bytes[kAllocSize - 1u] = static_cast<std::uint8_t>(i);
-                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kAllocSize - 1u]);
+                bytes[allocSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[allocSize - 1u]);
             }
         }
 
         sink ^= (acc + static_cast<std::uint64_t>(context.arena.GetUsed()));
         return true;
+    }
+
+    bool Bench_ArenaAllocReset(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_ArenaAllocResetSized(iterations, sink, outReason, 64u, alignof(std::max_align_t), 32);
+    }
+
+    bool Bench_ArenaAllocReset16(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_ArenaAllocResetSized(iterations, sink, outReason, 16u, alignof(std::max_align_t), 64);
+    }
+
+    bool Bench_ArenaAllocReset256(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_ArenaAllocResetSized(iterations, sink, outReason, 256u, alignof(std::max_align_t), 16);
+    }
+
+    bool Bench_ArenaAllocReset64Align64(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_ArenaAllocResetSized(iterations, sink, outReason, 64u, 64u, 32);
     }
 
     struct FrameBenchContext
@@ -486,7 +585,12 @@ namespace
         }
     };
 
-    bool Bench_FrameAllocReset(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    bool Bench_FrameAllocResetSized(int iterations,
+                                    volatile std::uint64_t& sink,
+                                    const char*& outReason,
+                                    dng::usize allocSize,
+                                    dng::usize allocAlign,
+                                    int allocsPerIter) noexcept
     {
         outReason = nullptr;
         if (iterations < 0)
@@ -497,17 +601,25 @@ namespace
 
         static FrameBenchContext context{};
 
-        constexpr int kAllocsPerIter = 32;
-        constexpr dng::usize kAllocSize = 64u;
-        constexpr dng::usize kAllocAlign = alignof(std::max_align_t);
+        if (allocsPerIter <= 0)
+        {
+            outReason = "frame bench allocsPerIter must be positive";
+            return false;
+        }
+
+        if (allocSize == 0u)
+        {
+            outReason = "frame bench allocSize must be > 0";
+            return false;
+        }
 
         std::uint64_t acc = 0;
         for (int i = 0; i < iterations; ++i)
         {
             context.frame.Reset();
-            for (int n = 0; n < kAllocsPerIter; ++n)
+            for (int n = 0; n < allocsPerIter; ++n)
             {
-                void* p = context.frame.Allocate(kAllocSize, kAllocAlign);
+                void* p = context.frame.Allocate(allocSize, allocAlign);
                 if (p == nullptr)
                 {
                     outReason = "frame bench allocation failed";
@@ -516,13 +628,33 @@ namespace
 
                 auto* bytes = static_cast<std::uint8_t*>(p);
                 bytes[0] = static_cast<std::uint8_t>(n);
-                bytes[kAllocSize - 1u] = static_cast<std::uint8_t>(i);
-                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kAllocSize - 1u]);
+                bytes[allocSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[allocSize - 1u]);
             }
         }
 
         sink ^= (acc + static_cast<std::uint64_t>(context.frame.GetUsed()));
         return true;
+    }
+
+    bool Bench_FrameAllocReset(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_FrameAllocResetSized(iterations, sink, outReason, 64u, alignof(std::max_align_t), 32);
+    }
+
+    bool Bench_FrameAllocReset16(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_FrameAllocResetSized(iterations, sink, outReason, 16u, alignof(std::max_align_t), 64);
+    }
+
+    bool Bench_FrameAllocReset256(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_FrameAllocResetSized(iterations, sink, outReason, 256u, alignof(std::max_align_t), 16);
+    }
+
+    bool Bench_FrameAllocReset64Align64(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_FrameAllocResetSized(iterations, sink, outReason, 64u, 64u, 32);
     }
 
     struct PoolBenchContext
@@ -621,7 +753,15 @@ namespace
         return true;
     }
 
-    bool Bench_SmallObjectAllocFreeSmall(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    bool Bench_AllocatorRefAllocFree(int iterations,
+                                     volatile std::uint64_t& sink,
+                                     const char*& outReason,
+                                     dng::core::AllocatorRef alloc,
+                                     const char* unavailableReason,
+                                     const char* allocFailureReason,
+                                     dng::usize allocSize,
+                                     dng::usize allocAlignment,
+                                     int opsPerIter) noexcept
     {
         outReason = nullptr;
         if (iterations < 0)
@@ -630,40 +770,52 @@ namespace
             return false;
         }
 
-        dng::core::AllocatorRef alloc = dng::memory::MemorySystem::GetSmallObjectAllocator();
         if (!alloc.IsValid())
         {
-            outReason = "small object allocator unavailable";
+            outReason = (unavailableReason != nullptr) ? unavailableReason : "allocator unavailable";
             return false;
         }
 
-        constexpr int kOpsPerIter = 32;
-        constexpr dng::usize kAllocSize = 32u;
-        constexpr dng::usize kAllocAlignment = alignof(std::max_align_t);
+        if (opsPerIter <= 0)
+        {
+            outReason = "allocator opsPerIter must be positive";
+            return false;
+        }
+
+        if (allocSize == 0u)
+        {
+            outReason = "allocator allocSize must be > 0";
+            return false;
+        }
 
         std::uint64_t acc = 0;
-        void* blocks[kOpsPerIter]{};
+        void* blocks[64]{};
+        if (opsPerIter > 64)
+        {
+            outReason = "allocator opsPerIter exceeds internal bench capacity";
+            return false;
+        }
 
         for (int i = 0; i < iterations; ++i)
         {
-            for (int n = 0; n < kOpsPerIter; ++n)
+            for (int n = 0; n < opsPerIter; ++n)
             {
-                blocks[n] = alloc.AllocateBytes(kAllocSize, kAllocAlignment);
+                blocks[n] = alloc.AllocateBytes(allocSize, allocAlignment);
                 if (blocks[n] == nullptr)
                 {
-                    outReason = "small object allocation failed";
+                    outReason = (allocFailureReason != nullptr) ? allocFailureReason : "allocator allocation failed";
                     return false;
                 }
 
                 auto* bytes = static_cast<std::uint8_t*>(blocks[n]);
                 bytes[0] = static_cast<std::uint8_t>(n);
-                bytes[kAllocSize - 1u] = static_cast<std::uint8_t>(i);
-                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kAllocSize - 1u]);
+                bytes[allocSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[allocSize - 1u]);
             }
 
-            for (int n = kOpsPerIter - 1; n >= 0; --n)
+            for (int n = opsPerIter - 1; n >= 0; --n)
             {
-                alloc.DeallocateBytes(blocks[n], kAllocSize, kAllocAlignment);
+                alloc.DeallocateBytes(blocks[n], allocSize, allocAlignment);
             }
         }
 
@@ -671,7 +823,87 @@ namespace
         return true;
     }
 
+    bool Bench_SmallObjectAllocFreeSized(int iterations,
+                                         volatile std::uint64_t& sink,
+                                         const char*& outReason,
+                                         dng::usize allocSize,
+                                         dng::usize allocAlignment,
+                                         int opsPerIter) noexcept
+    {
+        return Bench_AllocatorRefAllocFree(iterations,
+                                           sink,
+                                           outReason,
+                                           dng::memory::MemorySystem::GetSmallObjectAllocator(),
+                                           "small object allocator unavailable",
+                                           "small object allocation failed",
+                                           allocSize,
+                                           allocAlignment,
+                                           opsPerIter);
+    }
+
+    bool Bench_TrackingAllocFreeSized(int iterations,
+                                      volatile std::uint64_t& sink,
+                                      const char*& outReason,
+                                      dng::usize allocSize,
+                                      dng::usize allocAlignment,
+                                      int opsPerIter) noexcept
+    {
+        return Bench_AllocatorRefAllocFree(iterations,
+                                           sink,
+                                           outReason,
+                                           dng::memory::MemorySystem::GetTrackingAllocator(),
+                                           "tracking allocator unavailable",
+                                           "tracking allocator allocation failed",
+                                           allocSize,
+                                           allocAlignment,
+                                           opsPerIter);
+    }
+
+    bool Bench_SmallObjectAllocFreeSmall(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_SmallObjectAllocFreeSized(iterations, sink, outReason, 32u, alignof(std::max_align_t), 32);
+    }
+
+    bool Bench_SmallObjectAllocFree16(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_SmallObjectAllocFreeSized(iterations, sink, outReason, 16u, alignof(std::max_align_t), 32);
+    }
+
+    bool Bench_SmallObjectAllocFree64(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_SmallObjectAllocFreeSized(iterations, sink, outReason, 64u, alignof(std::max_align_t), 32);
+    }
+
+    bool Bench_SmallObjectAllocFree256(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_SmallObjectAllocFreeSized(iterations, sink, outReason, 256u, alignof(std::max_align_t), 16);
+    }
+
     bool Bench_TrackingOverheadSmallAlloc(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_TrackingAllocFreeSized(iterations, sink, outReason, 32u, alignof(std::max_align_t), 32);
+    }
+
+    bool Bench_TrackingOverheadAlloc16(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_TrackingAllocFreeSized(iterations, sink, outReason, 16u, alignof(std::max_align_t), 32);
+    }
+
+    bool Bench_TrackingOverheadAlloc64(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_TrackingAllocFreeSized(iterations, sink, outReason, 64u, alignof(std::max_align_t), 32);
+    }
+
+    bool Bench_TrackingOverheadAlloc256(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_TrackingAllocFreeSized(iterations, sink, outReason, 256u, alignof(std::max_align_t), 16);
+    }
+
+    bool Bench_MallocFreeSized(int iterations,
+                               volatile std::uint64_t& sink,
+                               const char*& outReason,
+                               std::size_t allocSize,
+                               int opsPerIter) noexcept
     {
         outReason = nullptr;
         if (iterations < 0)
@@ -680,45 +912,61 @@ namespace
             return false;
         }
 
-        dng::core::AllocatorRef alloc = dng::memory::MemorySystem::GetTrackingAllocator();
-        if (!alloc.IsValid())
+        if (opsPerIter <= 0)
         {
-            outReason = "tracking allocator unavailable";
+            outReason = "malloc bench opsPerIter must be positive";
             return false;
         }
 
-        constexpr int kOpsPerIter = 32;
-        constexpr dng::usize kAllocSize = 32u;
-        constexpr dng::usize kAllocAlignment = alignof(std::max_align_t);
+        if (allocSize == 0u)
+        {
+            outReason = "malloc bench allocSize must be > 0";
+            return false;
+        }
+
+        void* blocks[64]{};
+        if (opsPerIter > 64)
+        {
+            outReason = "malloc bench opsPerIter exceeds internal bench capacity";
+            return false;
+        }
 
         std::uint64_t acc = 0;
-        void* blocks[kOpsPerIter]{};
-
         for (int i = 0; i < iterations; ++i)
         {
-            for (int n = 0; n < kOpsPerIter; ++n)
+            for (int n = 0; n < opsPerIter; ++n)
             {
-                blocks[n] = alloc.AllocateBytes(kAllocSize, kAllocAlignment);
+                blocks[n] = std::malloc(allocSize);
                 if (blocks[n] == nullptr)
                 {
-                    outReason = "tracking allocator allocation failed";
+                    outReason = "malloc allocation failed";
                     return false;
                 }
 
                 auto* bytes = static_cast<std::uint8_t*>(blocks[n]);
                 bytes[0] = static_cast<std::uint8_t>(n);
-                bytes[kAllocSize - 1u] = static_cast<std::uint8_t>(i);
-                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kAllocSize - 1u]);
+                bytes[allocSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[allocSize - 1u]);
             }
 
-            for (int n = kOpsPerIter - 1; n >= 0; --n)
+            for (int n = opsPerIter - 1; n >= 0; --n)
             {
-                alloc.DeallocateBytes(blocks[n], kAllocSize, kAllocAlignment);
+                std::free(blocks[n]);
             }
         }
 
         sink ^= acc;
         return true;
+    }
+
+    bool Bench_MallocFree64(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_MallocFreeSized(iterations, sink, outReason, 64u, 32);
+    }
+
+    bool Bench_MallocFree256(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        return Bench_MallocFreeSized(iterations, sink, outReason, 256u, 16);
     }
 
     bool Bench_AudioMixNull1024fStereo(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
@@ -1482,6 +1730,9 @@ namespace
         os << "    \"maxRepeat\": " << args.maxRepeats << ",\n";
         os << "    \"iterations\": " << args.iterations << ",\n";
         os << "    \"strictStability\": " << (args.strictStability ? "true" : "false") << ",\n";
+        os << "    \"memoryOnly\": " << (args.memoryOnly ? "true" : "false") << ",\n";
+        os << "    \"memoryMatrix\": " << (args.memoryMatrix ? "true" : "false") << ",\n";
+        os << "    \"benchFilter\": \"" << EscapeJson(args.benchFilter) << "\",\n";
         const std::string sha = GetEnv("GITHUB_SHA");
         if (!sha.empty()) { os << "    \"gitSha\": \"" << EscapeJson(sha) << "\",\n"; }
         os << "    \"schemaVersion\": " << kBenchSchemaVersion << "\n";
@@ -1536,27 +1787,80 @@ int main(int argc, char** argv)
     const int poolIter = args.iterations > 5000 ? args.iterations / 5000 : 3000;
     const int smallObjectIter = args.iterations > 5000 ? args.iterations / 5000 : 3000;
     const int trackingIter = args.iterations > 6000 ? args.iterations / 6000 : 2500;
+    const int mallocIter = args.iterations > 6000 ? args.iterations / 6000 : 3000;
+    const int memoryMatrixIter = args.iterations > 7000 ? args.iterations / 7000 : 2500;
     const int audioMixIter = args.iterations > 1000 ? args.iterations / 1000 : 1000;
     const int audioPlatformIter = args.iterations > 2000 ? args.iterations / 2000 : 500;
 
-    const std::array<Benchmark, 11> benches = {{
-        {"baseline_loop", baseIter, &Bench_BaselineLoop},
-        {"vec3_dot", vecIter, &Bench_Vec3Dot},
-        {"memcpy_64", memcpyIter, &Bench_Memcpy64},
-        {"arena_alloc_reset", arenaIter, &Bench_ArenaAllocReset},
-        {"frame_alloc_reset", frameIter, &Bench_FrameAllocReset},
-        {"pool_alloc_free_fixed", poolIter, &Bench_PoolAllocFreeFixed},
-        {"small_object_alloc_free_small", smallObjectIter, &Bench_SmallObjectAllocFreeSmall},
-        {"tracking_overhead_small_alloc", trackingIter, &Bench_TrackingOverheadSmallAlloc},
-        {"audio_mix_null_1024f_stereo", audioMixIter, &Bench_AudioMixNull1024fStereo},
-        {"audio_mix_mem_clip_platform_1024f_stereo", audioPlatformIter, &Bench_AudioMixMemoryClipPlatform1024fStereo},
-        {"audio_mix_stream_clip_platform_1024f_stereo", audioPlatformIter, &Bench_AudioMixStreamClipPlatform1024fStereo},
-    }};
+    std::vector<Benchmark> benches;
+    benches.reserve(args.memoryMatrix ? 24u : 11u);
+
+    const auto addBench = [&](std::string_view name, int iterations, BenchFn fn, bool isMemory) {
+        benches.push_back(Benchmark{name, iterations, fn, isMemory});
+    };
+
+    addBench("baseline_loop", baseIter, &Bench_BaselineLoop, false);
+    addBench("vec3_dot", vecIter, &Bench_Vec3Dot, false);
+    addBench("memcpy_64", memcpyIter, &Bench_Memcpy64, false);
+    addBench("arena_alloc_reset", arenaIter, &Bench_ArenaAllocReset, true);
+    addBench("frame_alloc_reset", frameIter, &Bench_FrameAllocReset, true);
+    addBench("pool_alloc_free_fixed", poolIter, &Bench_PoolAllocFreeFixed, true);
+    addBench("small_object_alloc_free_small", smallObjectIter, &Bench_SmallObjectAllocFreeSmall, true);
+    addBench("tracking_overhead_small_alloc", trackingIter, &Bench_TrackingOverheadSmallAlloc, true);
+    addBench("audio_mix_null_1024f_stereo", audioMixIter, &Bench_AudioMixNull1024fStereo, false);
+    addBench("audio_mix_mem_clip_platform_1024f_stereo", audioPlatformIter, &Bench_AudioMixMemoryClipPlatform1024fStereo, false);
+    addBench("audio_mix_stream_clip_platform_1024f_stereo", audioPlatformIter, &Bench_AudioMixStreamClipPlatform1024fStereo, false);
+
+    if (args.memoryMatrix)
+    {
+        addBench("malloc_free_64", mallocIter, &Bench_MallocFree64, true);
+        addBench("malloc_free_256", mallocIter, &Bench_MallocFree256, true);
+        addBench("arena_alloc_reset_16b", memoryMatrixIter, &Bench_ArenaAllocReset16, true);
+        addBench("arena_alloc_reset_256b", memoryMatrixIter, &Bench_ArenaAllocReset256, true);
+        addBench("arena_alloc_reset_64b_align64", memoryMatrixIter, &Bench_ArenaAllocReset64Align64, true);
+        addBench("frame_alloc_reset_16b", memoryMatrixIter, &Bench_FrameAllocReset16, true);
+        addBench("frame_alloc_reset_256b", memoryMatrixIter, &Bench_FrameAllocReset256, true);
+        addBench("frame_alloc_reset_64b_align64", memoryMatrixIter, &Bench_FrameAllocReset64Align64, true);
+        addBench("small_object_alloc_free_16b", memoryMatrixIter, &Bench_SmallObjectAllocFree16, true);
+        addBench("small_object_alloc_free_64b", memoryMatrixIter, &Bench_SmallObjectAllocFree64, true);
+        addBench("small_object_alloc_free_256b", memoryMatrixIter, &Bench_SmallObjectAllocFree256, true);
+        addBench("tracking_overhead_alloc_16b", memoryMatrixIter, &Bench_TrackingOverheadAlloc16, true);
+        addBench("tracking_overhead_alloc_64b", memoryMatrixIter, &Bench_TrackingOverheadAlloc64, true);
+        addBench("tracking_overhead_alloc_256b", memoryMatrixIter, &Bench_TrackingOverheadAlloc256, true);
+    }
+
+    if (args.memoryOnly)
+    {
+        benches.erase(std::remove_if(benches.begin(),
+                                     benches.end(),
+                                     [](const Benchmark& bench) { return !bench.isMemory; }),
+                     benches.end());
+    }
+
+    if (!args.benchFilter.empty())
+    {
+        benches.erase(std::remove_if(benches.begin(),
+                                     benches.end(),
+                                     [&](const Benchmark& bench) {
+                                         return !ContainsCaseInsensitive(bench.name, args.benchFilter);
+                                     }),
+                     benches.end());
+    }
+
+    if (benches.empty())
+    {
+        std::fprintf(stderr, "No benchmarks selected. Adjust --memory-only/--memory-matrix/--bench-filter.\n");
+        if (ownsMemorySystem)
+        {
+            dng::memory::MemorySystem::Shutdown();
+        }
+        return 2;
+    }
 
     std::vector<BenchSample> results;
     results.reserve(benches.size());
 
-    for (const auto& bench : benches)
+    for (const Benchmark& bench : benches)
     {
         BenchSample sample = RunBenchmark(bench, args);
         std::printf("%s: %s value=%.6f rsd=%.3f repeats=%d",
@@ -1579,6 +1883,7 @@ int main(int argc, char** argv)
 
     if (ownsMemorySystem)
     {
+        dng::memory::MemorySystem::OnThreadDetach();
         dng::memory::MemorySystem::Shutdown();
     }
 

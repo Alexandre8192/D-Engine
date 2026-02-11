@@ -19,3 +19,12 @@ This folder collects the compile-only and smoke helpers that keep the header-fir
 - Run `x64\\Debug\\AllSmokes.exe` (or Release) for aggregate smoke coverage.
 - Run `x64\\Debug\\ModuleSmoke.exe` (or Release) for ABI module smoke coverage.
 - Run `x64\\Release\\D-Engine-BenchRunner.exe` for benchmark coverage.
+- For focused memory perf runs:
+  - `x64\\Release\\D-Engine-BenchRunner.exe --memory-only --memory-matrix --cpu-info`
+  - `python tools/bench_sweep.py --memory-only --memory-matrix --strict-stability`
+  - `python tools/memory_bench_sweep.py --strict-stability`
+
+## Memory Coverage
+- Runtime memory smokes executed by `AllSmokes`: `ArenaAllocator`, `FrameAllocator`, `StackAllocator`, `SmallObjectAllocator`, `LoggerOnly`, `GuardAllocatorAlignment`, `AllocatorAdapter`, `FrameScope`, `MemorySystem`, `NewDelete`, `OOMPolicy`, `PageAllocator`, `PoolAllocator`, `SmallObjectTLSBins`, `TrackingAllocator`.
+- Build-only memory checks compiled with `D-Engine.vcxproj`: `Test_MemoryRuntimeOverrides_BuildOnly.cpp`, `SelfContain/SmallObjectAllocator_header_only.cpp`, and the memory self-contain/header-order tests under `tests/SelfContain/`.
+- Bench memory performance coverage is provided by `BenchRunner` (`ArenaAllocReset`, `FrameAllocReset`, `PoolAllocFreeFixed`, `SmallObjectAllocFreeSmall`, `TrackingOverheadSmallAlloc`).

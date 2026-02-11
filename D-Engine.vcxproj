@@ -67,8 +67,10 @@
     <ClCompile Include="Source\Core\Interop\ModuleLoader.cpp" />
     <ClCompile Include="Source\Core\Math\Math.cpp" />
     <ClCompile Include="tests\Test_GlobalNewDelete_BuildOnly.cpp" />
+    <ClCompile Include="tests\Test_MemoryRuntimeOverrides_BuildOnly.cpp" />
     <ClCompile Include="tests\Test_StdAliases_BuildOnly.cpp" />
     <ClCompile Include="tests\SelfContain\ArenaAllocator_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\SmallObjectAllocator_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\StackAllocator_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\MemoryConfig_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\OOM_header_only.cpp" />
@@ -89,7 +91,16 @@
     <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="tests\Renderer_BasicForwardRenderer_demo.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\AllocatorAdapter_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\frame_scope_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Memory\guard_allocator_alignment_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\memory_system_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\new_delete_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\oom_policy_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\page_allocator_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\pool_allocator_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\small_object_tls_bins_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Memory\tracking_allocator_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Determinism\ReplayHash_smoke.cpp" />
     <ClCompile Include="tests\Math\Mat4_Convention_tests.cpp" />
     <ClCompile Include="tests\Math\Math_core_tests.cpp" />

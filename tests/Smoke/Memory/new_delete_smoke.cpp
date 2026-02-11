@@ -1,48 +1,49 @@
-#if __has_include("Core/Memory/MemorySystem.hpp")
-#    include "Core/Memory/MemorySystem.hpp"
-#else
-#    include <cstddef>
-#    include <new>
-namespace dng { namespace memory {
-    struct MemorySystemPlaceholder final
-    {
-        static void Init(std::size_t = 0, const std::nothrow_t* = nullptr) noexcept {}
-        static void Shutdown() noexcept {}
-    };
-} }
-#endif
-
-#if 0
 #include <new>
 
-namespace dng::tests
+namespace
 {
     struct alignas(32) AlignedPod
     {
         unsigned char payload[64];
     };
-
-    inline void NewDeleteSmoke() noexcept
-    {
-        auto* scalar = new AlignedPod{};
-        delete scalar;
-
-        auto* scalarAligned = new (std::align_val_t{32}) AlignedPod{};
-        delete scalarAligned;
-
-        auto* arrayDefault = new AlignedPod[4];
-        delete[] arrayDefault;
-
-        auto* arrayAligned = new (std::align_val_t{32}) AlignedPod[2];
-        delete[] arrayAligned;
-
-        auto* arrayAlignedNoThrow = new (std::align_val_t{16}, std::nothrow) AlignedPod[1];
-        delete[] arrayAlignedNoThrow;
-
-    #if defined(DNG_MEMORY_TEST_FORCE_OOM)
-        void* forced = ::operator new(128, std::nothrow);
-        (void)forced;
-    #endif
-    }
 }
-#endif
+
+int RunNewDeleteSmoke()
+{
+    auto* scalar = new (std::nothrow) AlignedPod{};
+    if (!scalar)
+    {
+        return 1;
+    }
+    delete scalar;
+
+    auto* scalarAligned = new (std::align_val_t{32}, std::nothrow) AlignedPod{};
+    if (!scalarAligned)
+    {
+        return 2;
+    }
+    delete scalarAligned;
+
+    auto* arrayDefault = new (std::nothrow) AlignedPod[4];
+    if (!arrayDefault)
+    {
+        return 3;
+    }
+    delete[] arrayDefault;
+
+    auto* arrayAligned = new (std::align_val_t{32}, std::nothrow) AlignedPod[2];
+    if (!arrayAligned)
+    {
+        return 4;
+    }
+    delete[] arrayAligned;
+
+    auto* arrayAlignedNoThrow = new (std::align_val_t{16}, std::nothrow) AlignedPod[1];
+    if (!arrayAlignedNoThrow)
+    {
+        return 5;
+    }
+    delete[] arrayAlignedNoThrow;
+
+    return 0;
+}

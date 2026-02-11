@@ -23,26 +23,42 @@
 #    include "../../Source/Core/Memory/DefaultAllocator.hpp"
 #endif
 
+#if __has_include("Core/Memory/TrackingAllocator.hpp")
+#    include "Core/Memory/TrackingAllocator.hpp"
+#else
+#    include "../../Source/Core/Memory/TrackingAllocator.hpp"
+#endif
+
 #include <cstdint>
 
 int RunSmallObjectAllocatorSmoke()
 {
     ::dng::core::DefaultAllocator parent{};
+    ::dng::core::TrackingAllocator tracking(&parent);
 
     ::dng::core::SmallObjectConfig cfg{};
     cfg.EnableTLSBins = false;
     cfg.SlabSizeBytes = 4096;
     cfg.MaxClassSize = 256;
 
-    ::dng::core::SmallObjectAllocator allocator(&parent, cfg);
+    {
+        ::dng::core::SmallObjectAllocator allocator(&tracking, cfg);
 
-    constexpr std::size_t kSize = 48;
-    constexpr std::size_t kAlign = alignof(std::max_align_t);
+        constexpr std::size_t kSize = 48;
+        constexpr std::size_t kAlign = alignof(std::max_align_t);
 
-    void* block = allocator.Allocate(kSize, kAlign);
-    DNG_CHECK(block != nullptr);
+        void* block = allocator.Allocate(kSize, kAlign);
+        DNG_CHECK(block != nullptr);
 
-    allocator.Deallocate(block, kSize, kAlign);
+        allocator.Deallocate(block, kSize, kAlign);
+    }
+
+#if DNG_MEM_TRACKING
+    if (tracking.GetActiveAllocationCount() != 0u)
+    {
+        return 1;
+    }
+#endif
 
     return 0;
 }

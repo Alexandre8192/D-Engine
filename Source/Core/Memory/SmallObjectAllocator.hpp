@@ -117,6 +117,42 @@ class SmallObjectAllocator final : public IAllocator
 #endif
             mAlive.store(false, std::memory_order_release);
 
+            // Clear shard free-list heads before slab teardown to avoid stale links.
+            if (mShards != nullptr)
+            {
+                for (usize shardIdx = 0; shardIdx < mShardCount; ++shardIdx)
+                {
+                    Shard& shard = mShards[shardIdx];
+                    std::scoped_lock shardGuard(shard.Mutex);
+                    for (i32 classIdx = 0; classIdx < kNumClasses; ++classIdx)
+                    {
+                        shard.FreeLists[classIdx] = nullptr;
+                    }
+                }
+            }
+
+            // Release all slabs acquired from the parent allocator.
+            for (i32 classIdx = 0; classIdx < kNumClasses; ++classIdx)
+            {
+                Class& klass = mClasses[classIdx];
+                std::scoped_lock slabGuard(klass.SlabMutex);
+
+                SlabHeader* slab = klass.Slabs;
+                while (slab != nullptr)
+                {
+                    SlabHeader* next = slab->Next;
+                    mParent->Deallocate(static_cast<void*>(slab),
+                        mCfg.SlabSizeBytes,
+                        alignof(std::max_align_t));
+                    slab = next;
+                }
+
+                klass.Slabs = nullptr;
+                klass.SlabCount.store(0, std::memory_order_relaxed);
+                klass.FreeCount.store(0, std::memory_order_relaxed);
+                klass.CachedCount.store(0, std::memory_order_relaxed);
+            }
+
             if (mShards != nullptr)
             {
                 for (usize i = 0; i < mShardCount; ++i)

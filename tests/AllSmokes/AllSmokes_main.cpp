@@ -24,6 +24,17 @@ int RunArenaAllocatorSmoke();
 int RunFrameAllocatorSmoke();
 int RunStackAllocatorSmoke();
 int RunSmallObjectAllocatorSmoke();
+int RunLoggerOnlySmoke();
+int RunGuardAllocatorAlignmentSmoke();
+int RunAllocatorAdapterSmoke();
+int RunFrameScopeSmoke();
+int RunMemorySystemSmoke();
+int RunNewDeleteSmoke();
+int RunOOMPolicySmoke();
+int RunPageAllocatorSmoke();
+int RunPoolAllocatorSmoke();
+int RunSmallObjectTLSBinsSmoke();
+int RunTrackingAllocatorSmoke();
 
 namespace
 {
@@ -53,6 +64,17 @@ int main()
         {"FrameAllocator", &RunFrameAllocatorSmoke},
         {"StackAllocator", &RunStackAllocatorSmoke},
         {"SmallObjectAllocator", &RunSmallObjectAllocatorSmoke},
+        {"LoggerOnly", &RunLoggerOnlySmoke},
+        {"GuardAllocatorAlignment", &RunGuardAllocatorAlignmentSmoke},
+        {"AllocatorAdapter", &RunAllocatorAdapterSmoke},
+        {"FrameScope", &RunFrameScopeSmoke},
+        {"MemorySystem", &RunMemorySystemSmoke},
+        {"NewDelete", &RunNewDeleteSmoke},
+        {"OOMPolicy", &RunOOMPolicySmoke},
+        {"PageAllocator", &RunPageAllocatorSmoke},
+        {"PoolAllocator", &RunPoolAllocatorSmoke},
+        {"SmallObjectTLSBins", &RunSmallObjectTLSBinsSmoke},
+        {"TrackingAllocator", &RunTrackingAllocatorSmoke},
     };
 
     int failures = 0;

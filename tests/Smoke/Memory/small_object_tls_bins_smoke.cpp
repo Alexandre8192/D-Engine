@@ -71,3 +71,9 @@ namespace
     }
 #endif
 } // namespace
+
+int RunSmallObjectTLSBinsSmoke()
+{
+    InvokeTLSBinsSmoke();
+    return 0;
+}

@@ -154,10 +154,21 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AllSmokes_main.cpp" />
+    <ClCompile Include="..\Smoke\Memory\AllocatorAdapter_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\arena_allocator_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\frame_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\frame_scope_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\guard_allocator_alignment_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\Logger_only.cpp" />
+    <ClCompile Include="..\Smoke\Memory\memory_system_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\new_delete_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\oom_policy_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\page_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\pool_allocator_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\small_object_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\small_object_tls_bins_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\stack_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\tracking_allocator_smoke.cpp" />
     <ClCompile Include="..\Smoke\Determinism\ReplayHash_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\FileSystem_smoke.cpp" />

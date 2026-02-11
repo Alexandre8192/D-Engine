@@ -1,22 +1,55 @@
 // ============================================================================
-// Tracking Allocator Smoke Test (compile-only)
+// Tracking Allocator Smoke Test
 // ----------------------------------------------------------------------------
-// Ensures the public TrackingAllocator headers compile in isolation.
+// Ensures the public TrackingAllocator headers compile in isolation and
+// validates a basic allocate/deallocate flow.
 // ============================================================================
 
-#if __has_include("Core/CoreMinimal.hpp")
-#    include "Core/CoreMinimal.hpp"
+#if __has_include("Core/Memory/TrackingAllocator.hpp")
+#    include "Core/Memory/TrackingAllocator.hpp"
 #else
-#    include "../../Source/Core/CoreMinimal.hpp"
+#    include "../../Source/Core/Memory/TrackingAllocator.hpp"
 #endif
 
-#if 0
-using namespace dng::core;
+#if __has_include("Core/Memory/DefaultAllocator.hpp")
+#    include "Core/Memory/DefaultAllocator.hpp"
+#else
+#    include "../../Source/Core/Memory/DefaultAllocator.hpp"
+#endif
 
-static void TrackingAllocatorSmoke(TrackingAllocator& tracking)
+#include <cstddef>
+
+int RunTrackingAllocatorSmoke()
 {
-    AllocInfo info{ AllocTag::General, "Smoke" };
-    void* ptr = tracking.AllocateTagged(64, alignof(std::max_align_t), info);
-    tracking.Deallocate(ptr, 64, alignof(std::max_align_t));
-}
+    ::dng::core::DefaultAllocator parent{};
+    ::dng::core::TrackingAllocator tracking(&parent);
+
+    constexpr std::size_t kSize = 64u;
+    constexpr std::size_t kAlign = alignof(std::max_align_t);
+    const ::dng::core::AllocInfo info{ ::dng::core::AllocTag::General, "TrackingSmoke" };
+
+    void* ptr = tracking.AllocateTagged(kSize, kAlign, info);
+    if (!ptr)
+    {
+        return 1;
+    }
+
+#if DNG_MEM_TRACKING
+    if (tracking.GetActiveAllocationCount() == 0u)
+    {
+        tracking.Deallocate(ptr, kSize, kAlign);
+        return 2;
+    }
 #endif
+
+    tracking.Deallocate(ptr, kSize, kAlign);
+
+#if DNG_MEM_TRACKING
+    if (tracking.GetActiveAllocationCount() != 0u)
+    {
+        return 3;
+    }
+#endif
+
+    return 0;
+}

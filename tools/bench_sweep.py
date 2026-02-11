@@ -18,6 +18,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--repeat", type=int, default=3)
     parser.add_argument("--target-rsd", type=float, default=3.0)
+    parser.add_argument("--iterations", type=int, default=None)
+    parser.add_argument("--memory-only", action="store_true")
+    parser.add_argument("--memory-matrix", action="store_true")
+    parser.add_argument("--bench-filter", type=str, default="")
     parser.add_argument("--emit-md", type=Path, default=None)
     parser.add_argument("--strict-stability", action="store_true")
     return parser.parse_args()
@@ -42,13 +46,38 @@ def latest_bench_json(root: Path) -> Path:
 
 
 def format_md(payload: dict, json_path: Path) -> str:
+    def is_memory_bench(name: str) -> bool:
+        key = name.lower()
+        return any(
+            token in key
+            for token in (
+                "arena",
+                "frame",
+                "pool",
+                "small_object",
+                "tracking",
+                "malloc",
+                "alloc",
+                "memory",
+            )
+        )
+
     lines: List[str] = []
     lines.append("# Bench Sweep Report")
     lines.append("")
     lines.append(f"- JSON: `{json_path}`")
+    metadata = payload.get("metadata", {})
+    if isinstance(metadata, dict):
+        if "memoryOnly" in metadata:
+            lines.append(f"- memoryOnly: `{metadata.get('memoryOnly')}`")
+        if "memoryMatrix" in metadata:
+            lines.append(f"- memoryMatrix: `{metadata.get('memoryMatrix')}`")
+        if "benchFilter" in metadata:
+            lines.append(f"- benchFilter: `{metadata.get('benchFilter')}`")
     lines.append("")
     lines.append("| Benchmark | Status | ns/op | rsd% | bytes/op | allocs/op | Reason |")
     lines.append("|---|---:|---:|---:|---:|---:|---|")
+    memory_rows: List[str] = []
     for item in payload.get("benchmarks", []):
         if not isinstance(item, dict):
             continue
@@ -59,10 +88,19 @@ def format_md(payload: dict, json_path: Path) -> str:
         bytes_per_op = item.get("bytesPerOp", -1.0)
         allocs_per_op = item.get("allocsPerOp", -1.0)
         reason = item.get("reason", "")
-        lines.append(
+        row = (
             f"| {name} | {status} | {float(value):.6f} | {float(rsd):.3f} | "
             f"{float(bytes_per_op):.6f} | {float(allocs_per_op):.6f} | {reason} |"
         )
+        lines.append(row)
+        if is_memory_bench(str(name)):
+            memory_rows.append(row)
+    if memory_rows:
+        lines.append("")
+        lines.append("## Memory Benchmarks")
+        lines.append("| Benchmark | Status | ns/op | rsd% | bytes/op | allocs/op | Reason |")
+        lines.append("|---|---:|---:|---:|---:|---:|---|")
+        lines.extend(memory_rows)
     lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -87,6 +125,14 @@ def main() -> int:
     ]
     if args.strict_stability:
         cmd.append("--strict-stability")
+    if args.iterations is not None:
+        cmd.extend(["--iterations", str(max(args.iterations, 1))])
+    if args.memory_only:
+        cmd.append("--memory-only")
+    if args.memory_matrix:
+        cmd.append("--memory-matrix")
+    if args.bench_filter:
+        cmd.extend(["--bench-filter", args.bench_filter])
 
     env = dict(os.environ)
     env["DNG_BENCH_OUT"] = str(out_dir)
