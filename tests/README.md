@@ -23,6 +23,9 @@ This folder collects the compile-only and smoke helpers that keep the header-fir
   - `x64\\Release\\D-Engine-BenchRunner.exe --memory-only --memory-matrix --cpu-info`
   - `python tools/bench_sweep.py --memory-only --memory-matrix --strict-stability`
   - `python tools/memory_bench_sweep.py --strict-stability`
+  - Memory baseline reference: `bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json`
+  - Compare latest memory sweep to baseline:
+    `python tools/bench_compare.py bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json <current_memory_bench_json>`
 
 ## Memory Coverage
 - Runtime memory smokes executed by `AllSmokes`: `ArenaAllocator`, `FrameAllocator`, `StackAllocator`, `SmallObjectAllocator`, `LoggerOnly`, `GuardAllocatorAlignment`, `AllocatorAdapter`, `FrameScope`, `MemorySystem`, `NewDelete`, `OOMPolicy`, `PageAllocator`, `PoolAllocator`, `SmallObjectTLSBins`, `TrackingAllocator`.
