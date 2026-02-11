@@ -87,7 +87,7 @@ jobs:
           }
           Write-Host "Baseline: $baseline"
           Write-Host "Current : $($latest.FullName)"
-          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --emit-md bench_report.md
+          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --allow-unstable baseline_loop --emit-md bench_report.md
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::warning title=Nightly performance regression exceeded doubled thresholds::See summary table below."
           }

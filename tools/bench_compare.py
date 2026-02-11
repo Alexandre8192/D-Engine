@@ -9,6 +9,7 @@ Exit code:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import math
 import os
@@ -40,6 +41,13 @@ class BenchEntry:
     allocs_per_op: float
     status: str
     reason: str
+
+
+def env_list(name: str) -> List[str]:
+    text = os.environ.get(name, "")
+    if not text:
+        return []
+    return [part.strip() for part in text.split(",") if part.strip()]
 
 
 def env_float(name: str, default: float) -> float:
@@ -82,6 +90,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--allocs-op-max-abs", type=float, default=env_float("ALLOCS_OP_MAX_ABS", 0.0))
     parser.add_argument("--allocs-op-max-rel-pct", type=float, default=env_float("ALLOCS_OP_MAX_REL_PCT", 0.0))
     parser.add_argument("--fail-on-skip", action="store_true", default=env_bool("PERF_FAIL_ON_SKIP", False))
+    parser.add_argument(
+        "--allow-unstable",
+        action="append",
+        default=env_list("PERF_ALLOW_UNSTABLE"),
+        help="Benchmark name/pattern to treat unstable status as warning (repeatable, supports wildcards).",
+    )
+    parser.add_argument(
+        "--allow-unstable-from-baseline",
+        action="store_true",
+        default=env_bool("PERF_ALLOW_UNSTABLE_FROM_BASELINE", False),
+        help="Treat unstable current results as warnings when baseline status is also unstable.",
+    )
+    parser.add_argument(
+        "--ignore-benchmark",
+        action="append",
+        default=env_list("PERF_IGNORE_BENCH"),
+        help="Benchmark name/pattern to ignore completely (repeatable, supports wildcards).",
+    )
     return parser.parse_args()
 
 
@@ -123,6 +149,24 @@ def map_entries(payload: dict) -> Dict[str, BenchEntry]:
         if entry.name:
             mapped[entry.name] = entry
     return mapped
+
+
+def flatten_patterns(raw_patterns: List[str]) -> List[str]:
+    patterns: List[str] = []
+    for item in raw_patterns:
+        for token in item.split(","):
+            value = token.strip()
+            if value:
+                patterns.append(value)
+    return patterns
+
+
+def matches_any(name: str, patterns: List[str]) -> bool:
+    lowered = name.lower()
+    for pattern in patterns:
+        if fnmatch.fnmatchcase(lowered, pattern.lower()):
+            return True
+    return False
 
 
 def classify_threshold(name: str, thresholds: Thresholds) -> Tuple[float, float]:
@@ -195,6 +239,8 @@ def main() -> int:
     current_payload = load_json(args.current)
     baseline = map_entries(baseline_payload)
     current = map_entries(current_payload)
+    allow_unstable_patterns = flatten_patterns(args.allow_unstable)
+    ignore_patterns = flatten_patterns(args.ignore_benchmark)
 
     failures: List[str] = []
     warnings: List[str] = []
@@ -202,6 +248,10 @@ def main() -> int:
 
     baseline_names = set(baseline.keys())
     current_names = set(current.keys())
+
+    if ignore_patterns:
+        baseline_names = {name for name in baseline_names if not matches_any(name, ignore_patterns)}
+        current_names = {name for name in current_names if not matches_any(name, ignore_patterns)}
 
     missing = sorted(baseline_names - current_names)
     added = sorted(current_names - baseline_names)
@@ -219,8 +269,21 @@ def main() -> int:
             failures.append(f"{name}: benchmark status=error ({cur.reason})")
             verdict = "FAIL"
         elif cur.status == "unstable":
-            failures.append(f"{name}: benchmark status=unstable (rsd={cur.rsd_pct:.3f}%)")
-            verdict = "FAIL"
+            allow_from_pattern = matches_any(name, allow_unstable_patterns)
+            allow_from_baseline = args.allow_unstable_from_baseline and base.status == "unstable"
+            if allow_from_pattern or allow_from_baseline:
+                reason_parts: List[str] = []
+                if allow_from_pattern:
+                    reason_parts.append("allow-unstable pattern")
+                if allow_from_baseline:
+                    reason_parts.append("baseline already unstable")
+                reasons = ", ".join(reason_parts)
+                warnings.append(
+                    f"{name}: benchmark status=unstable (rsd={cur.rsd_pct:.3f}%, treated as warning: {reasons})"
+                )
+            else:
+                failures.append(f"{name}: benchmark status=unstable (rsd={cur.rsd_pct:.3f}%)")
+                verdict = "FAIL"
         elif cur.status == "skipped":
             message = f"{name}: benchmark status=skipped ({cur.reason})"
             if thresholds.fail_on_skip:

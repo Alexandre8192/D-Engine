@@ -166,8 +166,11 @@
     <ClCompile Include="..\Smoke\Memory\page_allocator_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\pool_allocator_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\small_object_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\small_object_fragmentation_longrun_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\small_object_thread_stress_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\small_object_tls_bins_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\stack_allocator_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\memory_oom_alignment_extremes_smoke.cpp" />
     <ClCompile Include="..\Smoke\Memory\tracking_allocator_smoke.cpp" />
     <ClCompile Include="..\Smoke\Determinism\ReplayHash_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />

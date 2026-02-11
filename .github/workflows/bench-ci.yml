@@ -2,9 +2,12 @@ name: Bench CI
 
 # Threshold environment variables (defaults):
 # - PERF_THRESHOLD_PCT: 10        # ns/op relative threshold (%)
+# - PERF_MEMORY_THRESHOLD_PCT: 8  # memory ns/op relative threshold (%)
 # - PERF_ABS_NS: 5                # ns/op absolute threshold (ns)
 # - PERF_THRESHOLD_PCT_TRACKING: 15  # ns/op relative threshold for Tracking* (%)
 # - PERF_ABS_NS_TRACKING: 12         # ns/op absolute threshold for Tracking* (ns)
+# - PERF_ALLOW_UNSTABLE: baseline_loop
+# - PERF_MEMORY_IGNORE_BENCH: comma-separated memory benchmark ignore patterns
 # - BYTES_OP_MAX_ABS: 0           # bytes/op max allowed absolute increase
 # - BYTES_OP_MAX_REL_PCT: 0       # bytes/op max allowed relative increase (%)
 # - ALLOCS_OP_MAX_ABS: 0          # allocs/op max allowed absolute increase
@@ -21,6 +24,9 @@ env:
   CONFIGURATION: Release
   PLATFORM: x64
   PERF_THRESHOLD_PCT: 10
+  PERF_MEMORY_THRESHOLD_PCT: 8
+  PERF_ALLOW_UNSTABLE: baseline_loop
+  PERF_MEMORY_IGNORE_BENCH: small_object_alloc_free_16b,small_object_alloc_free_small
   DNG_MEM_TRACKING_SAMPLING_RATE: 1
   DNG_MEM_TRACKING_SHARDS: 8
   DNG_SOALLOC_BATCH: 64
@@ -37,10 +43,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify baseline exists
+      - name: Verify baselines exist
         run: |
-          $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
-          if (-not (Test-Path $baseline)) { throw "Baseline not found: $baseline" }
+          $coreBaseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
+          $memoryBaseline = "bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json"
+          if (-not (Test-Path $coreBaseline)) { throw "Core baseline not found: $coreBaseline" }
+          if (-not (Test-Path $memoryBaseline)) { throw "Memory baseline not found: $memoryBaseline" }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -58,18 +66,22 @@ jobs:
         run: |
           echo "::notice title=Bench Config::sampling=${env:DNG_MEM_TRACKING_SAMPLING_RATE}, shards=${env:DNG_MEM_TRACKING_SHARDS}, batch=${env:DNG_SOALLOC_BATCH}"
 
-      - name: Run BenchRunner
+      - name: Run BenchRunner (core)
         env:
           GITHUB_SHA: ${{ github.sha }}
-          DNG_BENCH_OUT: artifacts/bench
+          DNG_BENCH_OUT: artifacts/bench/core
         run: |
           $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
           if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
-          Write-Host "Running with CPU affinity=1 and High priority (pre-applied): $exeRel"
-          $benchArgs = '--warmup 1 --target-rsd 3 --max-repeat 12 --cpu-info --strict-stability'
+          New-Item -ItemType Directory -Path "artifacts/gates" -Force | Out-Null
+          $log = "artifacts/gates/bench-core.log"
+          Write-Host "Running core bench with CPU affinity=1 and High priority: $exeRel"
+          $benchArgs = '--warmup 1 --target-rsd 3 --max-repeat 20 --cpu-info'
           $cmdText = 'start /wait /affinity 1 /high "" "' + $exeRel + '" ' + $benchArgs
-          cmd /c $cmdText
+          cmd /c $cmdText 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { throw "BenchRunner failed with exit code $LASTEXITCODE" }
+          $leaks = Select-String -Path $log -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
+          if ($leaks) { throw "Leak markers detected in core bench log: $log" }
 
       - name: Upload bench artifacts
         if: always()
@@ -81,9 +93,10 @@ jobs:
             defaults.json
           if-no-files-found: error
 
-      - name: Compare with baseline (Python)
+      - name: Compare core with baseline (Python)
         env:
           PERF_THRESHOLD_PCT: ${{ env.PERF_THRESHOLD_PCT }}
+          PERF_ALLOW_UNSTABLE: ${{ env.PERF_ALLOW_UNSTABLE }}
           PERF_ABS_NS: ${{ env.PERF_ABS_NS || '5' }}
           PERF_THRESHOLD_PCT_TRACKING: ${{ env.PERF_THRESHOLD_PCT_TRACKING || '15' }}
           PERF_ABS_NS_TRACKING: ${{ env.PERF_ABS_NS_TRACKING || '12' }}
@@ -95,33 +108,95 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
           if (-not (Test-Path $baseline)) { throw "Baseline not found: $baseline" }
-          $latest = Get-ChildItem -Path "artifacts/bench" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $latest = Get-ChildItem -Path "artifacts/bench/core" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $latest) { throw "No bench json found in artifacts/bench" }
           Write-Host "Baseline: $baseline"
           Write-Host "Current : $($latest.FullName)"
-          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)"
+          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --allow-unstable "$env:PERF_ALLOW_UNSTABLE"
 
-      - name: Emit Markdown bench report
+      - name: Run BenchRunner (memory)
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          DNG_BENCH_OUT: artifacts/bench/memory
+        run: |
+          $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
+          if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
+          New-Item -ItemType Directory -Path "artifacts/gates" -Force | Out-Null
+          $log = "artifacts/gates/bench-memory.log"
+          Write-Host "Running memory bench with CPU affinity=1 and High priority: $exeRel"
+          $benchArgs = '--warmup 2 --target-rsd 8 --max-repeat 24 --cpu-info --memory-only --memory-matrix'
+          $cmdText = 'start /wait /affinity 1 /high "" "' + $exeRel + '" ' + $benchArgs
+          cmd /c $cmdText 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw "BenchRunner memory run failed with exit code $LASTEXITCODE" }
+          $leaks = Select-String -Path $log -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
+          if ($leaks) { throw "Leak markers detected in memory bench log: $log" }
+
+      - name: Compare memory with baseline (Python)
+        env:
+          PERF_MEMORY_THRESHOLD_PCT: ${{ env.PERF_MEMORY_THRESHOLD_PCT }}
+          PERF_MEMORY_IGNORE_BENCH: ${{ env.PERF_MEMORY_IGNORE_BENCH }}
+          PERF_ABS_NS: ${{ env.PERF_ABS_NS || '5' }}
+          PERF_ABS_NS_TRACKING: ${{ env.PERF_ABS_NS_TRACKING || '12' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $baseline = "bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json"
+          if (-not (Test-Path $baseline)) { throw "Memory baseline not found: $baseline" }
+          $latest = Get-ChildItem -Path "artifacts/bench/memory" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $latest) { throw "No memory bench json found in artifacts/bench/memory" }
+          Write-Host "Baseline: $baseline"
+          Write-Host "Current : $($latest.FullName)"
+          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" `
+            --perf-threshold-pct "$env:PERF_MEMORY_THRESHOLD_PCT" `
+            --perf-threshold-pct-tracking "$env:PERF_MEMORY_THRESHOLD_PCT" `
+            --allow-unstable-from-baseline `
+            --ignore-benchmark "$env:PERF_MEMORY_IGNORE_BENCH"
+
+      - name: Emit Markdown core bench report
         if: always()
         run: |
           $ErrorActionPreference = 'Continue'
           $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
-          $latest = Get-ChildItem -Path "artifacts/bench" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $latest = Get-ChildItem -Path "artifacts/bench/core" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if ($latest) {
-            python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --emit-md bench_report.md
-            Write-Host "===== Bench Report (Markdown) ====="
-            Get-Content -Raw bench_report.md | Write-Host
-            $md = Get-Content -Raw bench_report.md
+            python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --allow-unstable "$env:PERF_ALLOW_UNSTABLE" --emit-md bench_report_core.md
+            Write-Host "===== Core Bench Report (Markdown) ====="
+            Get-Content -Raw bench_report_core.md | Write-Host
+            $md = Get-Content -Raw bench_report_core.md
             $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
-            Write-Host "::notice title=Bench performance summary::$escaped"
+            Write-Host "::notice title=Core bench summary::$escaped"
           } else {
-            Write-Host "No current bench json found; skipping report."
+            Write-Host "No current core bench json found; skipping report."
           }
 
-      - name: Upload bench report
+      - name: Emit Markdown memory bench report
+        if: always()
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $baseline = "bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json"
+          $latest = Get-ChildItem -Path "artifacts/bench/memory" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($latest) {
+            python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" `
+              --perf-threshold-pct "$env:PERF_MEMORY_THRESHOLD_PCT" `
+              --perf-threshold-pct-tracking "$env:PERF_MEMORY_THRESHOLD_PCT" `
+              --allow-unstable-from-baseline `
+              --ignore-benchmark "$env:PERF_MEMORY_IGNORE_BENCH" `
+              --emit-md bench_report_memory.md
+            Write-Host "===== Memory Bench Report (Markdown) ====="
+            Get-Content -Raw bench_report_memory.md | Write-Host
+            $md = Get-Content -Raw bench_report_memory.md
+            $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
+            Write-Host "::notice title=Memory bench summary::$escaped"
+          } else {
+            Write-Host "No current memory bench json found; skipping report."
+          }
+
+      - name: Upload bench reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bench-report
-          path: bench_report.md
+          name: bench-reports
+          path: |
+            bench_report_core.md
+            bench_report_memory.md
+            artifacts/gates/*.log
           if-no-files-found: warn

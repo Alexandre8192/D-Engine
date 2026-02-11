@@ -29,5 +29,6 @@ This folder collects the compile-only and smoke helpers that keep the header-fir
 
 ## Memory Coverage
 - Runtime memory smokes executed by `AllSmokes`: `ArenaAllocator`, `FrameAllocator`, `StackAllocator`, `SmallObjectAllocator`, `LoggerOnly`, `GuardAllocatorAlignment`, `AllocatorAdapter`, `FrameScope`, `MemorySystem`, `NewDelete`, `OOMPolicy`, `PageAllocator`, `PoolAllocator`, `SmallObjectTLSBins`, `TrackingAllocator`.
+- Extended memory stress smokes: `SmallObjectThreadStress` (TLS bins off/on), `SmallObjectFragmentationLongRun`, `MemoryOOMAlignmentExtremes`.
 - Build-only memory checks compiled with `D-Engine.vcxproj`: `Test_MemoryRuntimeOverrides_BuildOnly.cpp`, `SelfContain/SmallObjectAllocator_header_only.cpp`, and the memory self-contain/header-order tests under `tests/SelfContain/`.
 - Bench memory performance coverage is provided by `BenchRunner` (`ArenaAllocReset`, `FrameAllocReset`, `PoolAllocFreeFixed`, `SmallObjectAllocFreeSmall`, `TrackingOverheadSmallAlloc`).

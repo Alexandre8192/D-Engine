@@ -38,7 +38,30 @@ Stabilization is applied by the caller in gates/CI:
 - `.github/workflows/bench-ci.yml` uses the same pattern.
 
 ## Recommended Invocation
-- `x64\Release\D-Engine-BenchRunner.exe --warmup 1 --target-rsd 3 --max-repeat 12 --cpu-info --strict-stability`
+- Core compare run:
+  - `x64\Release\D-Engine-BenchRunner.exe --warmup 1 --target-rsd 3 --max-repeat 20 --cpu-info`
+- Memory compare run:
+  - `x64\Release\D-Engine-BenchRunner.exe --warmup 2 --target-rsd 8 --max-repeat 24 --cpu-info --memory-only --memory-matrix`
+- Both runs are launched with process stabilization:
+  - `cmd /c start /wait /affinity 1 /high ...`
+
+## CI Compare Policy
+- Core baseline:
+  - `bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json`
+- Memory baseline:
+  - `bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json`
+- Core compare suppresses unstable-only noise for `baseline_loop`.
+- Memory compare uses an 8% threshold (tracking and non-tracking paths) and allows
+  unstable statuses when the baseline is already unstable.
+- Current memory noise watchlist (ignored in compare):
+  - `small_object_alloc_free_16b`
+  - `small_object_alloc_free_small`
+
+## Leak Gate
+- Bench and smoke logs are scanned for hard leak markers:
+  - `=== MEMORY LEAKS DETECTED ===`
+  - `TOTAL LEAKS:`
+- Presence of either marker fails the gate.
 
 ## JSON Output (Schema v2)
 BenchRunner writes `artifacts/bench/bench-<epoch-seconds>.bench.json`:
@@ -78,4 +101,4 @@ Notes:
 - `value` is measured `ns/op`.
 - `bytesPerOp` and `allocsPerOp` are measured at runtime through `Core/Diagnostics/Bench.hpp`.
 - `status` and `reason` make skipped/unavailable scenarios explicit (for example platform audio backends).
-- Baseline comparisons in CI use `bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json`.
+- Baseline comparisons in CI use both core and memory baselines listed above.

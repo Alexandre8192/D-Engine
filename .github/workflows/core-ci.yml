@@ -45,11 +45,18 @@ jobs:
             Write-Host "WARNING: using fallback exe discovery: $($candidates[0].FullName)" -ForegroundColor Yellow
             $exe = $candidates[0].FullName
           }
-          Write-Host "Running $exe"
-          & $exe
+          New-Item -ItemType Directory -Path '.\artifacts\gates' -Force | Out-Null
+          $log = '.\artifacts\gates\allsmokes.log'
+          Write-Host "Running $exe (log: $log)"
+          & $exe 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) {
             Write-Error "AllSmokes failed with exit code $LASTEXITCODE"
             exit $LASTEXITCODE
+          }
+          $leaks = Select-String -Path $log -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
+          if ($leaks) {
+            Write-Error "Leak markers detected in AllSmokes log"
+            exit 1
           }
 
       - name: Run ModuleSmoke (ABI runtime smoke)
@@ -69,9 +76,16 @@ jobs:
             Write-Host "WARNING: using fallback exe discovery: $($candidates[0].FullName)" -ForegroundColor Yellow
             $exe = $candidates[0].FullName
           }
-          Write-Host "Running $exe"
-          & $exe
+          New-Item -ItemType Directory -Path '.\artifacts\gates' -Force | Out-Null
+          $log = '.\artifacts\gates\modulesmoke.log'
+          Write-Host "Running $exe (log: $log)"
+          & $exe 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) {
             Write-Error "ModuleSmoke failed with exit code $LASTEXITCODE"
             exit $LASTEXITCODE
+          }
+          $leaks = Select-String -Path $log -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
+          if ($leaks) {
+            Write-Error "Leak markers detected in ModuleSmoke log"
+            exit 1
           }

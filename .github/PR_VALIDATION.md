@@ -1,61 +1,36 @@
- # Validation PR: Bench Stability & Runtime Defaults
+# PR Validation
 
-## Objectif
-Verrouiller les contrôles de stabilité BenchRunner et valider la variance ≤ ±3% sur deux runs consécutifs en CI, avec zéro hausse bytes/allocs.
+This document defines the minimum checks expected before merging to `main`.
 
-## Changements
-- **BenchRunner stabilization**: HIGH priority + pin to first CPU when `--cpu-info` enabled
-  - Console affiche: `[CPU] logical=8 affinity=0x1 priority=HIGH`
-  - RSD early-stop avec `--target-rsd 3 --max-repeat 7`
-  - Stability summaries: `n=X median=Y mean=Z RSD=W% min=A max=B`
-- **Runtime defaults (API -> env -> macros)**: sampling=1, shards=8, batch=64
-  - MemorySystem logs effective values + source at init
-  - Sampling >1 clamped to 1 avec warning (prévu vNext)
-- **Bench CI workflow** (`.github/workflows/bench-ci.yml`):
-  - Build Release|x64, run bench 2× avec flags
-  - Compare ns/op (variance ≤ ±3%), check bytes/allocs (no increase)
-  - Upload artifacts (JSONs + MD report) avec NOTICE des defaults
-- **Docs**: `Docs/Memory.md` – defaults, precedence, clamping, CI expectations
-- **MemoryConfig.hpp**: header mis à jour avec Purpose/Contract/Notes
-- **Sweep tools**: `bench_sweep.py`, `bench_pick_defaults.py`, `defaults.json/md`
+## Required gates
+- `python tools/policy_lint.py --strict --modules`
+- `msbuild D-Engine.sln /p:Configuration=Debug /p:Platform=x64 /m`
+- `msbuild D-Engine.sln /p:Configuration=Release /p:Platform=x64 /m`
+- `x64\Release\AllSmokes.exe`
+- `x64\Release\ModuleSmoke.exe`
+- `tools/run_all_gates.ps1 -RequireBench`
+- Optional when Rust module changes are touched:
+  - `tools/run_all_gates.ps1 -RequireBench -RustModule`
 
-## Validation locale (déjà effectuée)
-```powershell
-# Build Release|x64 : OK
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" D-Engine.sln -m -p:Configuration=Release -p:Platform=x64
+## Perf and leak rules
+- Core bench compare must pass against:
+  - `bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json`
+- Memory bench compare must pass against:
+  - `bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json`
+- Leak markers are forbidden in smoke and bench logs:
+  - `=== MEMORY LEAKS DETECTED ===`
+  - `TOTAL LEAKS:`
 
-# Run with stabilization : OK
-& .\x64\Release\D-Engine-BenchRunner.exe --warmup 1 --target-rsd 3 --max-repeat 7 --cpu-info
-# [CPU] logical=8 affinity=0x1 priority=HIGH
-# [I][Memory] Tracking sampling rate=1 (source=env)
-# [I][Memory] Tracking shard count=8 (source=env)
-# [I][Memory] SmallObject TLS batch=64 (source=env)
-# n=3 median=3.406 mean=3.418 RSD=0.709% min=3.397 max=3.452
-# ...
-# JSON exported to artifacts/bench/ with value=median, min/max/mean/stddev present
-```
+## Safe GitHub workflow
+- Use pull requests for all changes to `main`.
+- Use signed commits and verify signature status in GitHub.
+- Do not bypass protections except for emergency recovery.
+- If a bypass was used, open a follow-up PR that restores normal policy.
 
-## CI attendu (2 runs)
-- Build : Release|x64 sur windows-latest
-- Run 1 : `D-Engine-BenchRunner.exe --warmup 1 --target-rsd 3 --max-repeat 7 --cpu-info`
-- Run 2 : idem
-- Compare : |Δ ns/op| ≤ 3% pour toutes les métriques
-- Check : bytes/allocs identiques (no increase)
-- Upload : `artifacts/bench/**` + `bench_report.md` avec NOTICE
-
-## Merge & Tag
-Si CI vert :
-1. **Merge** la PR vers main
-2. **Tag** : `git tag -a v0.9-Memory -m "Memory subsystem stability controls and runtime defaults"`
-3. **Push tag** : `git push origin v0.9-Memory`
-
-## Baseline v2 (optionnel)
-Si les métriques Release sont meilleures que v1, promouvoir le dernier JSON :
-```powershell
-# Comparer avec baseline actuelle
-$latest = Get-Content artifacts/bench/current-default/bench-runner-*.bench.json | ConvertFrom-Json
-# Si ns/op ↓ et bytes/allocs stable -> copier comme bench/baselines/v2-release.bench.json
-```
-
----
-**NOTICE** : Effective defaults applied at runtime (API -> env -> macros). Sampling>1 is currently clamped to 1.
+## Baseline maintenance
+- Update baselines only after a deliberate perf review.
+- Keep historical snapshots in `artifacts/bench/` for traceability.
+- When updating a baseline, include:
+  - command used
+  - machine context
+  - reason for baseline promotion

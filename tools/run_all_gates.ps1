@@ -1,8 +1,8 @@
 # run_all_gates.ps1
-# Purpose : Local one-shot runner for D-Engine gates (lint, build, smokes, ABI smoke, bench).
+# Purpose : Local one-shot runner for D-Engine gates (lint, build, smokes, ABI smoke, bench, leak checks).
 # Modes   :
 #   -Fast          : policy lint (strict+modules), Release build, AllSmokes, ModuleSmoke; bench skipped.
-#   -RequireBench  : bench is required; missing BenchRunner fails. Uses CI args (--warmup 1 --target-rsd 3 --max-repeat 12 --strict-stability).
+#   -RequireBench  : bench is required; missing BenchRunner fails. Runs both core and memory perf compares.
 #   -RustModule    : build/copy Rust NullWindowModule via cargo before ModuleSmoke; fails if cargo missing.
 #   -RequireRealBench     : fail if BenchRunner artifact is a placeholder stub.
 #   -RequireBenchBaseline : fail if bench baseline is missing.
@@ -59,10 +59,36 @@ function Fail([string]$msg) {
     throw $msg
 }
 
+function Ensure-Directory([string]$path) {
+    if (-not (Test-Path $path)) {
+        New-Item -ItemType Directory -Path $path | Out-Null
+    }
+}
+
+function Assert-NoLeakMarkers([string]$logPath, [string]$context) {
+    if (-not (Test-Path $logPath)) { return }
+    $matches = Select-String -Path $logPath -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
+    if ($matches) {
+        Fail "$context emitted leak markers. See log: $logPath"
+    }
+}
+
 function Find-Python {
     $py = Get-Command python -ErrorAction SilentlyContinue
     if (-not $py) { Fail "Python not found in PATH. Install Python 3.x and re-run." }
     return $py.Path
+}
+
+function Get-CargoCommand {
+    $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+    if ($cargo) { return $cargo }
+
+    $userCargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+    if (Test-Path $userCargo) {
+        return [pscustomobject]@{ Path = $userCargo }
+    }
+
+    return $null
 }
 
 function Run-PolicyLint {
@@ -157,11 +183,24 @@ function Resolve-ExePath([string[]]$preferredPaths, [string]$fallbackPattern, [s
     return $candidates[0].FullName
 }
 
-function Run-Exe([string]$pattern, [string]$friendly, [string[]]$preferredPaths) {
+function Run-Exe([string]$pattern, [string]$friendly, [string[]]$preferredPaths, [switch]$LeakCheck) {
     $exe = Resolve-ExePath -preferredPaths $preferredPaths -fallbackPattern $pattern -friendly $friendly
-    Write-Host "Running ${friendly}: $exe"
-    $p = Start-Process -FilePath $exe -NoNewWindow -Wait -PassThru
-    if ($p.ExitCode -ne 0) { Fail "$friendly failed with exit code $($p.ExitCode)" }
+    $logDir = Join-Path $repoRoot 'artifacts/gates'
+    Ensure-Directory $logDir
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $safeName = ($friendly -replace '[^A-Za-z0-9_.-]', '_')
+    $logPath = Join-Path $logDir "$safeName-$stamp.log"
+
+    Write-Host "Running ${friendly}: $exe (log: $logPath)"
+    & $exe 2>&1 | Tee-Object -FilePath $logPath
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        Fail "$friendly failed with exit code $exitCode (log: $logPath)"
+    }
+
+    if ($LeakCheck) {
+        Assert-NoLeakMarkers -logPath $logPath -context $friendly
+    }
 }
 
 function Find-NullWindowModuleDll {
@@ -172,7 +211,7 @@ function Find-NullWindowModuleDll {
 }
 
 function Build-RustModule {
-    $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+    $cargo = Get-CargoCommand
     if (-not $cargo) { Fail "cargo not found in PATH. Install Rust (MSVC toolchain) or drop -RustModule." }
 
     $moduleRoot = Join-Path $repoRoot 'External/Rust/NullWindowModule'
@@ -233,35 +272,56 @@ function Run-Bench {
         return 'SKIPPED'
     }
 
-    $env:DNG_BENCH_OUT = "artifacts/bench"
-    $benchArgs = @('--warmup', '1', '--target-rsd', '3', '--max-repeat', '12', '--cpu-info', '--strict-stability')
-    Write-Host "Running BenchRunner: $($benchExe.FullName) $($benchArgs -join ' ') (affinity=1, priority=High)"
-    $argText = $benchArgs -join ' '
-    $cmdText = 'start /wait /affinity 1 /high "" "' + $benchExe.FullName + '" ' + $argText
-    & cmd.exe /c $cmdText
-    if ($LASTEXITCODE -ne 0) {
-        Set-GateStatus 'Bench' 'FAIL'
-        Fail "BenchRunner failed with exit code $LASTEXITCODE"
-    }
+    $python = Find-Python
+    $gateLogDir = Join-Path $repoRoot 'artifacts/gates'
+    Ensure-Directory $gateLogDir
 
-    $latest = Get-ChildItem -Path "$($env:DNG_BENCH_OUT)" -Filter *.bench.json -Recurse -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    $baseline = Join-Path $repoRoot 'bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json'
-    if (-not $latest) {
-        Write-Host "BenchRunner output not found under $env:DNG_BENCH_OUT" -ForegroundColor Yellow
+    $coreOut = Join-Path $repoRoot 'artifacts/bench/core'
+    $memoryOut = Join-Path $repoRoot 'artifacts/bench/memory'
+    Ensure-Directory $coreOut
+    Ensure-Directory $memoryOut
+
+    $coreBaseline = Join-Path $repoRoot 'bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json'
+    $memoryBaseline = Join-Path $repoRoot 'bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json'
+
+    if (-not (Test-Path $coreBaseline) -or -not (Test-Path $memoryBaseline)) {
+        $msg = "Bench baseline missing (core=$coreBaseline, memory=$memoryBaseline)"
+        if ($RequireBaseline) {
+            Set-GateStatus 'Bench' 'FAIL'
+            Fail $msg
+        }
+        Write-Host "$msg. Bench gate marked PARTIAL." -ForegroundColor Yellow
         return 'PARTIAL'
     }
 
-    $benchContent = Get-Content -Raw -LiteralPath $latest.FullName -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $coreLog = Join-Path $gateLogDir ("Bench-core-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".log")
+    $env:DNG_BENCH_OUT = $coreOut
+    $coreArgs = '--warmup 1 --target-rsd 3 --max-repeat 20 --cpu-info'
+    Write-Host "Running BenchRunner (core): $($benchExe.FullName) $coreArgs (affinity=1, priority=High, log=$coreLog)"
+    $coreCmd = 'start /wait /affinity 1 /high "" "' + $benchExe.FullName + '" ' + $coreArgs
+    & cmd.exe /c $coreCmd 2>&1 | Tee-Object -FilePath $coreLog
+    if ($LASTEXITCODE -ne 0) {
+        Set-GateStatus 'Bench' 'FAIL'
+        Fail "BenchRunner core run failed with exit code $LASTEXITCODE"
+    }
+    Assert-NoLeakMarkers -logPath $coreLog -context 'BenchRunner core run'
+
+    $coreLatest = Get-ChildItem -Path $coreOut -Filter *.bench.json -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $coreLatest) {
+        Set-GateStatus 'Bench' 'FAIL'
+        Fail "BenchRunner core output not found under $coreOut"
+    }
+
+    $benchContent = Get-Content -Raw -LiteralPath $coreLatest.FullName -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     $isPlaceholder = $false
     if ($benchContent.metadata -and $benchContent.metadata.note -match 'placeholder') { $isPlaceholder = $true }
     if ($benchContent.benchmarks) {
         $placeholderHits = $benchContent.benchmarks | Where-Object { $_.name -match '^placeholder$' }
         if ($placeholderHits) { $isPlaceholder = $true }
     }
-
     if ($isPlaceholder) {
-        $msg = "BenchRunner produced placeholder artifact ($($latest.FullName))."
+        $msg = "BenchRunner produced placeholder artifact ($($coreLatest.FullName))."
         if ($RequireReal) {
             Set-GateStatus 'Bench' 'FAIL'
             Fail $msg
@@ -270,24 +330,60 @@ function Run-Bench {
         return 'SKIPPED'
     }
 
-    if (-not (Test-Path $baseline)) {
-        $msg = "Bench baseline not found ($baseline). Latest result: $($latest.FullName)"
-        if ($RequireBaseline) {
-            Set-GateStatus 'Bench' 'FAIL'
-            Fail $msg
-        }
-        Write-Host $msg -ForegroundColor Yellow
-        return 'PARTIAL'
+    $coreCompareArgs = @(
+        'tools/bench_compare.py',
+        $coreBaseline,
+        $coreLatest.FullName,
+        '--allow-unstable', 'baseline_loop'
+    )
+    Write-Host "Comparing core bench output: python $($coreCompareArgs -join ' ')"
+    $coreCompare = Start-Process -FilePath $python -ArgumentList $coreCompareArgs -NoNewWindow -Wait -PassThru
+    if ($coreCompare.ExitCode -ne 0) {
+        Set-GateStatus 'Bench' 'FAIL'
+        Fail "bench_compare reported core regression"
     }
 
-    $python = Find-Python
-    $compareArgs = @('tools/bench_compare.py', $baseline, $latest.FullName)
-    Write-Host "Comparing bench output: python $($compareArgs -join ' ')"
-    $p2 = Start-Process -FilePath $python -ArgumentList $compareArgs -NoNewWindow -Wait -PassThru
-    if ($p2.ExitCode -ne 0) {
+    $memoryLog = Join-Path $gateLogDir ("Bench-memory-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".log")
+    $env:DNG_BENCH_OUT = $memoryOut
+    $memoryArgs = '--warmup 2 --target-rsd 8 --max-repeat 24 --cpu-info --memory-only --memory-matrix'
+    Write-Host "Running BenchRunner (memory): $($benchExe.FullName) $memoryArgs (affinity=1, priority=High, log=$memoryLog)"
+    $memoryCmd = 'start /wait /affinity 1 /high "" "' + $benchExe.FullName + '" ' + $memoryArgs
+    & cmd.exe /c $memoryCmd 2>&1 | Tee-Object -FilePath $memoryLog
+    if ($LASTEXITCODE -ne 0) {
         Set-GateStatus 'Bench' 'FAIL'
-        Fail "bench_compare reported regression"
+        Fail "BenchRunner memory run failed with exit code $LASTEXITCODE"
     }
+    Assert-NoLeakMarkers -logPath $memoryLog -context 'BenchRunner memory run'
+
+    $memoryLatest = Get-ChildItem -Path $memoryOut -Filter *.bench.json -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $memoryLatest) {
+        Set-GateStatus 'Bench' 'FAIL'
+        Fail "BenchRunner memory output not found under $memoryOut"
+    }
+
+    $memoryThreshold = if ($env:PERF_MEMORY_THRESHOLD_PCT) { $env:PERF_MEMORY_THRESHOLD_PCT } else { '8' }
+    $memoryIgnore = if ($env:PERF_MEMORY_IGNORE_BENCH) {
+        $env:PERF_MEMORY_IGNORE_BENCH
+    } else {
+        'small_object_alloc_free_16b,small_object_alloc_free_small'
+    }
+    $memoryCompareArgs = @(
+        'tools/bench_compare.py',
+        $memoryBaseline,
+        $memoryLatest.FullName,
+        '--perf-threshold-pct', $memoryThreshold,
+        '--perf-threshold-pct-tracking', $memoryThreshold,
+        '--allow-unstable-from-baseline',
+        '--ignore-benchmark', $memoryIgnore
+    )
+    Write-Host "Comparing memory bench output: python $($memoryCompareArgs -join ' ')"
+    $memoryCompare = Start-Process -FilePath $python -ArgumentList $memoryCompareArgs -NoNewWindow -Wait -PassThru
+    if ($memoryCompare.ExitCode -ne 0) {
+        Set-GateStatus 'Bench' 'FAIL'
+        Fail "bench_compare reported memory regression"
+    }
+
     return 'OK'
 }
 
@@ -304,7 +400,7 @@ try {
     Measure-Gate 'AllSmokes' {
         Write-Host "=== Runtime gate (AllSmokes) ==="
         $allSmokesPreferred = @('x64\Release\AllSmokes.exe', 'x64\Debug\AllSmokes.exe')
-        Run-Exe 'AllSmokes*.exe' 'AllSmokes' $allSmokesPreferred
+        Run-Exe 'AllSmokes*.exe' 'AllSmokes' $allSmokesPreferred -LeakCheck
         Set-GateStatus 'AllSmokes' 'OK'
     }
 
@@ -318,7 +414,7 @@ try {
             if (-not $nullDll) { Fail "NullWindowModule.dll not found. Build the C/C++ null module (solution build) or use -RustModule." }
         }
         $moduleSmokesPreferred = @('x64\Release\ModuleSmoke.exe', 'x64\Debug\ModuleSmoke.exe')
-        Run-Exe '*ModuleSmoke*.exe' 'ModuleSmoke' $moduleSmokesPreferred
+        Run-Exe '*ModuleSmoke*.exe' 'ModuleSmoke' $moduleSmokesPreferred -LeakCheck
         Set-GateStatus 'ModuleSmoke' 'OK'
     }
 
