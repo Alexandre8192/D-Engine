@@ -1,5 +1,9 @@
 # Audio M0 Status
 
+> [!WARNING]
+> Historical snapshot: this document describes milestone M0 status at the time it was written and may not match current code.
+> For current behavior, see `Docs/Implementation_Snapshot.md`, `D-Engine_Handbook.md`, and `tests/README.md`.
+
 Status
 - AudioSystem ships with two backends:
   - `NullAudio` (deterministic, replay-friendly, no device I/O)

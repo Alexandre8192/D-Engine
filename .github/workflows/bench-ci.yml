@@ -66,7 +66,10 @@ jobs:
           $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
           if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
           Write-Host "Running with CPU affinity=1 and High priority (pre-applied): $exeRel"
-          cmd /c start /wait /affinity 1 /high "D-Engine-BenchRunner" $exeRel --warmup 1 --target-rsd 3 --max-repeat 7
+          $benchArgs = '--warmup 1 --target-rsd 3 --max-repeat 12 --cpu-info --strict-stability'
+          $cmdText = 'start /wait /affinity 1 /high "" "' + $exeRel + '" ' + $benchArgs
+          cmd /c $cmdText
+          if ($LASTEXITCODE -ne 0) { throw "BenchRunner failed with exit code $LASTEXITCODE" }
 
       - name: Upload bench artifacts
         if: always()

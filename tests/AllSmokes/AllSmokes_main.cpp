@@ -10,6 +10,7 @@
 
 int RunRendererSystemSmoke();
 int RunBasicForwardRendererSmoke();
+int RunRendererSystemBasicForwardRendererSmoke();
 int RunTimeSmoke();
 int RunFileSystemSmoke();
 int RunWindowSmoke();
@@ -38,6 +39,7 @@ int main()
     const SmokeEntry smokes[] = {
         {"RendererSystem", &RunRendererSystemSmoke},
         {"BasicForwardRenderer", &RunBasicForwardRendererSmoke},
+        {"RendererSystemBasicForwardRenderer", &RunRendererSystemBasicForwardRendererSmoke},
         {"Time", &RunTimeSmoke},
         {"FileSystem", &RunFileSystemSmoke},
         {"Window", &RunWindowSmoke},

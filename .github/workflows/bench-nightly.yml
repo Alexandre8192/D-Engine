@@ -59,7 +59,10 @@ jobs:
           $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
           if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
           Write-Host "Running (nightly) with CPU affinity=1 and High priority: $exeRel"
-          cmd /c start /wait /affinity 1 /high "D-Engine-BenchRunner" $exeRel --warmup 1 --repeat 3
+          $benchArgs = '--warmup 1 --target-rsd 3 --max-repeat 7 --cpu-info'
+          $cmdText = 'start /wait /affinity 1 /high "" "' + $exeRel + '" ' + $benchArgs
+          cmd /c $cmdText
+          if ($LASTEXITCODE -ne 0) { throw "BenchRunner failed with exit code $LASTEXITCODE" }
 
       - name: Compare with baseline (nightly, doubled thresholds; never fail)
         env:

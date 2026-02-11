@@ -1,5 +1,9 @@
 # Input M0 Status
 
+> [!WARNING]
+> Historical snapshot: this document describes milestone M0 status at the time it was written and may not match current code.
+> For current behavior, see `Docs/Implementation_Snapshot.md`, `D-Engine_Handbook.md`, and `tests/README.md`.
+
 This document captures the input subsystem state at milestone M0. It reflects only the components that currently exist: the input contract, the Null backend, the InputSystem orchestrator, and the associated tests.
 
 ## Current Components

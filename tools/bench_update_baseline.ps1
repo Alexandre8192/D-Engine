@@ -48,11 +48,12 @@ function Run-BenchRunner {
     if (-not (Test-Path $benchExe)) { throw "BenchRunner not found after build: $benchExe" }
 
     $env:DNG_BENCH_OUT = 'artifacts/bench'
-    $benchArgs = @('--warmup', '1', '--target-rsd', '3', '--max-repeat', '7')
+    $benchArgs = @('--warmup', '1', '--target-rsd', '3', '--max-repeat', '12', '--cpu-info', '--strict-stability')
     Write-Host "Running BenchRunner: $benchExe $($benchArgs -join ' ') (affinity=1, priority=High)"
-    $cmdArgs = @('/c', 'start', '/wait', '/affinity', '1', '/high', '', $benchExe) + $benchArgs
-    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArgs -NoNewWindow -Wait -PassThru
-    if ($p.ExitCode -ne 0) { throw "BenchRunner failed with exit code $($p.ExitCode)" }
+    $argText = $benchArgs -join ' '
+    $cmdText = 'start /wait /affinity 1 /high "" "' + $benchExe + '" ' + $argText
+    & cmd.exe /c $cmdText
+    if ($LASTEXITCODE -ne 0) { throw "BenchRunner failed with exit code $LASTEXITCODE" }
 }
 
 function Get-LatestBenchJson {

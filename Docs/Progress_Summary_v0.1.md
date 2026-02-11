@@ -1,34 +1,33 @@
-# Contract SDK v0.1 Progress Summary
+# Contract SDK v0.1 Progress Summary (Historical)
 
-## Overview
-v0.1 locks a header-first "Contract SDK" for core engine services—rendering, time, filesystem, window, and input—using allocation-free contracts, deterministic Null backends, and small orchestrator systems, with dynamic interfaces (vtable + wrapper) to host injected implementations.
+## Important note
+- This file is preserved as a milestone snapshot of the early v0.1 phase.
+- It is not the source of truth for current behavior.
+- For current implementation status, use:
+  - `Docs/Implementation_Snapshot.md`
+  - `D-Engine_Handbook.md`
+  - `tests/README.md`
+  - `Source/Core/Runtime/CoreRuntime.hpp`
+  - `tests/AllSmokes/AllSmokes_main.cpp`
 
-## Completed milestones
-- Renderer M0: Contract defined in [Source/Core/Contracts/Renderer.hpp](Source/Core/Contracts/Renderer.hpp); Null backend in [Source/Core/Renderer/NullRenderer.hpp](Source/Core/Renderer/NullRenderer.hpp); system orchestration in [Source/Core/Renderer/RendererSystem.hpp](Source/Core/Renderer/RendererSystem.hpp); BasicForwardRenderer stub in [Source/Modules/Renderer/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp](Source/Modules/Renderer/Rendering/BasicForwardRenderer/BasicForwardRenderer.hpp); status doc [Docs/Renderer_M0_Status.md](Docs/Renderer_M0_Status.md); smoke helpers [tests/Smoke/Subsystems/BasicForwardRenderer_smoke.cpp](tests/Smoke/Subsystems/BasicForwardRenderer_smoke.cpp), [tests/Smoke/Subsystems/RendererSystem_smoke.cpp](tests/Smoke/Subsystems/RendererSystem_smoke.cpp), [tests/Smoke/Subsystems/RendererSystem_BasicForwardRenderer_smoke.cpp](tests/Smoke/Subsystems/RendererSystem_BasicForwardRenderer_smoke.cpp); demo main [tests/Renderer_BasicForwardRenderer_demo.cpp](tests/Renderer_BasicForwardRenderer_demo.cpp).
-- Time M0: Contract in [Source/Core/Contracts/Time.hpp](Source/Core/Contracts/Time.hpp); Null backend in [Source/Core/Time/NullTime.hpp](Source/Core/Time/NullTime.hpp); system orchestration (with `primeOnInit` and `nullStepNs` config, baseline priming) in [Source/Core/Time/TimeSystem.hpp](Source/Core/Time/TimeSystem.hpp); status doc [Docs/Time_M0_Status.md](Docs/Time_M0_Status.md); smoke helper [tests/Smoke/Subsystems/Time_smoke.cpp](tests/Smoke/Subsystems/Time_smoke.cpp).
-- FileSystem M0: Contract in [Source/Core/Contracts/FileSystem.hpp](Source/Core/Contracts/FileSystem.hpp); Null backend in [Source/Core/FileSystem/NullFileSystem.hpp](Source/Core/FileSystem/NullFileSystem.hpp); system orchestrator in [Source/Core/FileSystem/FileSystemSystem.hpp](Source/Core/FileSystem/FileSystemSystem.hpp); status doc [Docs/FileSystem_M0_Status.md](Docs/FileSystem_M0_Status.md); smoke helper [tests/Smoke/Subsystems/FileSystem_smoke.cpp](tests/Smoke/Subsystems/FileSystem_smoke.cpp).
-- Window M0: Contract in [Source/Core/Contracts/Window.hpp](Source/Core/Contracts/Window.hpp); Null backend in [Source/Core/Window/NullWindow.hpp](Source/Core/Window/NullWindow.hpp); system orchestrator in [Source/Core/Window/WindowSystem.hpp](Source/Core/Window/WindowSystem.hpp); status doc [Docs/Window_M0_Status.md](Docs/Window_M0_Status.md); smoke helper [tests/Smoke/Subsystems/Window_smoke.cpp](tests/Smoke/Subsystems/Window_smoke.cpp).
-- Input M0: Contract in [Source/Core/Contracts/Input.hpp](Source/Core/Contracts/Input.hpp); Null backend in [Source/Core/Input/NullInput.hpp](Source/Core/Input/NullInput.hpp); system orchestrator in [Source/Core/Input/InputSystem.hpp](Source/Core/Input/InputSystem.hpp); status doc [Docs/Input_M0_Status.md](Docs/Input_M0_Status.md); smoke helper [tests/Smoke/Subsystems/Input_smoke.cpp](tests/Smoke/Subsystems/Input_smoke.cpp).
+## What v0.1 originally locked
+- Header-first contract shape for core services.
+- Deterministic Null backends for initial subsystem bring-up.
+- System-orchestrator pattern around dynamic interface injection.
+- Smoke/helper and self-containment test scaffolding.
 
-## Tests and validation
-- Smoke helpers follow the "no main" pattern: functions like `RunRendererSystemSmoke`, `RunTimeSmoke`, `RunFileSystemSmoke`, `RunWindowSmoke`, `RunInputSmoke`, and `RunBasicForwardRendererSmoke` live in [tests/Smoke/Subsystems/](tests/Smoke/Subsystems/) and [tests/Smoke/Memory/](tests/Smoke/Memory/), returning 0/!0 to signal pass/fail without defining `main`.
-- The only entry-point TU for the contract stack is the demo in [tests/Renderer_BasicForwardRenderer_demo.cpp](tests/Renderer_BasicForwardRenderer_demo.cpp), wiring `BasicForwardRenderer` through `RendererSystem` and asserting telemetry over three frames.
-- Header-only self-containment translation units in [tests/SelfContain/](tests/SelfContain/) (e.g., [tests/SelfContain/Renderer_header_only.cpp](tests/SelfContain/Renderer_header_only.cpp), [tests/SelfContain/Time_header_only.cpp](tests/SelfContain/Time_header_only.cpp), [tests/SelfContain/FileSystem_header_only.cpp](tests/SelfContain/FileSystem_header_only.cpp), [tests/SelfContain/Window_header_only.cpp](tests/SelfContain/Window_header_only.cpp), [tests/SelfContain/Input_header_only.cpp](tests/SelfContain/Input_header_only.cpp)) include each header alone with `static_assert` concept checks to guarantee standalone compilation.
+## What evolved after this snapshot
+- Runtime orchestration now includes an integrated lifecycle in `CoreRuntime`:
+  - `Memory -> Time -> Jobs -> Input -> Window -> FileSystem -> Audio -> Renderer`
+- Audio moved beyond a pure milestone stub:
+  - `AudioSystem` supports Null, platform WinMM, and external backends.
+  - Voice command queue, bus gain control, memory clip loading, and streamed clip loading are implemented.
+- Smoke execution is executable-driven:
+  - `AllSmokes.exe` for aggregate smoke coverage.
+  - `ModuleSmoke.exe` for ABI loader/module coverage.
+  - `D-Engine-BenchRunner.exe` for benchmark runs.
+- Determinism smoke coverage exists in `tests/Smoke/Determinism/`.
 
-## Guarantees and policies enforced
-- Header-first, `noexcept`, no exceptions/RTTI, and no hidden allocations at the contract boundary across renderer, time, filesystem, window, and input headers and systems.
-- Dynamic interface pattern (concept + vtable + small interface wrapper) is applied consistently for each subsystem, enabling external backends to be injected without ownership transfer.
-- Public structs/enums are POD/trivially copyable and use non-owning views; Null backends are deterministic and allocation-free; system init paths validate required vtable entries and allow Null or injected backends.
-
-## Known limitations / non-goals (current)
-- No real GPU backend, swapchain, or rendering pipeline; only `NullRenderer` and the telemetry-only `BasicForwardRenderer` stub.
-- Windowing has no OS integration or real window creation beyond the simulated handle in `NullWindow`.
-- FileSystem is Null-only and read-oriented; no writes, iteration, or platform file metadata.
-- Input is poll-only and Null-only; no device discovery, text input, or haptics.
-
-## What changed (key additions)
-- Added header-only contracts and POD data surfaces for Renderer/Time/FileSystem/Window/Input with enforced `noexcept` concepts.
-- Implemented deterministic Null backends for each contract plus orchestration systems to own or accept injected interfaces.
-- Introduced the BasicForwardRenderer stub backend and wired it through `RendererSystem` alongside telemetry checks.
-- Established smoke-test harnesses (`Run*Smoke` helpers) without entry points and a single demo `main` exercising the renderer path.
-- Added self-containment TUs under tests/SelfContain to ensure each public header compiles in isolation.
+## How to use this file safely
+- Treat this file as historical context only.
+- When adding features, update current docs first (`Implementation_Snapshot.md`, relevant subsystem docs, and test docs).

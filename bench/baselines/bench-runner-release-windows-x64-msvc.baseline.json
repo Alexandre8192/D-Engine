@@ -1,29 +1,87 @@
 {
+  "schemaVersion": 2,
   "benchmarks": [
     {
       "name": "baseline_loop",
-      "value": 1.329687,
-      "rsdPct": 4.796124,
+      "value": 0.805440,
+      "rsdPct": 2.970956,
       "bytesPerOp": 0.000000,
-      "allocsPerOp": 0.000000
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 8,
+      "targetRsdPct": 3.000
     },
     {
       "name": "vec3_dot",
-      "value": 1.316268,
-      "rsdPct": 0.637305,
-      "bytesPerOp": 12.000000,
-      "allocsPerOp": 0.000000
+      "value": 0.566369,
+      "rsdPct": 0.257201,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 3.000
     },
     {
       "name": "memcpy_64",
-      "value": 0.587935,
-      "rsdPct": 1.486131,
-      "bytesPerOp": 512.000000,
-      "allocsPerOp": 0.000000
+      "value": 0.203910,
+      "rsdPct": 0.048316,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 3.000
+    },
+    {
+      "name": "audio_mix_null_1024f_stereo",
+      "value": 139.236258,
+      "rsdPct": 0.081652,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 3.000
+    },
+    {
+      "name": "audio_mix_mem_clip_platform_1024f_stereo",
+      "value": 3899.414048,
+      "rsdPct": 0.147755,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 3.000
+    },
+    {
+      "name": "audio_mix_stream_clip_platform_1024f_stereo",
+      "value": 0.000000,
+      "rsdPct": 0.000000,
+      "bytesPerOp": -1.000000,
+      "allocsPerOp": -1.000000,
+      "status": "skipped",
+      "reason": "platform audio init failed",
+      "repeatsUsed": 0,
+      "targetRsdPct": 3.000
     }
   ],
+  "summary": {
+    "okCount": 5,
+    "skippedCount": 1,
+    "unstableCount": 0,
+    "errorCount": 0
+  },
   "metadata": {
-    "note": "BenchRunner M0",
-    "unit": "ns/op"
+    "note": "BenchRunner v2",
+    "unit": "ns/op",
+    "warmup": 1,
+    "targetRsdPct": 3.000,
+    "maxRepeat": 12,
+    "iterations": 20000000,
+    "strictStability": true,
+    "schemaVersion": 2
   }
 }

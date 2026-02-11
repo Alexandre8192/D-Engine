@@ -33,7 +33,7 @@ jobs:
 
       - name: Run sweep
         run: |
-          python -u tools/bench_sweep.py --warmup 1 --repeat 3 --emit-md sweep_report.md
+          python -u tools/bench_sweep.py --warmup 1 --repeat 3 --target-rsd 3 --emit-md sweep_report.md
 
       - name: Pick defaults
         run: |

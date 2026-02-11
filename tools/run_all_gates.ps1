@@ -2,7 +2,7 @@
 # Purpose : Local one-shot runner for D-Engine gates (lint, build, smokes, ABI smoke, bench).
 # Modes   :
 #   -Fast          : policy lint (strict+modules), Release build, AllSmokes, ModuleSmoke; bench skipped.
-#   -RequireBench  : bench is required; missing BenchRunner fails. Uses CI args (--warmup 1 --target-rsd 3 --max-repeat 7).
+#   -RequireBench  : bench is required; missing BenchRunner fails. Uses CI args (--warmup 1 --target-rsd 3 --max-repeat 12 --strict-stability).
 #   -RustModule    : build/copy Rust NullWindowModule via cargo before ModuleSmoke; fails if cargo missing.
 #   -RequireRealBench     : fail if BenchRunner artifact is a placeholder stub.
 #   -RequireBenchBaseline : fail if bench baseline is missing.
@@ -234,13 +234,14 @@ function Run-Bench {
     }
 
     $env:DNG_BENCH_OUT = "artifacts/bench"
-    $benchArgs = @('--warmup', '1', '--target-rsd', '3', '--max-repeat', '7')
+    $benchArgs = @('--warmup', '1', '--target-rsd', '3', '--max-repeat', '12', '--cpu-info', '--strict-stability')
     Write-Host "Running BenchRunner: $($benchExe.FullName) $($benchArgs -join ' ') (affinity=1, priority=High)"
-    $cmdArgs = @('/c', 'start', '/wait', '/affinity', '1', '/high', '', $benchExe.FullName) + $benchArgs
-    $p = Start-Process -FilePath 'cmd.exe' -ArgumentList $cmdArgs -NoNewWindow -Wait -PassThru
-    if ($p.ExitCode -ne 0) {
+    $argText = $benchArgs -join ' '
+    $cmdText = 'start /wait /affinity 1 /high "" "' + $benchExe.FullName + '" ' + $argText
+    & cmd.exe /c $cmdText
+    if ($LASTEXITCODE -ne 0) {
         Set-GateStatus 'Bench' 'FAIL'
-        Fail "BenchRunner failed with exit code $($p.ExitCode)"
+        Fail "BenchRunner failed with exit code $LASTEXITCODE"
     }
 
     $latest = Get-ChildItem -Path "$($env:DNG_BENCH_OUT)" -Filter *.bench.json -Recurse -ErrorAction SilentlyContinue |

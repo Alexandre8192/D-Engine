@@ -11,8 +11,8 @@ Audience
 - Users who want to understand how to plug a backend into D-Engine without reading every header.
 
 Status
-- This repository is currently a "Contract SDK" (v0.1) plus a few pilot subsystems.
-- Many subsystems are M0: the goal is to reserve the architectural slot, not to ship a real production backend.
+- The repository keeps a contract-first core, but implementation maturity is uneven by subsystem.
+- For current behavior, prefer `Docs/Implementation_Snapshot.md`, `Source/`, and smoke targets over milestone snapshot docs.
 
 -------------------------------------------------------------------------------
 
@@ -95,7 +95,7 @@ Root
 - README.md
   - Quickstart, non-negotiables, and a high level overview.
 - Docs/
-  - Policies, subsystem M0 status docs, and deeper design notes.
+  - Policies, implementation snapshots, milestone snapshots, and deeper design notes.
   - Docs/INDEX.md (map of all docs)
 - Source/
   - Core/ : the engine core building blocks and contracts.
@@ -114,12 +114,17 @@ Core (Source/Core)
 - Abi/ : stable C ABI headers (interop contract surface).
 - Interop/ : dynamic loader and ABI adapters (C++ convenience layer).
 
-Subsystem pattern (current M0 set)
+Subsystem pattern (current code)
 - Contract: Source/Core/Contracts/<Subsystem>.hpp
 - Null backend: Source/Core/<Subsystem>/Null<Subsystem>.hpp
 - System: Source/Core/<Subsystem>/<Subsystem>System.hpp
-- Tests: tests/<Subsystem>_smoke.cpp and/or tests/*_header_only.cpp
-- Status doc: Docs/<Subsystem>_M0_Status.md
+- Tests:
+  - tests/Smoke/Subsystems/*_smoke.cpp
+  - tests/Smoke/Memory/*_smoke.cpp
+  - tests/Smoke/Determinism/*_smoke.cpp
+  - tests/SelfContain/*_header_only.cpp
+  - tests/AllSmokes/AllSmokes_main.cpp (aggregate executable)
+- Historical milestone status docs: Docs/<Subsystem>_M0_Status.md
 
 Example (Window)
 - Contract: Source/Core/Contracts/Window.hpp
@@ -350,20 +355,19 @@ Step 3: System orchestrator (Source/Core/<Subsystem>/<Subsystem>System.hpp)
 
 Step 4: Tests
 - Header self-containment (compile-only):
-  - tests/SelfContain/* or tests/<Subsystem>_header_only.cpp
+  - tests/SelfContain/*_header_only.cpp
 - Smoke tests:
-  - tests/<Subsystem>_smoke.cpp
+  - tests/Smoke/Subsystems/*_smoke.cpp
+  - tests/Smoke/Memory/*_smoke.cpp
+  - tests/Smoke/Determinism/*_smoke.cpp
+  - tests/AllSmokes/AllSmokes_main.cpp (for aggregate execution)
 - If ABI is involved:
-  - ABI header compile tests
-  - module smoke tests
+  - tests/Abi/AbiHeaders_c.c and tests/Abi/AbiHeaders_cpp.cpp
+  - tests/Abi/ModuleSmoke.cpp
 
 Step 5: Docs
-- Add Docs/<Subsystem>_M0_Status.md describing:
-  - what is implemented
-  - guarantees
-  - non-goals
-  - tests
-  - definition of "done" for M0
+- Update Docs/Implementation_Snapshot.md when runtime behavior or architecture wiring changes.
+- Keep Docs/<Subsystem>_M0_Status.md only as a milestone snapshot when relevant.
 
 -------------------------------------------------------------------------------
 
@@ -386,7 +390,8 @@ Benchmark rules (CI stability)
 
 Subsystem vision docs
 - Docs/Renderer_Vision.md (renderer direction)
-- Docs/*_M0_Status.md (Window/Renderer/Time/Jobs/Input/FileSystem/Audio)
+- Docs/Implementation_Snapshot.md (current code-backed status)
+- Docs/*_M0_Status.md (historical milestone snapshots)
 
 -------------------------------------------------------------------------------
 
@@ -400,7 +405,7 @@ Documentation coherence
 
 Code coherence
 - Contracts stay in Source/Core/Contracts/.
-- Every subsystem has: Contract + Null backend + System + tests + status doc.
+- Every subsystem has: Contract + Null backend + System + tests.
 - No exceptions and no RTTI in Core.
 - No hidden allocations across contract boundaries.
 - Headers are self-contained (compile-only tests stay green).
@@ -416,8 +421,8 @@ Tooling coherence
 
 If you are new:
 - Start at README.md (quickstart).
-- Then read this handbook to understand layering.
-- Then pick a subsystem status doc in Docs/ (Window_M0_Status.md is a good start).
+- Then read Docs/Implementation_Snapshot.md for current implementation reality.
+- Then read this handbook to understand layering and rationale.
 - Then inspect a contract header in Source/Core/Contracts/.
 
 If you are adding a backend:

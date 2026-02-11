@@ -1,5 +1,9 @@
 # Renderer M0 Status
 
+> [!WARNING]
+> Historical snapshot: this document describes milestone M0 status at the time it was written and may not match current code.
+> For current behavior, see `Docs/Implementation_Snapshot.md`, `D-Engine_Handbook.md`, and `tests/README.md`.
+
 This document captures the renderer state in D-Engine at milestone **M0**. It reflects only the components that currently exist in the repository: the renderer contract, the Null backend, the RendererSystem orchestrator, the BasicForwardRenderer stub, and the associated tests/demos. It does not speculate about future GPU backends or pipelines beyond what is already implemented.
 
 ## Current Components

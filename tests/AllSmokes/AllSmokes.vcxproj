@@ -167,6 +167,7 @@
     <ClCompile Include="..\Smoke\Subsystems\AudioPlayback_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\CoreRuntime_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\RendererSystem_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Subsystems\RendererSystem_BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\Time_smoke.cpp" />
     <ClCompile Include="..\Smoke\Subsystems\Window_smoke.cpp" />
   </ItemGroup>
