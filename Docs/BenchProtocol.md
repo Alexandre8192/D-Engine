@@ -15,6 +15,13 @@ BenchRunner (`tests/BenchRunner/BenchRunner_main.cpp`) runs a fixed suite and ex
 - `--cpu-info`
 - `--strict-stability`
 
+Current scenarios include:
+- `baseline_loop`, `vec3_dot`, `memcpy_64`
+- `arena_alloc_reset`, `frame_alloc_reset`, `pool_alloc_free_fixed`
+- `small_object_alloc_free_small`, `tracking_overhead_small_alloc`
+- `audio_mix_null_1024f_stereo`
+- `audio_mix_mem_clip_platform_1024f_stereo`, `audio_mix_stream_clip_platform_1024f_stereo`
+
 For each scenario, the runner:
 1. executes warmup runs,
 2. measures repeated batches,
@@ -53,8 +60,8 @@ BenchRunner writes `artifacts/bench/bench-<epoch-seconds>.bench.json`:
     }
   ],
   "summary": {
-    "okCount": 6,
-    "skippedCount": 0,
+    "okCount": 10,
+    "skippedCount": 1,
     "unstableCount": 0,
     "errorCount": 0
   },

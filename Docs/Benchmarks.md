@@ -8,6 +8,13 @@ Canonical baseline JSON lives in:
 - BenchRunner now emits per-benchmark status (`ok` / `skipped` / `unstable` / `error`) so platform-dependent scenarios are explicit.
 - CI strict mode uses `--strict-stability` to fail when any benchmark stays unstable after max repeats.
 
+## Current scenarios
+- Core microbenchmarks: `baseline_loop`, `vec3_dot`, `memcpy_64`
+- Allocator-focused: `arena_alloc_reset`, `frame_alloc_reset`, `pool_alloc_free_fixed`,
+  `small_object_alloc_free_small`, `tracking_overhead_small_alloc`
+- Audio path: `audio_mix_null_1024f_stereo`, `audio_mix_mem_clip_platform_1024f_stereo`,
+  `audio_mix_stream_clip_platform_1024f_stereo`
+
 ## Stable-run options (BenchRunner v2)
 
 - --warmup N (default 1): Warm-up runs before measurement.

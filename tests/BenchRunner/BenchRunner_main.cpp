@@ -11,10 +11,14 @@
 #include "Core/Audio/AudioSystem.hpp"
 #include "Core/Contracts/FileSystem.hpp"
 #include "Core/Diagnostics/Bench.hpp"
+#include "Core/Memory/ArenaAllocator.hpp"
+#include "Core/Memory/FrameAllocator.hpp"
 #include "Core/Memory/MemorySystem.hpp"
+#include "Core/Memory/PoolAllocator.hpp"
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -402,6 +406,317 @@ namespace
                 acc += dst[0] + dst[63];
             }
         }
+        sink ^= acc;
+        return true;
+    }
+
+    struct ArenaBenchContext
+    {
+        std::array<std::uint8_t, 128u * 1024u> storage{};
+        dng::core::ArenaAllocator arena;
+
+        ArenaBenchContext() noexcept
+            : storage{}
+            , arena(storage.data(), static_cast<dng::usize>(storage.size()))
+        {
+        }
+    };
+
+    bool Bench_ArenaAllocReset(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (iterations < 0)
+        {
+            outReason = "iterations must be non-negative";
+            return false;
+        }
+
+        static ArenaBenchContext context{};
+        if (!context.arena.IsValid())
+        {
+            outReason = "arena bench allocator unavailable";
+            return false;
+        }
+
+        constexpr int kAllocsPerIter = 32;
+        constexpr dng::usize kAllocSize = 64u;
+        constexpr dng::usize kAllocAlign = alignof(std::max_align_t);
+
+        std::uint64_t acc = 0;
+        for (int i = 0; i < iterations; ++i)
+        {
+            context.arena.Reset();
+            for (int n = 0; n < kAllocsPerIter; ++n)
+            {
+                void* p = context.arena.Allocate(kAllocSize, kAllocAlign);
+                if (p == nullptr)
+                {
+                    outReason = "arena bench allocation failed";
+                    return false;
+                }
+
+                auto* bytes = static_cast<std::uint8_t*>(p);
+                bytes[0] = static_cast<std::uint8_t>(n);
+                bytes[kAllocSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kAllocSize - 1u]);
+            }
+        }
+
+        sink ^= (acc + static_cast<std::uint64_t>(context.arena.GetUsed()));
+        return true;
+    }
+
+    struct FrameBenchContext
+    {
+        std::array<std::uint8_t, 128u * 1024u> storage{};
+        dng::core::FrameAllocator frame;
+
+        FrameBenchContext() noexcept
+            : storage{}
+            , frame(storage.data(), static_cast<dng::usize>(storage.size()), BuildConfig())
+        {
+        }
+
+        static dng::core::FrameAllocatorConfig BuildConfig() noexcept
+        {
+            dng::core::FrameAllocatorConfig cfg{};
+            cfg.bReturnNullOnOOM = true;
+            cfg.bDebugPoisonOnReset = false;
+            return cfg;
+        }
+    };
+
+    bool Bench_FrameAllocReset(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (iterations < 0)
+        {
+            outReason = "iterations must be non-negative";
+            return false;
+        }
+
+        static FrameBenchContext context{};
+
+        constexpr int kAllocsPerIter = 32;
+        constexpr dng::usize kAllocSize = 64u;
+        constexpr dng::usize kAllocAlign = alignof(std::max_align_t);
+
+        std::uint64_t acc = 0;
+        for (int i = 0; i < iterations; ++i)
+        {
+            context.frame.Reset();
+            for (int n = 0; n < kAllocsPerIter; ++n)
+            {
+                void* p = context.frame.Allocate(kAllocSize, kAllocAlign);
+                if (p == nullptr)
+                {
+                    outReason = "frame bench allocation failed";
+                    return false;
+                }
+
+                auto* bytes = static_cast<std::uint8_t*>(p);
+                bytes[0] = static_cast<std::uint8_t>(n);
+                bytes[kAllocSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kAllocSize - 1u]);
+            }
+        }
+
+        sink ^= (acc + static_cast<std::uint64_t>(context.frame.GetUsed()));
+        return true;
+    }
+
+    struct PoolBenchContext
+    {
+        alignas(std::max_align_t) std::array<std::uint8_t, 4096u * 64u> backing{};
+        alignas(dng::core::PoolAllocator) std::array<std::uint8_t, sizeof(dng::core::PoolAllocator)> storage{};
+        dng::core::PoolAllocator* pool = nullptr;
+        bool initAttempted = false;
+        const char* initFailureReason = nullptr;
+    };
+
+    bool EnsurePoolBench(PoolBenchContext& context, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (context.pool != nullptr)
+        {
+            return true;
+        }
+
+        if (context.initAttempted)
+        {
+            outReason = (context.initFailureReason != nullptr)
+                ? context.initFailureReason
+                : "pool bench allocator unavailable";
+            return false;
+        }
+
+        context.initAttempted = true;
+        context.initFailureReason = "pool bench allocator unavailable";
+
+        constexpr dng::usize kBlockSize = 64u;
+        constexpr dng::usize kBlockAlignment = alignof(std::max_align_t);
+
+        context.pool = new (context.storage.data()) dng::core::PoolAllocator(context.backing.data(),
+                                                                             static_cast<dng::usize>(context.backing.size()),
+                                                                             kBlockSize,
+                                                                             kBlockAlignment);
+        if (context.pool == nullptr || context.pool->GetTotalBlocks() == 0)
+        {
+            context.pool = nullptr;
+            context.initFailureReason = "pool bench init failed";
+            outReason = context.initFailureReason;
+            return false;
+        }
+
+        context.initFailureReason = nullptr;
+        return true;
+    }
+
+    bool Bench_PoolAllocFreeFixed(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (iterations < 0)
+        {
+            outReason = "iterations must be non-negative";
+            return false;
+        }
+
+        static PoolBenchContext context{};
+        if (!EnsurePoolBench(context, outReason))
+        {
+            return false;
+        }
+
+        constexpr int kOpsPerIter = 32;
+        constexpr dng::usize kBlockSize = 64u;
+        constexpr dng::usize kBlockAlignment = alignof(std::max_align_t);
+
+        std::uint64_t acc = 0;
+        void* blocks[kOpsPerIter]{};
+
+        for (int i = 0; i < iterations; ++i)
+        {
+            for (int n = 0; n < kOpsPerIter; ++n)
+            {
+                blocks[n] = context.pool->Allocate(kBlockSize, kBlockAlignment);
+                if (blocks[n] == nullptr)
+                {
+                    outReason = "pool bench allocation failed";
+                    return false;
+                }
+
+                auto* bytes = static_cast<std::uint8_t*>(blocks[n]);
+                bytes[0] = static_cast<std::uint8_t>(n);
+                bytes[kBlockSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kBlockSize - 1u]);
+            }
+
+            for (int n = kOpsPerIter - 1; n >= 0; --n)
+            {
+                context.pool->Deallocate(blocks[n], kBlockSize, kBlockAlignment);
+            }
+        }
+
+        sink ^= acc;
+        return true;
+    }
+
+    bool Bench_SmallObjectAllocFreeSmall(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (iterations < 0)
+        {
+            outReason = "iterations must be non-negative";
+            return false;
+        }
+
+        dng::core::AllocatorRef alloc = dng::memory::MemorySystem::GetSmallObjectAllocator();
+        if (!alloc.IsValid())
+        {
+            outReason = "small object allocator unavailable";
+            return false;
+        }
+
+        constexpr int kOpsPerIter = 32;
+        constexpr dng::usize kAllocSize = 32u;
+        constexpr dng::usize kAllocAlignment = alignof(std::max_align_t);
+
+        std::uint64_t acc = 0;
+        void* blocks[kOpsPerIter]{};
+
+        for (int i = 0; i < iterations; ++i)
+        {
+            for (int n = 0; n < kOpsPerIter; ++n)
+            {
+                blocks[n] = alloc.AllocateBytes(kAllocSize, kAllocAlignment);
+                if (blocks[n] == nullptr)
+                {
+                    outReason = "small object allocation failed";
+                    return false;
+                }
+
+                auto* bytes = static_cast<std::uint8_t*>(blocks[n]);
+                bytes[0] = static_cast<std::uint8_t>(n);
+                bytes[kAllocSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kAllocSize - 1u]);
+            }
+
+            for (int n = kOpsPerIter - 1; n >= 0; --n)
+            {
+                alloc.DeallocateBytes(blocks[n], kAllocSize, kAllocAlignment);
+            }
+        }
+
+        sink ^= acc;
+        return true;
+    }
+
+    bool Bench_TrackingOverheadSmallAlloc(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (iterations < 0)
+        {
+            outReason = "iterations must be non-negative";
+            return false;
+        }
+
+        dng::core::AllocatorRef alloc = dng::memory::MemorySystem::GetTrackingAllocator();
+        if (!alloc.IsValid())
+        {
+            outReason = "tracking allocator unavailable";
+            return false;
+        }
+
+        constexpr int kOpsPerIter = 32;
+        constexpr dng::usize kAllocSize = 32u;
+        constexpr dng::usize kAllocAlignment = alignof(std::max_align_t);
+
+        std::uint64_t acc = 0;
+        void* blocks[kOpsPerIter]{};
+
+        for (int i = 0; i < iterations; ++i)
+        {
+            for (int n = 0; n < kOpsPerIter; ++n)
+            {
+                blocks[n] = alloc.AllocateBytes(kAllocSize, kAllocAlignment);
+                if (blocks[n] == nullptr)
+                {
+                    outReason = "tracking allocator allocation failed";
+                    return false;
+                }
+
+                auto* bytes = static_cast<std::uint8_t*>(blocks[n]);
+                bytes[0] = static_cast<std::uint8_t>(n);
+                bytes[kAllocSize - 1u] = static_cast<std::uint8_t>(i);
+                acc += static_cast<std::uint64_t>(bytes[0] + bytes[kAllocSize - 1u]);
+            }
+
+            for (int n = kOpsPerIter - 1; n >= 0; --n)
+            {
+                alloc.DeallocateBytes(blocks[n], kAllocSize, kAllocAlignment);
+            }
+        }
+
         sink ^= acc;
         return true;
     }
@@ -1216,13 +1531,23 @@ int main(int argc, char** argv)
     const int baseIter = args.iterations;
     const int vecIter = args.iterations > 1 ? args.iterations / 2 : 1;
     const int memcpyIter = args.iterations > 1 ? args.iterations / 2 : 1;
+    const int arenaIter = args.iterations > 4000 ? args.iterations / 4000 : 4000;
+    const int frameIter = args.iterations > 4000 ? args.iterations / 4000 : 4000;
+    const int poolIter = args.iterations > 5000 ? args.iterations / 5000 : 3000;
+    const int smallObjectIter = args.iterations > 5000 ? args.iterations / 5000 : 3000;
+    const int trackingIter = args.iterations > 6000 ? args.iterations / 6000 : 2500;
     const int audioMixIter = args.iterations > 1000 ? args.iterations / 1000 : 1000;
     const int audioPlatformIter = args.iterations > 2000 ? args.iterations / 2000 : 500;
 
-    const std::array<Benchmark, 6> benches = {{
+    const std::array<Benchmark, 11> benches = {{
         {"baseline_loop", baseIter, &Bench_BaselineLoop},
         {"vec3_dot", vecIter, &Bench_Vec3Dot},
         {"memcpy_64", memcpyIter, &Bench_Memcpy64},
+        {"arena_alloc_reset", arenaIter, &Bench_ArenaAllocReset},
+        {"frame_alloc_reset", frameIter, &Bench_FrameAllocReset},
+        {"pool_alloc_free_fixed", poolIter, &Bench_PoolAllocFreeFixed},
+        {"small_object_alloc_free_small", smallObjectIter, &Bench_SmallObjectAllocFreeSmall},
+        {"tracking_overhead_small_alloc", trackingIter, &Bench_TrackingOverheadSmallAlloc},
         {"audio_mix_null_1024f_stereo", audioMixIter, &Bench_AudioMixNull1024fStereo},
         {"audio_mix_mem_clip_platform_1024f_stereo", audioPlatformIter, &Bench_AudioMixMemoryClipPlatform1024fStereo},
         {"audio_mix_stream_clip_platform_1024f_stereo", audioPlatformIter, &Bench_AudioMixStreamClipPlatform1024fStereo},
