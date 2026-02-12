@@ -21,12 +21,10 @@ jobs:
         run: msbuild D-Engine.sln /p:Configuration=Release /p:Platform=x64 /m
 
       - name: Build Debug (mem tracking compile-only)
-        run: >
-          msbuild D-Engine.vcxproj
-          /p:Configuration=Debug
-          /p:Platform=x64
-          /p:PreprocessorDefinitions="DNG_MEM_TRACKING=1;DNG_MEM_CAPTURE_CALLSITE=1;%(PreprocessorDefinitions)"
-          /p:BuildProjectReferences=false
+        shell: pwsh
+        run: |
+          $defs = 'DNG_MEM_TRACKING=1%3BDNG_MEM_CAPTURE_CALLSITE=1%3B%(PreprocessorDefinitions)'
+          msbuild D-Engine.vcxproj /p:Configuration=Debug /p:Platform=x64 "/p:PreprocessorDefinitions=$defs" /p:BuildProjectReferences=false
 
       - name: Run AllSmokes
         shell: pwsh
@@ -56,6 +54,37 @@ jobs:
           $leaks = Select-String -Path $log -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
           if ($leaks) {
             Write-Error "Leak markers detected in AllSmokes log"
+            exit 1
+          }
+
+      - name: Run MemoryStressSmokes
+        shell: pwsh
+        run: |
+          $preferred = @('.\x64\Release\MemoryStressSmokes.exe', '.\x64\Debug\MemoryStressSmokes.exe')
+          $exe = $null
+          foreach ($p in $preferred) {
+            if (Test-Path $p) { $exe = (Resolve-Path $p).Path; break }
+          }
+          if (-not $exe) {
+            $candidates = Get-ChildItem -Path . -Recurse -Filter 'MemoryStressSmokes*.exe' | Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, LastWriteTime -Descending
+            if (-not $candidates) {
+              Write-Error 'MemoryStressSmokes executable not found after build.'
+              exit 1
+            }
+            Write-Host "WARNING: using fallback exe discovery: $($candidates[0].FullName)" -ForegroundColor Yellow
+            $exe = $candidates[0].FullName
+          }
+          New-Item -ItemType Directory -Path '.\artifacts\gates' -Force | Out-Null
+          $log = '.\artifacts\gates\memorystresssmokes.log'
+          Write-Host "Running $exe (log: $log)"
+          & $exe 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "MemoryStressSmokes failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          $leaks = Select-String -Path $log -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
+          if ($leaks) {
+            Write-Error "Leak markers detected in MemoryStressSmokes log"
             exit 1
           }
 
