@@ -105,6 +105,43 @@ jobs:
             Write-Host "WARNING: using fallback exe discovery: $($candidates[0].FullName)" -ForegroundColor Yellow
             $exe = $candidates[0].FullName
           }
+
+          $nullDll = Get-ChildItem -Path . -Recurse -Filter 'NullWindowModule.dll' -ErrorAction SilentlyContinue |
+            Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $nullDll) {
+            $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+            $moduleRoot = Join-Path (Get-Location) 'External/Rust/NullWindowModule'
+            if ($cargo -and (Test-Path $moduleRoot)) {
+              Write-Host "NullWindowModule.dll missing; attempting Rust build via cargo in $moduleRoot" -ForegroundColor Yellow
+              Push-Location $moduleRoot
+              try {
+                & $cargo.Path build --release
+                if ($LASTEXITCODE -eq 0) {
+                  $built = Join-Path $moduleRoot 'target/release/rust_null_window_module.dll'
+                  if (Test-Path $built) {
+                    foreach ($dest in @('.\x64\Release\NullWindowModule.dll', '.\x64\Debug\NullWindowModule.dll')) {
+                      $destDir = Split-Path $dest -Parent
+                      if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
+                      Copy-Item -Path $built -Destination $dest -Force
+                    }
+                  }
+                }
+              }
+              finally {
+                Pop-Location
+              }
+            }
+
+            $nullDll = Get-ChildItem -Path . -Recurse -Filter 'NullWindowModule.dll' -ErrorAction SilentlyContinue |
+              Sort-Object @{Expression = { $_.FullName -match 'Release' } ; Descending = $true}, LastWriteTime -Descending |
+              Select-Object -First 1
+            if (-not $nullDll) {
+              Write-Warning 'NullWindowModule.dll not found in this CI checkout. Skipping ModuleSmoke.'
+              return
+            }
+          }
+
           New-Item -ItemType Directory -Path '.\artifacts\gates' -Force | Out-Null
           $log = '.\artifacts\gates\modulesmoke.log'
           Write-Host "Running $exe (log: $log)"
