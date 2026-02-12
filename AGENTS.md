@@ -30,6 +30,7 @@ Consolidates repo rules + Copilot instructions for Core code.
 - Release build: `msbuild D-Engine.sln /p:Configuration=Release /p:Platform=x64 /m`.
 - Build only the engine lib: `msbuild D-Engine.vcxproj /p:Configuration=Debug /p:Platform=x64`.
 - Build AllSmokes only: `msbuild D-Engine.sln /t:AllSmokes /p:Configuration=Debug /p:Platform=x64`.
+- Build MemoryStressSmokes only: `msbuild D-Engine.sln /t:MemoryStressSmokes /p:Configuration=Debug /p:Platform=x64`.
 - Build ModuleSmoke only: `msbuild D-Engine.sln /t:ModuleSmoke /p:Configuration=Debug /p:Platform=x64`.
 - Build BenchRunner only: `msbuild D-Engine.sln /t:D-Engine-BenchRunner /p:Configuration=Release /p:Platform=x64`.
 - Mem tracking compile-only: `msbuild D-Engine.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:PreprocessorDefinitions="DNG_MEM_TRACKING=1;DNG_MEM_CAPTURE_CALLSITE=1;%(PreprocessorDefinitions)" /p:BuildProjectReferences=false`.
@@ -42,23 +43,27 @@ Consolidates repo rules + Copilot instructions for Core code.
 
 ## Test/Smoke Commands
 - All smokes (after build): `x64\Debug\AllSmokes.exe` or `x64\Release\AllSmokes.exe`.
+- Memory stress smokes: `x64\Debug\MemoryStressSmokes.exe` or `x64\Release\MemoryStressSmokes.exe`.
 - ABI smoke: `x64\Debug\ModuleSmoke.exe` or `x64\Release\ModuleSmoke.exe`.
 - ModuleSmoke requires `NullWindowModule.dll` built by the solution (or build the Rust module).
 - Header-only and build-only tests compile with the solution build.
 
 ## Single-Test Guidance
-- Smallest runnable units are executables (AllSmokes, ModuleSmoke, BenchRunner).
+- Smallest runnable units are executables (AllSmokes, MemoryStressSmokes, ModuleSmoke, BenchRunner).
 - To focus on a single smoke, temporarily edit `tests/AllSmokes/AllSmokes_main.cpp` to call only the desired `Run*Smoke()` (do not commit).
-- Prefer building the specific project target (`/t:AllSmokes`, `/t:ModuleSmoke`) to reduce build time.
+- Prefer building the specific project target (`/t:AllSmokes`, `/t:MemoryStressSmokes`, `/t:ModuleSmoke`) to reduce build time.
 
 ## Bench Commands
 - Build Release: `msbuild D-Engine.sln -m -p:Configuration=Release -p:Platform=x64`.
 - Run bench: `x64\Release\D-Engine-BenchRunner.exe --warmup 1 --target-rsd 3 --max-repeat 7`.
 - Optional output: set `DNG_BENCH_OUT=artifacts/bench` before running.
+- Memory sweep + compare: `python tools/memory_bench_sweep.py --strict-stability --stabilize --compare-baseline`.
+- Capture baseline candidates (safe default): `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both`.
+- Promote baselines after review: `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both -Promote`.
 
 ## Gate Script (all-in-one)
-- Fast gates: `pwsh tools/run_all_gates.ps1 -Fast`.
-- Full gates: `pwsh tools/run_all_gates.ps1`.
+- Fast gates: `pwsh tools/run_all_gates.ps1 -Fast` (skips `MemoryStressSmokes` and bench).
+- Full gates: `pwsh tools/run_all_gates.ps1` (includes `MemoryStressSmokes`).
 - Include bench: `pwsh tools/run_all_gates.ps1 -RequireBench`.
 - Build Rust module before ModuleSmoke: `pwsh tools/run_all_gates.ps1 -RustModule`.
 

@@ -44,6 +44,12 @@ Stabilization is applied by the caller in gates/CI:
   - `x64\Release\D-Engine-BenchRunner.exe --warmup 2 --target-rsd 8 --max-repeat 24 --cpu-info --memory-only --memory-matrix`
 - Both runs are launched with process stabilization:
   - `cmd /c start /wait /affinity 1 /high ...`
+- Local memory sweep helper (same stabilized profile):
+  - `python tools/memory_bench_sweep.py --strict-stability --stabilize --compare-baseline`
+- Baseline capture helper (safe default, no overwrite):
+  - `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both`
+- Baseline promotion helper (explicit overwrite):
+  - `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both -Promote`
 
 ## CI Compare Policy
 - Core baseline:
@@ -56,6 +62,10 @@ Stabilization is applied by the caller in gates/CI:
 - Current memory noise watchlist (ignored in compare):
   - `small_object_alloc_free_16b`
   - `small_object_alloc_free_small`
+- Bench profile knobs can be tuned without script edits:
+  - `BENCH_AFFINITY_MASK`, `BENCH_NORMAL_PRIORITY`
+  - `BENCH_CORE_WARMUP`, `BENCH_CORE_TARGET_RSD`, `BENCH_CORE_MAX_REPEAT`
+  - `BENCH_MEMORY_WARMUP`, `BENCH_MEMORY_TARGET_RSD`, `BENCH_MEMORY_MAX_REPEAT`
 
 ## Leak Gate
 - Bench and smoke logs are scanned for hard leak markers:
