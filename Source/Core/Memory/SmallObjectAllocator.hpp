@@ -86,6 +86,13 @@ class SmallObjectAllocator final : public IAllocator
             DNG_CHECK(mParent != nullptr);
             DNG_CHECK(mCfg.SlabSizeBytes >= 4096); // sanity guard against degenerate slabs
 
+            if (mParent == nullptr)
+            {
+                mShardCount = 0;
+                mShards = nullptr;
+                return;
+            }
+
             const usize minBatch = 1;
             const usize maxBatch = kMagazineCapacity;
             const usize requested = (cfg.TLSBatchSize == 0) ? kDefaultBatch : cfg.TLSBatchSize;
@@ -193,10 +200,20 @@ class SmallObjectAllocator final : public IAllocator
         // ---
         [[nodiscard]] void* Allocate(usize size, usize alignment) noexcept override
         {
+            if (mParent == nullptr)
+            {
+                return nullptr;
+            }
+
             alignment = NormalizeAlignment(alignment);
             if (size == 0)
             {
                 size = 1; // zero-byte allocs still consume a slot; keep contracts explicit
+            }
+
+            if (mShards == nullptr || mShardCount == 0)
+            {
+                return mParent->Allocate(size, alignment);
             }
 
             if (size > mCfg.MaxClassSize)
@@ -232,13 +249,38 @@ class SmallObjectAllocator final : public IAllocator
                 return;
             }
 
+            if (mParent == nullptr)
+            {
+                return;
+            }
+
             alignment = NormalizeAlignment(alignment);
             if (size == 0)
             {
                 size = 1;
             }
 
+            if (mShards == nullptr || mShardCount == 0)
+            {
+                mParent->Deallocate(ptr, size, alignment);
+                return;
+            }
+
             if (size > mCfg.MaxClassSize)
+            {
+                mParent->Deallocate(ptr, size, alignment);
+                return;
+            }
+
+            const ClassIndex ci = SizeToClass(size);
+            if (ci.Index < 0)
+            {
+                mParent->Deallocate(ptr, size, alignment);
+                return;
+            }
+
+            const usize supportedAlignment = NormalizeAlignment(NaturalAlignFor(kClassSizes[static_cast<usize>(ci.Index)]));
+            if (alignment > supportedAlignment)
             {
                 mParent->Deallocate(ptr, size, alignment);
                 return;
@@ -266,6 +308,15 @@ class SmallObjectAllocator final : public IAllocator
             usize alignment = alignof(std::max_align_t),
             bool* wasInPlace = nullptr) noexcept override
         {
+            if (mParent == nullptr)
+            {
+                if (wasInPlace)
+                {
+                    *wasInPlace = false;
+                }
+                return nullptr;
+            }
+
             alignment = NormalizeAlignment(alignment);
 
             if (wasInPlace)
@@ -291,6 +342,11 @@ class SmallObjectAllocator final : public IAllocator
             {
                 Deallocate(ptr, oldSize, alignment);
                 return nullptr;
+            }
+
+            if (mShards == nullptr || mShardCount == 0)
+            {
+                return mParent->Reallocate(ptr, oldSize, newSize, alignment, wasInPlace);
             }
 
             void* newBlock = Allocate(newSize, alignment);
@@ -487,8 +543,24 @@ class SmallObjectAllocator final : public IAllocator
             const usize bytes = normalized * sizeof(Shard);
             const usize alignment = alignof(Shard);
 
+            if (mParent == nullptr)
+            {
+                mShardCount = 0;
+                mShards = nullptr;
+                return;
+            }
+
             void* mem = mParent->Allocate(bytes, alignment);
-            DNG_CHECK(mem != nullptr && "SmallObjectAllocator::InitShards allocation failed");
+            if (mem == nullptr)
+            {
+                if (!mCfg.ReturnNullOnOOM)
+                {
+                    HandleOutOfMemory(bytes, alignment, "SmallObjectAllocator::InitShards");
+                }
+                mShardCount = 0;
+                mShards = nullptr;
+                return;
+            }
 
             mShardCount = normalized;
             mShards = static_cast<Shard*>(mem);
@@ -1063,7 +1135,7 @@ class SmallObjectAllocator final : public IAllocator
             if (mCfg.ReturnNullOnOOM)
             {
                 DNG_LOG_WARNING("Memory",
-                    "SmallObjectAllocator: allocation failure in %s (size=%zu, align=%zu)",
+                    "SmallObjectAllocator: allocation failure in {} (size={}, align={})",
                     context ? context : "<unknown>", static_cast<size_t>(size), static_cast<size_t>(alignment));
             }
             else
