@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 2,
+  "benchmarks": [
+    {
+      "name": "arena_alloc_reset",
+      "value": 76.101218,
+      "rsdPct": 7.449449,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 7,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "frame_alloc_reset",
+      "value": 75.004086,
+      "rsdPct": 7.394030,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 3,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "pool_alloc_free_fixed",
+      "value": 158.461052,
+      "rsdPct": 3.046192,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "small_object_alloc_free_small",
+      "value": 1566.041382,
+      "rsdPct": 21.805427,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "unstable",
+      "reason": "target RSD not reached",
+      "repeatsUsed": 24,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "tracking_overhead_small_alloc",
+      "value": 4301.401671,
+      "rsdPct": 0.584546,
+      "bytesPerOp": 1024.000000,
+      "allocsPerOp": 32.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "malloc_free_64",
+      "value": 1064.036025,
+      "rsdPct": 5.875838,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "malloc_free_256",
+      "value": 588.426663,
+      "rsdPct": 0.470401,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "arena_alloc_reset_16b",
+      "value": 142.704106,
+      "rsdPct": 3.798906,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "arena_alloc_reset_256b",
+      "value": 42.932616,
+      "rsdPct": 7.515395,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 3,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "arena_alloc_reset_64b_align64",
+      "value": 83.423255,
+      "rsdPct": 17.119571,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "unstable",
+      "reason": "target RSD not reached",
+      "repeatsUsed": 24,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "frame_alloc_reset_16b",
+      "value": 155.361443,
+      "rsdPct": 1.167682,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "frame_alloc_reset_256b",
+      "value": 38.722771,
+      "rsdPct": 0.410251,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "frame_alloc_reset_64b_align64",
+      "value": 73.027266,
+      "rsdPct": 0.839761,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "small_object_alloc_free_16b",
+      "value": 1693.953418,
+      "rsdPct": 0.691496,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "small_object_alloc_free_64b",
+      "value": 1379.182793,
+      "rsdPct": 7.475818,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "small_object_alloc_free_256b",
+      "value": 685.554134,
+      "rsdPct": 4.227283,
+      "bytesPerOp": 0.000000,
+      "allocsPerOp": 0.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "tracking_overhead_alloc_16b",
+      "value": 4158.964130,
+      "rsdPct": 7.479243,
+      "bytesPerOp": 512.000000,
+      "allocsPerOp": 32.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 3,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "tracking_overhead_alloc_64b",
+      "value": 4193.819096,
+      "rsdPct": 2.761943,
+      "bytesPerOp": 2048.000000,
+      "allocsPerOp": 32.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 2,
+      "targetRsdPct": 8.000
+    },
+    {
+      "name": "tracking_overhead_alloc_256b",
+      "value": 2221.236211,
+      "rsdPct": 7.005765,
+      "bytesPerOp": 4096.000000,
+      "allocsPerOp": 16.000000,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 3,
+      "targetRsdPct": 8.000
+    }
+  ],
+  "summary": {
+    "okCount": 17,
+    "skippedCount": 0,
+    "unstableCount": 2,
+    "errorCount": 0
+  },
+  "metadata": {
+    "note": "BenchRunner v2",
+    "unit": "ns/op",
+    "warmup": 2,
+    "targetRsdPct": 8.000,
+    "maxRepeat": 24,
+    "iterations": 20000000,
+    "strictStability": false,
+    "memoryOnly": true,
+    "memoryMatrix": true,
+    "benchFilter": "",
+    "schemaVersion": 2
+  }
+}
