@@ -3,19 +3,19 @@
   "benchmarks": [
     {
       "name": "baseline_loop",
-      "value": 0.844685,
-      "rsdPct": 2.932544,
+      "value": 0.808393,
+      "rsdPct": 2.551780,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
       "reason": "",
-      "repeatsUsed": 18,
+      "repeatsUsed": 2,
       "targetRsdPct": 3.000
     },
     {
       "name": "vec3_dot",
-      "value": 0.593190,
-      "rsdPct": 1.494044,
+      "value": 0.551267,
+      "rsdPct": 0.114777,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
@@ -25,8 +25,8 @@
     },
     {
       "name": "memcpy_64",
-      "value": 0.211862,
-      "rsdPct": 2.110760,
+      "value": 0.203957,
+      "rsdPct": 2.572996,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
@@ -36,8 +36,8 @@
     },
     {
       "name": "arena_alloc_reset",
-      "value": 78.876764,
-      "rsdPct": 1.597177,
+      "value": 77.550661,
+      "rsdPct": 2.785686,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
@@ -47,8 +47,8 @@
     },
     {
       "name": "frame_alloc_reset",
-      "value": 75.657118,
-      "rsdPct": 0.053708,
+      "value": 77.238542,
+      "rsdPct": 1.785957,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
@@ -58,8 +58,8 @@
     },
     {
       "name": "pool_alloc_free_fixed",
-      "value": 161.284973,
-      "rsdPct": 0.177075,
+      "value": 166.227658,
+      "rsdPct": 2.883479,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
@@ -69,8 +69,8 @@
     },
     {
       "name": "small_object_alloc_free_small",
-      "value": 1321.208961,
-      "rsdPct": 0.381461,
+      "value": 1301.892312,
+      "rsdPct": 1.464857,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
@@ -80,8 +80,8 @@
     },
     {
       "name": "tracking_overhead_small_alloc",
-      "value": 4266.943229,
-      "rsdPct": 0.204333,
+      "value": 4314.345046,
+      "rsdPct": 0.190931,
       "bytesPerOp": 1024.000000,
       "allocsPerOp": 32.000000,
       "status": "ok",
@@ -91,8 +91,8 @@
     },
     {
       "name": "audio_mix_null_1024f_stereo",
-      "value": 146.905754,
-      "rsdPct": 1.535163,
+      "value": 146.370675,
+      "rsdPct": 0.159360,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
@@ -102,8 +102,8 @@
     },
     {
       "name": "audio_mix_mem_clip_platform_1024f_stereo",
-      "value": 4027.866429,
-      "rsdPct": 0.494635,
+      "value": 3993.630952,
+      "rsdPct": 0.322196,
       "bytesPerOp": 0.000000,
       "allocsPerOp": 0.000000,
       "status": "ok",
@@ -134,12 +134,9 @@
     "unit": "ns/op",
     "warmup": 1,
     "targetRsdPct": 3.000,
-    "maxRepeat": 20,
+    "maxRepeat": 12,
     "iterations": 20000000,
     "strictStability": true,
-    "memoryOnly": false,
-    "memoryMatrix": false,
-    "benchFilter": "",
     "schemaVersion": 2
   }
 }
