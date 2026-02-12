@@ -123,7 +123,8 @@ Subsystem pattern (current code)
   - tests/Smoke/Memory/*_smoke.cpp
   - tests/Smoke/Determinism/*_smoke.cpp
   - tests/SelfContain/*_header_only.cpp
-  - tests/AllSmokes/AllSmokes_main.cpp (aggregate executable)
+  - tests/AllSmokes/AllSmokes_main.cpp (aggregate executable for stable smokes)
+  - tests/MemoryStressSmokes/MemoryStressSmokes_main.cpp (aggregate executable for aggressive memory stress)
 - Historical milestone status docs: Docs/<Subsystem>_M0_Status.md
 
 Example (Window)
@@ -360,7 +361,8 @@ Step 4: Tests
   - tests/Smoke/Subsystems/*_smoke.cpp
   - tests/Smoke/Memory/*_smoke.cpp
   - tests/Smoke/Determinism/*_smoke.cpp
-  - tests/AllSmokes/AllSmokes_main.cpp (for aggregate execution)
+  - tests/AllSmokes/AllSmokes_main.cpp (for aggregate stable execution)
+  - tests/MemoryStressSmokes/MemoryStressSmokes_main.cpp (for aggregate memory stress execution)
 - If ABI is involved:
   - tests/Abi/AbiHeaders_c.c and tests/Abi/AbiHeaders_cpp.cpp
   - tests/Abi/ModuleSmoke.cpp

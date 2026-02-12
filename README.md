@@ -5,6 +5,7 @@ Header-first C++ engine focused on contracts-first APIs and deterministic, audit
 ## Quickstart
 - Open D-Engine.sln in Visual Studio 2022 (or run `msbuild D-Engine.sln /p:Configuration=Debug /p:Platform=x64`).
 - Build Debug or Release on x64 to run the smoke/build checks.
+- Run `x64\Debug\AllSmokes.exe` for standard smoke coverage and `x64\Debug\MemoryStressSmokes.exe` for aggressive memory stress coverage.
 
 ## Read next
 - Handbook: D-Engine_Handbook.md

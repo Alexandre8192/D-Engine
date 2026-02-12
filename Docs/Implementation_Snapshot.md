@@ -38,7 +38,10 @@ Scope note
 ## Test and target reality
 - Aggregate smoke executable:
   - `tests/AllSmokes/AllSmokes_main.cpp` -> `AllSmokes.exe`
-  - Runs subsystem smokes, determinism replay smoke, and selected memory runtime smokes.
+  - Runs subsystem smokes, determinism replay smoke, and stable memory runtime smokes.
+- Extended memory stress executable:
+  - `tests/MemoryStressSmokes/MemoryStressSmokes_main.cpp` -> `MemoryStressSmokes.exe`
+  - Runs long-running/noisy memory stress scenarios separately from `AllSmokes`.
 - ABI smoke executable:
   - `tests/Abi/ModuleSmoke.cpp` -> `ModuleSmoke.exe`
 - Benchmark executable:
