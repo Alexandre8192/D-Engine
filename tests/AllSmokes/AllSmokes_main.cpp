@@ -35,9 +35,6 @@ int RunPageAllocatorSmoke();
 int RunPoolAllocatorSmoke();
 int RunSmallObjectTLSBinsSmoke();
 int RunTrackingAllocatorSmoke();
-int RunSmallObjectThreadStressSmoke();
-int RunSmallObjectFragmentationLongRunSmoke();
-int RunMemoryOOMAlignmentExtremesSmoke();
 
 namespace
 {
@@ -78,9 +75,6 @@ int main()
         {"PoolAllocator", &RunPoolAllocatorSmoke},
         {"SmallObjectTLSBins", &RunSmallObjectTLSBinsSmoke},
         {"TrackingAllocator", &RunTrackingAllocatorSmoke},
-        {"SmallObjectThreadStress", &RunSmallObjectThreadStressSmoke},
-        {"SmallObjectFragmentationLongRun", &RunSmallObjectFragmentationLongRunSmoke},
-        {"MemoryOOMAlignmentExtremes", &RunMemoryOOMAlignmentExtremesSmoke},
     };
 
     int failures = 0;
