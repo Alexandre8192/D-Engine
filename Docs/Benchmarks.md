@@ -3,6 +3,11 @@
 ## Release Baseline
 Canonical baseline JSON lives in:
 - `bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json`
+- `bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json`
+
+Historical memory snapshot (commit `3818f5a`) is stored in:
+- `bench/baselines/historical/3818f5a/bench-runner-memory-release-windows-x64-msvc-3818f5a.baseline.json`
+- `bench/baselines/historical/3818f5a/3818f5a-memory-baseline-report.md`
 
 ## Notes
 - BenchRunner now emits per-benchmark status (`ok` / `skipped` / `unstable` / `error`) so platform-dependent scenarios are explicit.
@@ -33,4 +38,11 @@ Current BenchRunner JSON (schema v2) emits:
 - `metadata` with run options and schema version
 
 Recommended CI invocation:
-- `--warmup 1 --target-rsd 3 --max-repeat 12 --cpu-info --strict-stability`
+- Core: `--warmup 1 --target-rsd 3 --max-repeat 20 --cpu-info --strict-stability`
+- Memory: `--warmup 2 --target-rsd 8 --max-repeat 24 --cpu-info --memory-only --memory-matrix --strict-stability`
+
+Recommended local baseline workflow:
+- Capture candidates (safe default, no overwrite):
+  - `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both`
+- Promote canonical baselines only after review:
+  - `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both -Promote`

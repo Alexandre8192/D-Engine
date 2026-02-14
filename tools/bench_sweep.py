@@ -24,6 +24,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bench-filter", type=str, default="")
     parser.add_argument("--emit-md", type=Path, default=None)
     parser.add_argument("--strict-stability", action="store_true")
+    parser.add_argument("--stabilize", action="store_true")
+    parser.add_argument("--affinity-mask", type=str, default="1")
+    parser.add_argument("--normal-priority", action="store_true")
     return parser.parse_args()
 
 
@@ -43,6 +46,36 @@ def latest_bench_json(root: Path) -> Path:
     if not files:
         raise FileNotFoundError(f"No bench JSON found in {root}")
     return files[0]
+
+
+def run_bench(
+    exe: Path,
+    args: List[str],
+    env: dict[str, str],
+    stabilize: bool,
+    affinity_mask: str,
+    normal_priority: bool,
+) -> int:
+    if stabilize and os.name == "nt":
+        arg_text = subprocess.list2cmdline(args)
+        priority = "" if normal_priority else " /high"
+        cmd_text = (
+            "start /wait /affinity "
+            + affinity_mask
+            + priority
+            + ' "" "'
+            + str(exe)
+            + '" '
+            + arg_text
+        )
+        print("Running (stabilized): cmd /c", cmd_text)
+        process = subprocess.run(["cmd", "/c", cmd_text], env=env, check=False)
+        return process.returncode
+
+    cmd = [str(exe), *args]
+    print("Running:", " ".join(cmd))
+    process = subprocess.run(cmd, env=env, check=False)
+    return process.returncode
 
 
 def format_md(payload: dict, json_path: Path) -> str:
@@ -113,8 +146,7 @@ def main() -> int:
     out_dir = Path("artifacts/bench/sweeps") / f"sweep-{timestamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = [
-        str(exe),
+    bench_args = [
         "--warmup",
         str(max(args.warmup, 0)),
         "--target-rsd",
@@ -124,24 +156,30 @@ def main() -> int:
         "--cpu-info",
     ]
     if args.strict_stability:
-        cmd.append("--strict-stability")
+        bench_args.append("--strict-stability")
     if args.iterations is not None:
-        cmd.extend(["--iterations", str(max(args.iterations, 1))])
+        bench_args.extend(["--iterations", str(max(args.iterations, 1))])
     if args.memory_only:
-        cmd.append("--memory-only")
+        bench_args.append("--memory-only")
     if args.memory_matrix:
-        cmd.append("--memory-matrix")
+        bench_args.append("--memory-matrix")
     if args.bench_filter:
-        cmd.extend(["--bench-filter", args.bench_filter])
+        bench_args.extend(["--bench-filter", args.bench_filter])
 
     env = dict(os.environ)
     env["DNG_BENCH_OUT"] = str(out_dir)
 
-    print("Running:", " ".join(cmd))
-    process = subprocess.run(cmd, env=env, check=False)
-    if process.returncode != 0:
-        print(f"BenchRunner failed with exit code {process.returncode}", file=sys.stderr)
-        return process.returncode
+    exit_code = run_bench(
+        exe=exe,
+        args=bench_args,
+        env=env,
+        stabilize=args.stabilize,
+        affinity_mask=args.affinity_mask,
+        normal_priority=args.normal_priority,
+    )
+    if exit_code != 0:
+        print(f"BenchRunner failed with exit code {exit_code}", file=sys.stderr)
+        return exit_code
 
     json_path = latest_bench_json(out_dir)
     payload = json.loads(json_path.read_text(encoding="utf-8"))

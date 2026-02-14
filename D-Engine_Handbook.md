@@ -1,434 +1,1217 @@
-# D-Engine Handbook (single source of truth)
+# D-Engine Handbook (Single Source of Truth)
 
-Purpose
-- Explain what D-Engine is trying to be, and what it is NOT trying to be.
-- Explain the Contract model (backend interchangeability) for in-process C++ backends.
-- Explain the ABI model (loadable modules) and how it enables future bindings from other languages.
-- Point to the concrete files in this repository that implement the ideas.
+> This file is the canonical place for D-Engine's vision, non-negotiables,
+> technical policies, and roadmap.
+>
+> Other documents that used to define policies/roadmaps now act as thin
+> pointers to sections of this handbook to avoid contradictions.
 
-Audience
-- Contributors and reviewers (including AI assistants) who want a stable mental model.
-- Users who want to understand how to plug a backend into D-Engine without reading every header.
-
-Status
-- The repository keeps a contract-first core, but implementation maturity is uneven by subsystem.
-- For current behavior, prefer `Docs/Implementation_Snapshot.md`, `Source/`, and smoke targets over milestone snapshot docs.
+Last updated: 2026-02-14
 
 -------------------------------------------------------------------------------
 
-## 1. Philosophy
+## How to read this handbook
 
-D-Engine is built around a few non-negotiables:
+This document is intentionally long. It exists to prevent "wishful architecture"
+and to keep D-Engine coherent as it grows.
 
-1) Header-first, contracts first
-- Public APIs live in headers.
-- Every subsystem starts with a Contract that describes: data, handles, invariants, and the call surface.
-- Implementations (backends) are interchangeable and are not allowed to leak into the contract layer.
+### Read it in layers
 
-2) "Freedom in C++", but with discipline
-- No magic.
-- Explicit ownership, explicit lifetimes, explicit costs.
-- If something is optional, it is actually optional: you can remove a module and the rest still builds.
+1) **Product charter + reality checks** (Sections 0-2)
+   - What D-Engine is trying to be.
+   - What it explicitly does NOT promise.
+   - The chosen wedge (Crowd-first Musou performance) and why it is realistic.
 
-3) Determinism is a first-class goal
-- Null backends exist to be deterministic and testable.
-- If a subsystem cannot guarantee determinism, that must be stated in its caps / docs.
+2) **Principles + architecture** (Sections 3-6)
+   - The non-negotiables.
+   - The canonical "Contract / Null backend / System" model.
+   - How modules, layering, and costs are meant to work.
 
-4) Performance by design, not by micro-tricks
+3) **Normative policies** (Sections 7-16)
+   - These are the rules that keep the codebase stable and predictable.
+   - If a rule says MUST/SHALL, it is enforced (lint/tests/CI) or treated as a bug.
+
+4) **Roadmap + implementation snapshot** (Sections 17-20)
+   - Roadmap: where we want to go next (planning).
+   - Snapshot: what the code actually does today (reality).
+
+### Suggested reading paths
+
+- **New to the project (10-15 min):**
+  Read 0-3, skim 4-6, then jump to 17 (Roadmap).
+
+- **Implementing a subsystem or backend (30-60 min):**
+  Read 4-6, then the relevant policies (8-16), then 19 (Review checklist).
+
+- **Interested in determinism / replay / rollback:**
+  Read 10-12 carefully, plus the enforcement notes in 16.
+
+- **Interested in plugins or Rust interop:**
+  Read 14-15, then the ABI section in 16 (bench + test expectations still apply).
+
+### What to trust when things disagree
+
+- This handbook is the **single source of truth** for intent and rules.
+- The implementation snapshot is the **single source of truth** for current code.
+- If they disagree, treat it as a bug in documentation: update one side until they match.
+
+### Terms used in this doc (quick glossary)
+
+- **Contract**: a backend-agnostic API surface with explicit ownership, error behavior,
+  determinism notes, and a visible cost model.
+- **Backend**: a concrete implementation of a contract (Null, Win32, DX12, etc.).
+- **System**: the orchestrator that owns lifecycle and ties contracts together safely.
+- **Replay mode**: a configuration where simulation is structured to be reproducible.
+- **Wedge**: a narrow, demonstrable use case used to prove value (Crowd-first Musou).
+
+-------------------------------------------------------------------------------
+
+## Table of contents
+
+0. [Why D-Engine exists (product charter)](#0-why-d-engine-exists-product-charter)
+1. [The wedge: Crowd-first (Musou) performance as proof](#1-the-wedge-crowd-first-musou-performance-as-proof)
+2. [What D-Engine does NOT promise (explicit non-goals)](#2-what-d-engine-does-not-promise-explicit-non-goals)
+3. [Guiding principles (the "dream engine" rules)](#3-guiding-principles-the-dream-engine-rules)
+4. [Architecture model](#4-architecture-model)
+5. [Repository layout and layering](#5-repository-layout-and-layering)
+6. [Contracts-first rules](#6-contracts-first-rules)
+7. [Policy matrix (map of all rules)](#7-policy-matrix-map-of-all-rules)
+8. [Core language policy (no exceptions, no RTTI, STL constraints)](#8-core-language-policy-no-exceptions-no-rtti-stl-constraints)
+9. [Header-first strategy (fast build, thin facades)](#9-header-first-strategy-fast-build-thin-facades)
+10. [Determinism policy](#10-determinism-policy)
+11. [Threading rules (Replay determinism compatible)](#11-threading-rules-replay-determinism-compatible)
+12. [Time policy (SimulationClock vs RealClock)](#12-time-policy-simulationclock-vs-realclock)
+13. [Memory policy (defaults, precedence, invariants)](#13-memory-policy-defaults-precedence-invariants)
+14. [ABI and interop policy (stable C ABI for modules)](#14-abi-and-interop-policy-stable-c-abi-for-modules)
+15. [ABI review checklist](#15-abi-review-checklist)
+16. [Benchmark protocol](#16-benchmark-protocol)
+17. [Roadmap (two tracks: SDK stability + crowd slice)](#17-roadmap-two-tracks-sdk-stability--crowd-slice)
+18. [Implementation snapshot (code-backed reality)](#18-implementation-snapshot-code-backed-reality)
+19. [Contribution workflow and review checklist](#19-contribution-workflow-and-review-checklist)
+20. [Appendix: historical snapshots and where to look next](#20-appendix-historical-snapshots-and-where-to-look-next)
+
+-------------------------------------------------------------------------------
+
+## 0. Why D-Engine exists (product charter)
+
+D-Engine is a programmer-first engine project built around four promises:
+
+1) **Contracts-first**: every subsystem starts as a backend-agnostic contract
+   with explicit ownership, error behavior, determinism notes, and a visible cost
+   model.
+2) **Determinism and auditability**: the engine is structured so that simulation
+   can be made reproducible (Replay mode) and debugged with stable ordering.
+3) **Header-first clarity**: the public surface is readable and self-contained.
+   "What does this do and what does it cost?" should be answerable by reading a
+   header.
+4) **Performance by design, not by luck**: no hidden allocations on hot paths,
+   explicit data layouts, and benchmarks treated as first-class tests.
+
+Platform scope (current): **Windows-only**.
+
+This file also contains explicit reality checks. The goal is to avoid
+"wishful architecture" that feels inspiring but cannot ship.
+
+-------------------------------------------------------------------------------
+
+## 1. The wedge: Crowd-first (Musou) performance as proof
+
+D-Engine does not need to "beat Unreal/Unity at everything" to be valuable.
+The strategy is to win hard on a narrow, concrete use case that:
+
+- is easy to demonstrate,
+- is easy to benchmark,
+- benefits from determinism and low-latency scheduling,
+- and is painful in general-purpose engines.
+
+### 1.1 The chosen wedge
+
+**Crowd-first action (Musou / Dynasty Warriors-like)**:
+
+- hundreds to thousands of animated agents,
+- lots of VFX, collisions, and gameplay logic,
+- stable 60 fps target,
+- minimal stutter (frame-time stability matters more than average fps).
+
+This wedge is compatible with D-Engine's core philosophy:
+data-oriented simulation, deterministic-friendly update rules, and explicit cost.
+
+### 1.2 What "winning" looks like
+
+The first believable win is NOT "a full engine". It is a reproducible proof:
+
+- a fixed benchmark scene,
+- a stable simulation tick,
+- agent update + animation sampling + visibility/VFX submission,
+- a frame-time graph that stays flat under load,
+- and a clearly explained cost model.
+
+If this proof is strong, it becomes a marketing and adoption lever. It also
+forces the engine to become real (windowing, input, jobs, renderer path, asset
+loading), but in a scoped way.
+
+### 1.3 Why this wedge can plausibly differentiate
+
+General-purpose engines pay overhead for:
+
+- broad feature sets,
+- editor-first pipelines,
+- dynamic reflection/serialization,
+- flexible but expensive entity models,
+- multi-purpose job scheduling.
+
+D-Engine can choose to be:
+
+- narrow in scope at first,
+- explicit about data and ownership,
+- strict about determinism/stable ordering,
+- and willing to optimize for one scenario.
+
+This does not guarantee superiority, but it makes a measurable win plausible.
+
+-------------------------------------------------------------------------------
+
+## 2. What D-Engine does NOT promise (explicit non-goals)
+
+These non-goals are part of the charter. They are here to reduce future doubt
+and prevent the roadmap from drifting into impossibility.
+
+### 2.1 Not a "Unreal replacement" across all use cases
+
+D-Engine aims to be a serious alternative for some teams and some genres.
+It is not designed to cover the full Unreal/Unity surface area.
+
+### 2.2 Not instantly studio-ready
+
+Large studios choose engines based on:
+
+- shipping track record,
+- tooling maturity,
+- long-term support guarantees,
+- stability (API/ABI),
+- debug/profiling pipelines,
+- hiring and onboarding cost.
+
+D-Engine can become attractive over time, but "studio-ready" is a result of
+multiple shipped projects, not a document.
+
+### 2.3 Not designer-friendly "by magic"
+
+AI assistants help, but a designer-friendly engine requires:
+
+- robust tooling (editor, content pipeline),
+- iteration workflows,
+- safe scripting or visual logic,
+- documentation and UX.
+
+D-Engine is intentionally programmer-first. Designer friendliness can be added
+later, but it is not a v0.x requirement.
+
+### 2.4 Not bitwise identical simulation across all machines
+
+Replay determinism is defined in this handbook, but "bitwise identical across
+different hardware and compilers" is out of scope by default.
+
+-------------------------------------------------------------------------------
+
+## 3. Guiding principles (the "dream engine" rules)
+
+These are the non-negotiables that shape every subsystem.
+
+### 3.1 Contracts first, backends second
+
+- Start every subsystem by writing the contract.
+- The contract must be readable, stable, and explicit.
+- Then implement:
+  - a Null backend (deterministic reference),
+  - a System/orchestrator layer,
+  - and only then a real platform backend.
+
+### 3.2 No hidden allocations and visible costs
+
+- Public APIs must document allocation behavior.
+- Hot paths must avoid hidden allocations.
+- Prefer caller-provided buffers or explicit arenas.
+
+### 3.3 Determinism as a first-class mode
+
+- Replay mode exists to make bugs reproducible.
+- Stable ordering rules are mandatory when results depend on order.
+- Multithreading is allowed only with deterministic merge rules.
+
+### 3.4 Header-first, self-contained public surface
+
+- Contracts are in headers.
+- Every public header compiles in isolation.
+- "Thin facade" pattern: keep heavy templates in `detail/` and `.cpp`.
+
+### 3.5 Minimal magic, maximum clarity
+
+- Avoid opaque macros.
+- Prefer explicit types, explicit ownership, explicit error returns.
+- Teach through code: Purpose/Contract/Notes are expected.
+
+### 3.6 Modular by construction
+
+- A project can pick which backends to use.
+- The engine should not force a single "one true" implementation.
+- If a backend respects the contract, it should plug in.
+
+-------------------------------------------------------------------------------
+
+## 4. Architecture model
+
+The engine is organized around three layers:
+
+1) **Contract layer** (source-level, C++):
+   - backend-agnostic types and functions
+   - stable shape for in-repo backends
+2) **System layer** (C++):
+   - orchestrates initialization, lifetime, validation, and dispatch
+   - owns "policy" decisions (Replay mode, error handling, threading mode)
+3) **Backend layer**:
+   - Null backend (reference)
+   - platform backend (Win32, audio device, etc.)
+   - external backend (third-party)
+   - optional loadable module via C ABI
+
+This separation keeps the Core understandable and makes evolution safer.
+
+-------------------------------------------------------------------------------
+
+## 5. Repository layout and layering
+
+High-level map:
+
+- `Source/Core/Contracts/` : subsystem contracts (public API)
+- `Source/Core/<Subsystem>/` : system + null backend
+- `Source/Core/Abi/` : stable C ABI headers
+- `Source/Core/Interop/` : C++ wrappers around ABI
+- `Source/Modules/` : optional modules/backends
+- `tests/` : header self-containment + smoke tests + bench runner
+- `Docs/` : thin pointers and historical snapshots
+
+Core rule: **Contracts live in `Source/Core/Contracts/`**.
+
+-------------------------------------------------------------------------------
+
+## 6. Contracts-first rules
+
+Every contract header must contain a file header block like:
+
+```cpp
+// ============================================================================
+// D-Engine - <Module>/<Path>/<File>.hpp
+// ----------------------------------------------------------------------------
+// Purpose : <big-picture intent>
+// Contract: <inputs/outputs/ownership; thread-safety; noexcept; allocations;
+//           determinism; compile-time/runtime guarantees>
+// Notes   : <rationale; pitfalls; alternatives; references; cost model>
+// ============================================================================
+```
+
+Contract requirements (minimum):
+
+- **Ownership**: who owns what, who frees what.
+- **Error model**: status codes, no exceptions.
+- **Thread-safety**: what is safe, what is not.
+- **Determinism notes**: what is stable in Replay mode.
+- **Allocation model**: explicit call-outs for any allocation.
+- **Ordering guarantees**: if ordering affects results, define it.
+
+-------------------------------------------------------------------------------
+
+## 7. Policy matrix (map of all rules)
+
+This is the engine's policy map. It is repeated here so there is one place to
+read everything.
+
+| Policy | Scope | Requirement (one-liner) | Enforcement |
+| --- | --- | --- | --- |
+| Core language policy | Core C++ usage | No exceptions/RTTI in Core; allocator-aware STL only; explicit status-based APIs | Build flags + lint + review |
+| Header-first strategy | Public headers/build hygiene | Contracts in self-contained headers; heavy templates stay out of the public inclusion cone | Header self-contain tests + review |
+| Determinism policy | Simulation determinism | Replay mode uses deterministic time/RNG and stable ordering; no nondeterministic sources in simulation paths | Replay tests + review |
+| Threading rules | Parallel simulation work | Jobs write to private lanes and merge deterministically; forbid timing/order-dependent patterns in Replay | Replay tests + review |
+| Time policy | Time sources/ticks | Simulation uses fixed-step SimulationClock; RealClock only for rendering/tools; command buffers per tick | Design review + tests |
+| Memory policy | Allocators/defaults | No hidden allocs in hot paths; precedence rules (API -> env -> macros); stable invariants | Smokes + benches + review |
+| ABI and interop policy | Cross-language boundary | Stable C ABI only, function tables + POD; explicit ownership; no unwind; versioned v1+ | ABI smoke tests + review |
+| ABI review checklist | ABI change gate | Any ABI change must pass checklist items A-G | Review gate |
+| Benchmark protocol | Perf regression detection | Repro-stable bench execution + JSON outputs + CI comparisons | Bench CI + review |
+
+-------------------------------------------------------------------------------
+
+## 8. Core language policy (no exceptions, no RTTI, STL constraints)
+
+Goal: deterministic, auditable, portable C++23/26 with zero hidden costs.
+
+### 8.1 Exceptions
+
+Policy:
+
+- Forbidden in `Source/Core/**`: no `throw`, no `try/catch`.
+- Allowed only at interop boundaries (separate module) to catch and translate
+  third-party exceptions into explicit status for the Core. Exceptions must
+  never cross into Core code.
+- Global `operator new/new[]` in Core are fatal on OOM (call `std::terminate`).
+  Nothrow forms return `nullptr`. Core does not emit `std::bad_alloc`.
+
+Build flags (Core targets):
+
+- MSVC: `/EHs-` (no C++ EH), keep SEH as needed; do not use `/EHsc` in Core.
+- Clang/GCC: `-fno-exceptions`.
+
+Pattern:
+
+```cpp
+// Core API (status-based)
+struct [[nodiscard]] Status
+{
+    bool ok;
+    const char* msg; // optional, static or caller-managed
+};
+
+[[nodiscard]] inline Status LoadFoo(BufferView src, Foo& out) noexcept;
+```
+
+### 8.2 RTTI
+
+Policy:
+
+- Forbidden in Core: no `dynamic_cast`, no `typeid`.
+
+Alternatives:
+
+- Static polymorphism: concepts/CRTP/templates.
+- Tiny dynamic facades: explicit V-tables (structs of function pointers).
+
+Build flags (Core targets):
+
+- MSVC: `/GR-`
+- Clang/GCC: `-fno-rtti`
+
+### 8.3 STL usage
+
+Allowed with constraints:
+
+- Public headers prefer views and POD (`std::span`, pointers+sizes, simple
+  structs). Avoid exposing owning standard containers in public ABI.
+- Internal implementation can use a curated subset.
+
+Curated subset (typical):
+
+- Fundamentals: `<array> <span> <bit> <type_traits> <limits> <utility> <tuple>
+  <optional> <variant> <string_view>`
+- Containers if needed and wired to the engine allocator via an adapter:
+  `<vector> <deque> <string> <unordered_map> <unordered_set>`
+- Avoid heavy subsystems unless justified: no `<regex>`, `<filesystem>`,
+  `<iostream>`, `<locale>`, `<future>`, `<thread>` in Core by default.
+
+Rules:
+
 - No hidden allocations on hot paths.
-- No exceptions and no RTTI in Core.
-- Data layout is explicit; handles are small; views are non-owning.
+- Do not introduce public API that implicitly requires exceptions/RTTI.
 
-5) Documentation is part of the product
-- Code is expected to carry "Purpose / Contract / Notes" comments where it matters.
-- Tests include "header-only" compile tests to keep the header-first promise honest.
+### 8.4 Namespaces and globals
 
-If you only remember one sentence:
-- D-Engine is a set of well-explained building blocks that can be wired together, not a monolith.
+- Everything lives under `namespace dng { ... }`.
+- No anonymous namespaces in public headers.
+- No mutable global state in headers.
 
--------------------------------------------------------------------------------
+### 8.5 Assertions and logging
 
-## 2. Terms and Layers (glossary)
+- Programmer errors: `DNG_ASSERT(cond)`.
+- Recoverable conditions: `DNG_CHECK(cond)` + return status.
+- Heavy logging guarded by `Logger::IsEnabled("Category")`.
 
-Contract
-- A backend-agnostic description of a subsystem (types + functions + invariants).
-- Lives under: Source/Core/Contracts/
-- Example: Source/Core/Contracts/Window.hpp
+### 8.6 Policy lint gates (what CI enforces today)
 
-Backend
-- A concrete implementation of a Contract.
-- Backends can be:
-  - In-process C++ (header or compiled .cpp) implementing the contract.
-  - A loadable module that exposes a C ABI table (see ABI section).
+The repository includes a lightweight policy linter (`tools/policy_lint.py`).
+It currently scans `Source/Core/**` (and optionally `Source/Modules/**`) and
+enforces these rules:
 
-Null Backend
-- A deterministic reference backend used for tests and as the default wiring.
-- Lives near each subsystem:
-  - Source/Core/<Subsystem>/Null*.hpp
-  - Example: Source/Core/Window/NullWindow.hpp
+- Forbidden exception/RTTI tokens in Core: `throw`, `try`, `catch`,
+  `dynamic_cast`, `typeid`.
+- Raw `new`/`delete` expressions are forbidden in Core (placement-new is allowed).
+- "Heavy" includes are forbidden unless explicitly allowlisted:
+  - `<regex>`, `<filesystem>`, `<iostream>`, `<locale>`
+- Code files must be **ASCII-only bytes** (no UTF-8 punctuation, no BOM).
+- The linter also flags:
+  - `using namespace` in Core code
+  - `std::shared_ptr` / `std::weak_ptr` (discouraged)
+  - raw `assert(...)` usage (prefer `DNG_ASSERT` / `DNG_CHECK`)
+  - CRT alloc calls (`malloc/free/realloc/calloc`) outside blessed files
 
-System (orchestrator)
-- Owns state, validates configuration, and routes calls to the chosen backend.
-- It is the main "runtime object" for a subsystem in Core.
-- Example: Source/Core/Window/WindowSystem.hpp
+Blessed exceptions (narrow, documented):
 
-ABI (Application Binary Interface)
-- A stable C interface shape for loadable modules and cross-language interop.
-- Lives under: Source/Core/Abi/
-- C ABI is the canonical cross-language contract surface.
+- `Source/Core/Memory/GlobalNewDelete.cpp` may call `malloc/free` to avoid
+  recursion when implementing global new/delete.
 
-Module (loadable)
-- A shared library (DLL/.so/.dylib) that exports a module entrypoint function.
-- The entrypoint returns one or more subsystem function tables.
-- Example: Source/Modules/Window/NullWindowModule/NullWindowModule.cpp
+### 8.7 Suggested build profiles
 
-Interop Helpers
-- C++ helpers that load a module and adapt ABI tables into a friendly C++ face.
-- Lives under: Source/Core/Interop/
-- Example: Source/Core/Interop/ModuleLoader.hpp
+- `core_debug`: `-O0`, asserts ON, logs ON, no exceptions/RTTI
+- `core_release`: `-O3`, asserts OFF (or light), logs minimal, no exceptions/RTTI
+- `interop_exceptions` (optional): isolated target with exceptions ON to wrap
+  third-party libs; must translate to status before returning to Core
 
 -------------------------------------------------------------------------------
 
-## 3. Repository Map (what lives where)
+## 9. Header-first strategy (fast build, thin facades)
 
-Root
-- README.md
-  - Quickstart, non-negotiables, and a high level overview.
-- Docs/
-  - Policies, implementation snapshots, milestone snapshots, and deeper design notes.
-  - Docs/INDEX.md (map of all docs)
-- Source/
-  - Core/ : the engine core building blocks and contracts.
-  - Modules/ : optional modules (loadable or in-process backends).
-- tests/
-  - Header self-containment checks, smoke tests, and policy compile tests.
+Objective: contracts in self-contained headers while confining heavy
+implementation details outside the public inclusion cone.
 
-Core (Source/Core)
-- Platform/ : fixed width types, platform macros, low-level detection.
-- Diagnostics/ + Logger.hpp + Timer.hpp : checks/logging/timers (core utilities).
-- Memory/ : allocator suite and runtime override rules.
-- Math/ : foundational math types and functions.
-- Containers/ : engine containers (when used).
-- Contracts/ : subsystem contracts (Window, Renderer, Time, Jobs, Input, FileSystem, Audio).
-- <Subsystem>/ : per-subsystem orchestrator + Null backend.
-- Abi/ : stable C ABI headers (interop contract surface).
-- Interop/ : dynamic loader and ABI adapters (C++ convenience layer).
+### 9.1 The "thin facade" pattern
 
-Subsystem pattern (current code)
-- Contract: Source/Core/Contracts/<Subsystem>.hpp
-- Null backend: Source/Core/<Subsystem>/Null<Subsystem>.hpp
-- System: Source/Core/<Subsystem>/<Subsystem>System.hpp
-- Tests:
-  - tests/Smoke/Subsystems/*_smoke.cpp
-  - tests/Smoke/Memory/*_smoke.cpp
-  - tests/Smoke/Determinism/*_smoke.cpp
-  - tests/SelfContain/*_header_only.cpp
-  - tests/AllSmokes/AllSmokes_main.cpp (aggregate executable)
-- Historical milestone status docs: Docs/<Subsystem>_M0_Status.md
+- `Public.hpp`: declares only the contract (PODs, handles, spans, small inline).
+- `detail/*.hpp`: heavy templates and implementation details, never included by
+  other modules, only by the module's own `.cpp`.
+- `detail/*.inl` (optional): inline chunks included from the module `.cpp` or a
+  private TU, never from public headers.
 
-Example (Window)
-- Contract: Source/Core/Contracts/Window.hpp
-- Null backend: Source/Core/Window/NullWindow.hpp
-- System: Source/Core/Window/WindowSystem.hpp
-- ABI types and tables: Source/Core/Abi/DngWindowApi.h
-- Loadable sample module: Source/Modules/Window/NullWindowModule/NullWindowModule.cpp
-- Interop wrappers: Source/Core/Interop/WindowAbi.hpp
+### 9.2 Explicit instantiation
 
--------------------------------------------------------------------------------
+For templates with a finite set of combinations, use `extern template` to avoid
+re-instantiation.
 
-## 4. Contracts and Backend Interchangeability (in-process C++)
+```cpp
+namespace dng
+{
+    template<class T>
+    void ProcessPodArray(Span<const T> in, Span<T> out) noexcept;
 
-### 4.1 The contract is the boundary
+    // Prevent instantiation in consumer TUs
+    extern template void ProcessPodArray<float>(Span<const float>, Span<float>) noexcept;
+}
+```
 
-A Contract header:
-- defines POD-ish types (descriptors, handles, views),
-- defines invariants and expectations (threading, determinism, error semantics),
-- defines the call surface (functions) without forcing a specific backend.
+Implementation TU:
 
-Constraints at the contract boundary:
-- no exceptions and no RTTI (Core rule),
-- avoid owning STL containers in the public surface (prefer views, spans, ptr+count),
-- do not hide allocations at the boundary,
-- handle lifetime rules are explicit.
+```cpp
+#include "Public.hpp"
+#include "detail/HeavyAlgo.hpp" // Heavy templates live here
 
-### 4.2 Two faces: static and dynamic (when needed)
+namespace dng
+{
+    // Explicit instantiation: compiled once, linked everywhere
+    template void ProcessPodArray<float>(Span<const float>, Span<float>) noexcept;
+}
+```
 
-D-Engine prefers a dual-face approach:
+### 9.3 Build hygiene
 
-Static face (compile-time)
-- Use templates / concepts where possible.
-- Best performance and best inlining.
-- The user chooses the backend at compile time.
+- Self-contained headers: compile-only tests in `tests/SelfContain/`.
+- IWYU: no transitive includes.
+- PCH: lightweight, platform types and logging macros only.
 
-Dynamic face (runtime)
-- A small vtable-style interface for runtime backend selection.
-- Useful for testing, tools, and late binding.
+### 9.4 Template vs v-table policy
 
-Many contracts in this repo include helpers for dynamic selection
-without forcing virtual classes or RTTI.
-
-### 4.3 Systems wire contracts to backends
-
-A System:
-- holds the chosen backend interface,
-- holds subsystem state,
-- applies runtime policy (validation, defaulting),
-- exposes an easy API for the rest of Core.
-
-This keeps contracts thin and keeps backends replaceable.
-
-### 4.4 Null backends define "minimum viable semantics"
-
-Null backends are not toys:
-- they provide deterministic reference behavior,
-- they are used by smoke tests,
-- they are the default wiring when you "just want it to run".
-
-If a real backend differs, it must document the differences (caps and notes).
+- Internal templates in `detail/` for hot paths.
+- Small public v-tables to stabilize headers and limit recompilation.
+- ABI surface: prefer C ABI tables.
 
 -------------------------------------------------------------------------------
 
-## 5. ABI and Loadable Modules (cross-language foundation)
+## 10. Determinism policy
 
-### 5.1 Why the ABI exists
+Purpose: define what determinism means in D-Engine and the rules required for
+Replay-mode reproducibility.
 
-The ABI is a second, stricter boundary that enables:
-- loadable modules (plugins) without C++ ABI issues,
-- potential backends written in other languages,
-- stable interop for tooling and embedding.
+### 10.1 Determinism levels
 
-The ABI is not meant to replace in-process C++ contracts.
-It is an optional interop path.
+- Off: performance-first, no guarantees.
+- Replay (default for debug/tests): same inputs + same build + same machine =>
+  same simulation outputs.
+- Strict (experimental): stronger reproducibility via extra restrictions.
 
-### 5.2 The one true ABI shape
+### 10.2 Core guarantees (Replay)
 
-The ABI follows a consistent pattern:
-- function table + context (a vtable-in-C),
-- explicit status codes (no exceptions),
-- POD-only data (fixed width integers, explicit bool size),
-- explicit ownership (host alloc/free, caller-allocated outputs),
-- no unwinding across the boundary.
+In Replay mode:
 
-Canonical headers
-- Base types and macros: Source/Core/Abi/DngAbi.h
-- Host services: Source/Core/Abi/DngHostApi.h
-- Subsystem table (example Window): Source/Core/Abi/DngWindowApi.h
-- Module entrypoint: Source/Core/Abi/DngModuleApi.h
+1) Simulation time is derived only from SimulationClock.
+2) RNG is explicit and deterministically seeded.
+3) Results do not depend on OS time, thread timing, pointer addresses, unordered
+   iteration, or nondeterministic job completion order.
+4) Parallel simulation work follows the Threading Rules (private lanes +
+   deterministic merge).
 
-### 5.3 Module entrypoint
+### 10.3 Stable ordering rules
 
-A loadable module exports a single C function:
+If order affects results, it must be stable:
 
-- dngModuleGetApi_v1(out_api)
+- iterate arrays/vectors with stable order,
+- sort keys/handles/IDs before applying effects,
+- merge per-entity/per-chunk buffers in ascending ID order.
 
-It fills a dng_module_api_v1 struct with:
-- module metadata (name + version),
-- one or more subsystem function tables (currently Window is the pilot).
+Do not rely on hash container iteration order.
 
-See:
-- Source/Core/Abi/DngModuleApi.h
-- Source/Modules/Window/NullWindowModule/NullWindowModule.cpp
+### 10.4 Verification
 
-### 5.4 Host API (services provided to modules)
+Minimum recommended test:
 
-The host passes a dng_host_api_v1 table to subsystem create/init calls
-(depending on the subsystem contract), so modules can:
-- log via host,
-- allocate/free via host allocator.
+- run N simulation ticks,
+- feed a deterministic CommandBuffer per tick,
+- compute a stable hash of simulation state every M ticks,
+- compare against a baseline.
 
-See:
-- Source/Core/Abi/DngHostApi.h
+### 10.5 Subsystem contract requirements (mandatory fields)
 
-### 5.5 Interop helpers in C++
+Every subsystem contract MUST explicitly declare:
 
-Loading and calling ABI modules from C++ is supported via:
-- Source/Core/Interop/ModuleLoader.hpp (+ .cpp)
-- Source/Core/Interop/WindowAbi.hpp
+- `SupportsReplayDeterminism`: yes/no
+- `SupportsStrictDeterminism`: yes/no
+- `DeterminismNotes`: known nondeterminism sources and mitigations
+- `ThreadSafetyNotes`: what the caller must guarantee
 
-These helpers are cold-path by design:
-- dynamic loading is not a hot path,
-- they trade a bit of overhead for clarity and safety.
+Examples (conceptual):
 
--------------------------------------------------------------------------------
-
-## 6. Writing a backend in another language (future-proof rules)
-
-This section describes how to approach "contracts in other languages".
-The short answer:
-- Use the C ABI as the canonical contract boundary, and generate or hand-write bindings.
-
-### 6.1 Rule: the ABI headers are the source of truth
-
-If you want a backend in Rust/Zig/C#/etc:
-- you implement the ABI tables defined in Source/Core/Abi/
-- you export dngModuleGetApi_v1
-- you follow the ABI Policy and Checklist in Docs/
-
-Policy and checklist
-- Docs/ABI_Interop_Policy.md
-- Docs/ABI_Review_Checklist.md
-
-### 6.2 Data layout rules you must respect
-
-- Use fixed width integers (u8/u16/u32/u64, i8/i16/i32/i64).
-- Use explicit bool size (uint8_t or u8), never language-native "bool" unless it is guaranteed to be 1 byte and repr(C) compatible.
-- Strings are views: pointer + length (not null-terminated by default).
-- Arrays are views: pointer + count.
-- Handles are integers (or opaque structs holding an integer).
-- No packed structs unless the ABI header explicitly packs (prefer natural alignment).
-
-### 6.3 Calling convention and exports
-
-- Use the calling convention macro from DngAbi.h (DNG_ABI_CALL) when implementing ABI functions.
-- Export symbols using the ABI export macro (DNG_ABI_API / DNG_ABI_EXPORT as defined).
-- Never throw across the boundary. If your language can panic/throw, you must catch and translate to a status code.
-
-### 6.4 Ownership and allocation rules
-
-- If the ABI says "caller allocates", the caller must pass a buffer and capacity.
-- If the module returns allocated memory, it must use host->alloc and host->free with matching size+align.
-- Never mix allocators across boundaries.
-
-### 6.5 Testing strategy for cross-language backends
-
-Minimum requirements:
-1) Compile check: the bindings compile and match the C headers.
-2) Size checks: verify struct sizes and alignments (static asserts where possible).
-3) Smoke test: load the module and call a basic sequence (create, query, destroy).
-
-In this repo, the C/C++ header self-containment tests are the model:
-- tests/Abi/AbiHeaders_c.c
-- tests/Abi/AbiHeaders_cpp.cpp
-- tests/Abi/ModuleSmoke.cpp
-
-If you add a Rust backend, add a similar "smoke loader" test that loads it.
+- Audio: Replay determinism may guarantee event timeline stability, not
+  sample-bitwise identical mixing.
+- Renderer: visuals may be nondeterministic; renderer must not affect simulation
+  state in Replay mode.
+- IO/Streaming: must not feed nondeterministic data into simulation without
+  recording.
 
 -------------------------------------------------------------------------------
 
-## 7. Versioning and compatibility rules (how we evolve safely)
+## 11. Threading rules (Replay determinism compatible)
 
-D-Engine uses two kinds of versioning:
+Core principle:
 
-Subsystem contract versioning (C++ headers)
-- Controlled by repository version (v0.1 currently).
-- Breaking changes are allowed at v0.x but should be documented.
+In Replay mode, parallelism must be structured so the result does not depend on
+execution timing and final effects are merged in deterministic order.
 
-ABI versioning (C headers)
-- Must be explicit and conservative.
-- ABI structs include:
-  - struct_size
-  - abi_version
-- Function tables are versioned (v1, v2, ...).
-- Additive evolution is preferred:
-  - add new fields at the end,
-  - keep existing fields stable,
-  - consider reserved fields for growth.
+### 11.1 Allowed patterns
 
-See:
-- Docs/ABI_Interop_Policy.md (Versioning and compatibility section)
+Pattern A: write to your own lane + deterministic merge
 
--------------------------------------------------------------------------------
+- each job writes to a private buffer (per-job/per-entity/per-chunk)
+- merge applies results in stable order (ascending IDs)
 
-## 8. How to add a new subsystem (end-to-end recipe)
+Pattern B: stable reduction trees
 
-Goal: every new subsystem follows the same predictable pattern.
+- fixed partitioning and stable pairings
+- beware float non-associativity
 
-Step 1: Contract (Source/Core/Contracts/<Subsystem>.hpp)
-- Define:
-  - POD-ish descriptors and handles
-  - capability struct (caps)
-  - required functions
-  - thread-safety and determinism notes
-- Provide:
-  - static face (template/concept) if feasible
-  - optional dynamic face helper if runtime selection matters
+Pattern C: truly order-independent operations (e.g., integer bitset OR)
 
-Step 2: Null backend (Source/Core/<Subsystem>/Null<Subsystem>.hpp)
-- Deterministic reference behavior.
-- Minimal state, explicit behavior, no side effects.
-- No hidden allocations in hot paths.
+### 11.2 Forbidden patterns (Replay)
 
-Step 3: System orchestrator (Source/Core/<Subsystem>/<Subsystem>System.hpp)
-- Validates config.
-- Holds backend interface.
-- Provides a simple runtime API.
+- multiple jobs writing directly to shared simulation state without deterministic
+  ordering
+- "who finishes first" logic
+- parallel float reductions without stable ordering
+- relying on thread ids, OS scheduling, address ordering, unordered iteration
 
-Step 4: Tests
-- Header self-containment (compile-only):
-  - tests/SelfContain/*_header_only.cpp
-- Smoke tests:
-  - tests/Smoke/Subsystems/*_smoke.cpp
-  - tests/Smoke/Memory/*_smoke.cpp
-  - tests/Smoke/Determinism/*_smoke.cpp
-  - tests/AllSmokes/AllSmokes_main.cpp (for aggregate execution)
-- If ABI is involved:
-  - tests/Abi/AbiHeaders_c.c and tests/Abi/AbiHeaders_cpp.cpp
-  - tests/Abi/ModuleSmoke.cpp
+### 11.3 Phase structure (recommended)
 
-Step 5: Docs
-- Update Docs/Implementation_Snapshot.md when runtime behavior or architecture wiring changes.
-- Keep Docs/<Subsystem>_M0_Status.md only as a milestone snapshot when relevant.
+Per tick:
 
--------------------------------------------------------------------------------
+1) read-only gather (parallel OK)
+2) compute phase writing private outputs (parallel OK)
+3) deterministic merge/apply (single-thread default in Replay)
+4) post-tick validation
 
-## 9. Policies and where they live
+### 11.4 Ownership and mutation rules
 
-Core language and safety rules
-- Docs/LanguagePolicy.md (this should be pure markdown policy text)
+Simulation state is owned by systems or phases. Mutations must be controlled.
 
-ABI rules
-- Docs/ABI_Interop_Policy.md
-- Docs/ABI_Review_Checklist.md
+Rules:
 
-Header-first constraints
-- Docs/HeaderFirstStrategy.md
+1) Avoid shared mutable state between jobs.
+2) If multiple jobs contribute to the same logical output, use a deterministic merge.
+3) Do not use atomics as "gameplay logic ordering" in Replay mode.
 
-Benchmark rules (CI stability)
-- Docs/Benchmarks.md
-- .github/PR_VALIDATION.md
-- .github/workflows/bench-*.yml
+### 11.5 Container and iteration rules
 
-Subsystem vision docs
-- Docs/Renderer_Vision.md (renderer direction)
-- Docs/Implementation_Snapshot.md (current code-backed status)
-- Docs/*_M0_Status.md (historical milestone snapshots)
+If iteration order affects simulation results:
 
--------------------------------------------------------------------------------
+- DO:
+  - use stable containers (arrays/vectors)
+  - sort key lists before applying effects
+  - keep stable ID assignment and stable ordering
 
-## 10. "Coherence" checklist (what reviewers should enforce)
+- DO NOT:
+  - iterate directly over hash maps/sets and apply effects in that order
+  - iterate over pointer-based containers with nondeterministic ordering
 
-Documentation coherence
-- There is exactly one "handbook" (this file) that explains the big picture.
-- README.md stays as a quick entrypoint and points here for architecture/interop.
-- Policies are consistent and do not contradict each other.
-- Terms are consistent: Contract, Backend, System, Module, ABI.
+If you need a map in simulation code:
 
-Code coherence
-- Contracts stay in Source/Core/Contracts/.
-- Every subsystem has: Contract + Null backend + System + tests.
-- No exceptions and no RTTI in Core.
-- No hidden allocations across contract boundaries.
-- Headers are self-contained (compile-only tests stay green).
-- ABI changes follow the checklist and keep compatibility rules.
+- prefer an ordered map or a sorted view of keys
+- or keep hash maps for lookup only, and separately maintain a stable key list
 
-Tooling coherence
-- Copilot instructions reference policies instead of duplicating them.
-- Bench CI rules match Docs/Benchmarks.md and PR_VALIDATION.md.
+### 11.6 Scheduling rules (Replay)
+
+In Replay mode:
+
+- Job submission order must be stable.
+- Partitioning must be stable (fixed chunk sizes or deterministic chunking rules).
+- No auto-tuning that changes partitioning without being recorded.
+
+Default recommendation:
+
+- Replay simulation runs single-thread.
+- Parallelism in Replay is only enabled when the engine provides a proven
+  deterministic scheduler and merge framework.
+
+### 11.7 Diagnostics
+
+When possible, provide debug checks:
+
+- detect direct shared-state writes from jobs in Replay mode
+- assert stable ordering assumptions in merges
+- optional tracing that records merge order for debugging
+
+### 11.8 Rationale
+
+These rules prevent two major classes of bugs:
+
+1) Data races and nondeterministic ordering causing hard-to-repro issues.
+2) Floating-point and ordering effects causing Replay drift across runs.
 
 -------------------------------------------------------------------------------
 
-## 11. Appendix: Where to look next
+## 12. Time policy (SimulationClock vs RealClock)
+
+Two time sources:
+
+### 12.1 SimulationClock (deterministic)
+
+- used by simulation logic
+- advances in fixed steps
+- Replay mode: only allowed time source for simulation
+
+Properties:
+
+- TickIndex: monotonic integer tick counter
+- FixedDeltaSeconds: constant step size (default 1/60)
+- SimTimeSeconds: derived = TickIndex * FixedDeltaSeconds
+
+### 12.2 RealClock (nondeterministic)
+
+- used by tools, UI, profiling display, wall-clock timers
+- derived from OS time, not deterministic
+- must not drive simulation in Replay
+
+### 12.3 Fixed-step simulation loop
+
+- accumulator pattern
+- SimulationStep depends only on SimulationClock + recorded inputs + explicit RNG
+- rendering interpolates between previous/current simulation state
+
+Timers/cooldowns should prefer ticks (EndTick = CurrentTick + DurationTicks).
+
+### 12.4 Default fixed step
+
+Recommended engine default:
+
+- FixedDeltaSeconds = 1/60
+
+Project-level configuration may choose 1/120 for high-demand action titles.
+Engine policy: fixed-step is configurable; the existence of fixed-step is not
+optional.
+
+### 12.5 Input sampling policy (repro friendly)
+
+For realtime action:
+
+- Sample raw input as late as possible before each simulation tick.
+- Convert raw input into a deterministic CommandBuffer for that tick.
+- Simulation consumes CommandBuffer only.
+
+In Replay mode:
+
+- CommandBuffers are recorded or generated deterministically.
+- Raw OS events are not used as a direct simulation input source.
+
+### 12.6 Timers and cooldowns
+
+Timers in simulation should be expressed in:
+
+- ticks (preferred), or
+- fixed-step time derived from ticks
+
+Avoid:
+
+- comparing against RealClock time
+- fractional time accumulation that depends on variable dt
+
+Recommended:
+
+- store "end tick" for cooldowns: EndTick = CurrentTick + DurationTicks
+- compute remaining time from tick difference if needed for UI
+
+### 12.7 Editor and tools
+
+The editor may use RealClock for UI and interaction.
+When the editor drives simulation:
+
+- it should advance SimulationClock deterministically (fixed-step)
+- it should not inject RealClock into simulation decisions
+
+### 12.8 Logging and profiling
+
+- Profiling timestamps can use RealClock.
+- Simulation logs should tag events with TickIndex for reproducibility.
+- Avoid mixing wall time into simulation event ordering.
+
+-------------------------------------------------------------------------------
+
+## 13. Memory policy (defaults, precedence, invariants)
+
+Purpose: production defaults for memory subsystem knobs and how runtime
+precedence works for effective values.
+
+Contract:
+
+- Applies to Release | x64 unless overridden.
+- Effective values are determined at startup by: API -> environment -> macros.
+- Changes are logged once at `MemorySystem` initialization.
+
+### 13.1 At a glance
+
+- Effective defaults (Release | x64): tracking sampling=1, tracking shards=8,
+  SmallObject batch=64
+- Determinism-first: no hidden costs
+
+### 13.2 Choosing the right allocator
+
+| Usage pattern | Recommended allocator(s) | Rationale |
+| --- | --- | --- |
+| Temporary, transient work (default) | `SmallObjectAllocator` + `FrameScope` | Hot-path bump-style flow; `FrameScope` guarantees rewind at scope exit. |
+| Persistent systems | `DefaultAllocator` or `PoolAllocator` | General-purpose fallback or fixed pools with predictable reuse. |
+| High-safety diagnostics | `GuardAllocator`, `TrackingAllocator` | Higher cost but maximum visibility. |
+| High alignment / large payloads | parent allocator | `SmallObjectAllocator` caps natural alignment; bypass for >= 32-byte alignment. |
+
+### 13.3 Effective defaults (Release)
+
+- Tracking sampling: 1 (`DNG_MEM_TRACKING_SAMPLING_RATE`)
+- Tracking shards: 8 (`DNG_MEM_TRACKING_SHARDS`)
+- SmallObject batch: 64 (`DNG_SOALLOC_BATCH`)
+
+### 13.4 Precedence and observability
+
+Resolution order:
+
+1) API override via `dng::core::MemoryConfig` passed to `MemorySystem::Init()`
+2) Environment variables at process start:
+   - `DNG_MEM_TRACKING_SAMPLING_RATE`
+   - `DNG_MEM_TRACKING_SHARDS`
+   - `DNG_SOALLOC_BATCH`
+3) Compile-time macros (see `Source/Core/Memory/MemoryConfig.hpp`)
+
+MemorySystem logs the final effective values and their source once at init.
+
+### 13.5 Constraints and clamping
+
+- sampling >= 1; values > 1 currently clamp to 1
+- shards must be power-of-two; invalid values fall back to macro default
+- batch clamped to `[1, DNG_SOA_TLS_MAG_CAPACITY]`
+
+### 13.6 Notes and rationale (why these defaults exist)
+
+- Sampling > 1 is planned for future work, but until the accounting model and
+  reporting format can represent sampled tracking safely, the engine clamps to 1.
+- Sharding is used to reduce contention in tracking structures and reduce cache
+  line bouncing.
+- SmallObjectAllocator batching is a throughput knob: higher batch reduces calls
+  to parent allocator but increases per-thread retained memory.
+
+Rules of thumb:
+
+- If you see contention in tracking, increase shards.
+- If you see too much retained memory (TLS magazines), reduce batch.
+- For deterministic CI, prefer sampling=1.
+
+### 13.7 Engine invariants (must hold)
+
+- Every allocation has a matching free with the same size and alignment.
+- Alignment helpers must be used consistently:
+  - `NormalizeAlignment`
+  - `AlignUp`
+  - `IsPowerOfTwo`
+- Allocators must document:
+  - thread-safety
+  - ownership and lifetime
+  - whether they can return nullptr
+  - OOM behavior
+
+-------------------------------------------------------------------------------
+
+## 14. ABI and interop policy (stable C ABI for modules)
+
+Purpose:
+
+- define a stable, language-agnostic plugin boundary
+- keep Core in C++ while enabling modules/backends in other languages
+- make interop boring, explicit, deterministic-friendly, reviewable
+
+Hard rules:
+
+- the only official cross-language boundary is a C ABI
+- no exceptions/RTTI in Core; absolutely no unwinding across ABI
+- no hidden allocations at ABI boundary; ownership is explicit
+- ABI v1 is frozen; incompatible evolution uses v2/v3 names
+
+### 14.1 Terminology
+
+- Core: engine runtime in C++
+- Contract: C++ backend-agnostic interface (source-level stable)
+- ABI contract: stable binary boundary (C ABI)
+- Host: engine side that loads modules
+- Module: dynamically loaded library implementing subsystem backends
+
+### 14.2 The one true ABI shape
+
+- function table + context (vtable-in-C)
+- status codes, not exceptions
+- POD-only data
+
+### 14.3 ABI type rules (review rules)
+
+- fixed-width integer types
+- no `bool` in ABI (use `uint8_t`)
+- strings are (ptr + len)
+- arrays are (ptr + count)
+- handles are integers, not pointers
+- struct layout is stable; no implicit packing
+
+### 14.4 Ownership and allocation
+
+- "who allocates frees"
+- prefer caller-allocated output (two-call pattern)
+- host allocator services: `alloc(size, align)` and `free(ptr, size, align)`
+- avoid hidden allocation in hot paths
+
+### 14.5 Versioning
+
+- v1 is immutable once published
+- breaks create new names (`*_v2`, `dngModuleGetApi_v2`)
+- if using struct extension, append fields only and validate `struct_size`
+
+-------------------------------------------------------------------------------
+
+## 15. ABI review checklist
+
+If any item fails, the change is rejected or redesigned.
+
+### A. Interface shape
+
+- [A1] Cross-language boundary is C ABI only
+- [A2] Function table + context pattern
+- [A3] Functions return `dng_status_t` + out-params
+- [A4] Explicit thread-safety notes
+- [A5] Callbacks are `noexcept` and documented as non-throwing
+
+### B. Unwinding and safety
+
+- [B1] No exceptions/panics can escape
+- [B2] Exceptions are caught and converted to status
+- [B3] Callbacks documented to never unwind
+
+### C. Data and layout
+
+- [C1] POD-only, fixed-width primitives
+- [C2] Enums explicit size
+- [C3] Bool as `uint8_t`
+- [C4] Strings (ptr + len)
+- [C5] Arrays (ptr + count)
+- [C6] Handles are integers
+- [C7] Alignment/packing documented
+- [C8] `sizeof/alignof` invariants checked
+- [C9] Extensible structs use `struct_size` and validate it
+- [C10] Reserved/padding fields are append-only
+
+### D. Ownership and allocation
+
+- [D1] Ownership explicit
+- [D2] Matching free path or host allocator usage
+- [D3] Hot paths avoid hidden allocations
+- [D4] Scratch buffers/arenas used where appropriate
+
+### E. Versioning
+
+- [E1] No modifications to released v1 structs/signatures
+- [E2] Breaking change introduces v2 names
+- [E3] Append-only extension validates `struct_size`
+- [E4] ABI version exposed and checked at load time
+
+### F. Determinism
+
+- [F1] Nondeterminism sources documented
+- [F2] Deterministic modes described in caps/flags
+- [F3] Ordering guarantees spelled out
+
+### G. Tests
+
+- [G1] Header self-contained test for new headers
+- [G2] Compile-time layout check where relevant
+- [G3] Smoke test loads module and calls minimal sequence
+- [G4] ABI headers covered by `extern "C"` compile-only TU
+
+-------------------------------------------------------------------------------
+
+## 16. Benchmark protocol
+
+### 16.1 Purpose
+
+- Document how BenchRunner is executed in local gates and CI.
+- Keep performance comparisons reproducible enough for regression detection.
+- Describe the JSON payload emitted by the current benchmark harness.
+
+### 16.2 Execution model
+
+BenchRunner (`tests/BenchRunner/BenchRunner_main.cpp`) runs a fixed suite and exposes:
+
+- `--warmup N`
+- `--target-rsd P`
+- `--max-repeat M`
+- `--repeat M` (alias for `--max-repeat`)
+- `--iterations K`
+- `--cpu-info`
+- `--strict-stability`
+
+For each scenario, the runner:
+
+1. executes warmup runs,
+2. measures repeated batches,
+3. computes `ns/op`,
+4. stops early when `RSD <= target-rsd` or when `max-repeat` is reached,
+5. marks the scenario as `unstable` when target RSD is still not met.
+
+### 16.3 Affinity and priority
+
+The runner itself does not currently pin affinity or set process priority.
+
+Stabilization is applied by the caller in gates/CI:
+
+- `tools/run_all_gates.ps1` launches BenchRunner via:
+  - `cmd /c start /wait /affinity 1 /high ...`
+- `.github/workflows/bench-ci.yml` uses the same pattern.
+
+### 16.4 Recommended invocation
+
+- Core compare run:
+  - `x64\Release\D-Engine-BenchRunner.exe --warmup 1 --target-rsd 3 --max-repeat 20 --cpu-info`
+- Memory compare run:
+  - `x64\Release\D-Engine-BenchRunner.exe --warmup 2 --target-rsd 8 --max-repeat 24 --cpu-info --memory-only --memory-matrix`
+
+Related helpers:
+
+- Local memory sweep helper:
+  - `python tools/memory_bench_sweep.py --strict-stability --stabilize --compare-baseline`
+- Baseline capture helper (safe default, no overwrite):
+  - `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both`
+- Baseline promotion helper (explicit overwrite):
+  - `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both -Promote`
+
+### 16.5 CI compare policy
+
+- Core baseline:
+  - `bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json`
+- Memory baseline:
+  - `bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json`
+
+Notes:
+
+- Core compare suppresses unstable-only noise for `baseline_loop`.
+- Memory compare uses an 8% threshold (tracking and non-tracking paths) and
+  allows unstable statuses when the baseline is already unstable.
+- Current memory noise watchlist (ignored in compare):
+  - `small_object_alloc_free_16b`
+  - `small_object_alloc_free_small`
+
+Bench profile knobs can be tuned without script edits:
+
+- `BENCH_AFFINITY_MASK`, `BENCH_NORMAL_PRIORITY`
+- `BENCH_CORE_WARMUP`, `BENCH_CORE_TARGET_RSD`, `BENCH_CORE_MAX_REPEAT`
+- `BENCH_MEMORY_WARMUP`, `BENCH_MEMORY_TARGET_RSD`, `BENCH_MEMORY_MAX_REPEAT`
+
+### 16.6 Leak gate
+
+Bench and smoke logs are scanned for hard leak markers:
+
+- `=== MEMORY LEAKS DETECTED ===`
+- `TOTAL LEAKS:`
+
+Presence of either marker fails the gate.
+
+### 16.7 JSON output (schema v2)
+
+BenchRunner writes `artifacts/bench/bench-<epoch-seconds>.bench.json`:
+
+```json
+{
+  "schemaVersion": 2,
+  "benchmarks": [
+    {
+      "name": "baseline_loop",
+      "value": 2.085922,
+      "rsdPct": 5.424463,
+      "bytesPerOp": 0.0,
+      "allocsPerOp": 0.0,
+      "status": "ok",
+      "reason": "",
+      "repeatsUsed": 4,
+      "targetRsdPct": 3.0
+    }
+  ],
+  "summary": {
+    "okCount": 10,
+    "skippedCount": 1,
+    "unstableCount": 0,
+    "errorCount": 0
+  },
+  "metadata": {
+    "note": "BenchRunner v2",
+    "strictStability": true,
+    "schemaVersion": 2,
+    "unit": "ns/op"
+  }
+}
+```
+
+Notes:
+
+- `value` is measured `ns/op`.
+- `bytesPerOp` and `allocsPerOp` are measured at runtime through `Core/Diagnostics/Bench.hpp`.
+- `status` and `reason` make skipped/unavailable scenarios explicit.
+
+-------------------------------------------------------------------------------
+
+## 17. Roadmap (two tracks: SDK stability + crowd slice)
+
+The roadmap is split into two tracks:
+
+- Track A: engine foundation (contracts, ABI, determinism, memory, runtime)
+- Track B: crowd-first vertical slice (the proof)
+
+The point of Track B is to create a concrete public demonstration while Track A
+keeps the architecture honest.
+
+### 17.1 Track A - Foundation
+
+Phase A0 (done): Contract SDK stabilization
+
+- contracts and ABI shape established
+- Null backends + systems + smoke coverage
+- policy lint + header self-containment gates
+- bench runner + baselines
+
+Phase A1 (next): Core runtime solidity
+
+- runtime orchestration (init/shutdown) remains clean and rollback-safe
+- memory system continues to harden (tracking, OOM policy, reporting)
+- deterministic job mode (Replay-friendly) with instrumentation
+- ABI loader hardening and packaging of SDK
+
+Phase A2: Platform-ready renderer and windowing (Windows)
+
+- choose renderer strategy (DX12 recommended but not mandatory)
+- Win32 windowing + swapchain + input path
+- GPU resource lifetime rules and frame submission contract
+
+### 17.2 Track B - Crowd-first vertical slice
+
+Milestone B0: Deterministic crowd simulation harness
+
+- headless simulation benchmark: update N agents per tick
+- stable ordering, explicit RNG, fixed-step
+- state hash baseline (Replay test)
+
+Milestone B1: Animation sampling and submission
+
+- skeletal pose sampling for N agents
+- memory and job partitioning rules
+- stable merge and determinism notes
+
+Milestone B2: Minimal renderer path
+
+- enough rendering to visualize the crowd
+- stable frame pacing and frame-time measurement
+
+Milestone B3: VFX and interaction stress
+
+- bursts (impacts), simple collisions, VFX submissions
+- demonstrate frame-time stability under stress
+
+Deliverable: a documented, reproducible benchmark scene and a report.
+
+-------------------------------------------------------------------------------
+
+## 18. Implementation snapshot (code-backed reality)
+
+This section is derived from the repository's code layout and smoke targets.
+
+Current architecture:
+
+- Core pattern per subsystem:
+  - Contract: `Source/Core/Contracts/<Subsystem>.hpp`
+  - Null backend: `Source/Core/<Subsystem>/Null<Subsystem>.hpp`
+  - Orchestrator: `Source/Core/<Subsystem>/<Subsystem>System.hpp`
+- Runtime orchestration:
+  - `Source/Core/Runtime/CoreRuntime.hpp`
+
+Test/target reality:
+
+- `tests/AllSmokes/AllSmokes_main.cpp` -> `AllSmokes.exe`
+- `tests/MemoryStressSmokes/MemoryStressSmokes_main.cpp` -> `MemoryStressSmokes.exe`
+- `tests/Abi/ModuleSmoke.cpp` -> `ModuleSmoke.exe`
+- `tests/BenchRunner/...` -> `D-Engine-BenchRunner.exe`
+- header self-containment: `tests/SelfContain/`
+- policy tests: `tests/Policy/`
+
+If this section becomes wrong, it must be updated when code changes.
+
+-------------------------------------------------------------------------------
+
+## 19. Contribution workflow and review checklist
+
+### 19.1 Workflow (practical)
+
+1) Extend/add a contract in `Source/Core/Contracts/`.
+2) Implement/update Null backend and system layer.
+3) Wire runtime integration in `Source/Core/Runtime/CoreRuntime.hpp` when needed.
+4) Add smoke coverage in `tests/Smoke/...` and aggregator wiring if runnable
+   behavior changed.
+5) Add/adjust header self-containment tests.
+6) Run policy lint and gates.
+7) Update this handbook if any policy/roadmap/architecture rule changes.
+
+### 19.2 Review checklist (engine-wide)
+
+Documentation coherence:
+
+- this handbook remains the canonical source
+- new docs do not duplicate policies; they link here
+
+Code coherence:
+
+- contracts live in `Source/Core/Contracts/`
+- every subsystem has contract + null backend + system + tests
+- no exceptions and no RTTI in Core
+- no hidden allocations across contract boundaries
+- headers are self-contained (self-contain tests green)
+
+Tooling coherence:
+
+- gates and bench CI match benchmark protocol
+- policy lint remains strict
+
+-------------------------------------------------------------------------------
+
+## 20. Appendix: historical snapshots and where to look next
 
 If you are new:
-- Start at README.md (quickstart).
-- Then read Docs/Implementation_Snapshot.md for current implementation reality.
-- Then read this handbook to understand layering and rationale.
-- Then inspect a contract header in Source/Core/Contracts/.
 
-If you are adding a backend:
-- In-process: implement the Contract and wire it through the System.
-- Loadable: implement the ABI table and export dngModuleGetApi_v1.
+- start at `README.md` (build quickstart)
+- read this handbook
+- inspect a contract header in `Source/Core/Contracts/`
 
-If you are reviewing:
-- Use Docs/ABI_Review_Checklist.md for anything crossing the ABI boundary.
-- Use Docs/LanguagePolicy.md for Core safety rules.
+Historical milestone snapshots (may be stale):
+
+- `Docs/Progress_Summary_v0.1.md`
+- `Docs/*_M0_Status.md`
+
+ABI author guide:
+
+- see `Docs/ABI_Module_Authoring.md` (pointer) and this handbook's ABI section.

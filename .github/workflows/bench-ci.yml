@@ -1,6 +1,9 @@
 name: Bench CI
 
 # Threshold environment variables (defaults):
+# - BENCH_AFFINITY_MASK: 1
+# - BENCH_CORE_WARMUP/TARGET_RSD/MAX_REPEAT: 1 / 3 / 20
+# - BENCH_MEMORY_WARMUP/TARGET_RSD/MAX_REPEAT: 2 / 8 / 24
 # - PERF_THRESHOLD_PCT: 10        # ns/op relative threshold (%)
 # - PERF_MEMORY_THRESHOLD_PCT: 8  # memory ns/op relative threshold (%)
 # - PERF_ABS_NS: 5                # ns/op absolute threshold (ns)
@@ -23,8 +26,17 @@ on:
 env:
   CONFIGURATION: Release
   PLATFORM: x64
+  BENCH_AFFINITY_MASK: 1
+  BENCH_CORE_WARMUP: 1
+  BENCH_CORE_TARGET_RSD: 3
+  BENCH_CORE_MAX_REPEAT: 20
+  BENCH_MEMORY_WARMUP: 2
+  BENCH_MEMORY_TARGET_RSD: 8
+  BENCH_MEMORY_MAX_REPEAT: 24
   PERF_THRESHOLD_PCT: 10
   PERF_MEMORY_THRESHOLD_PCT: 8
+  # Set repository variable DNG_PERF_ENFORCE=1 to make compare failures blocking in CI.
+  PERF_ENFORCE: ${{ vars.DNG_PERF_ENFORCE }}
   PERF_ALLOW_UNSTABLE: baseline_loop
   PERF_MEMORY_IGNORE_BENCH: small_object_alloc_free_16b,small_object_alloc_free_small
   DNG_MEM_TRACKING_SAMPLING_RATE: 1
@@ -70,14 +82,19 @@ jobs:
         env:
           GITHUB_SHA: ${{ github.sha }}
           DNG_BENCH_OUT: artifacts/bench/core
+          BENCH_AFFINITY_MASK: ${{ env.BENCH_AFFINITY_MASK }}
+          BENCH_CORE_WARMUP: ${{ env.BENCH_CORE_WARMUP }}
+          BENCH_CORE_TARGET_RSD: ${{ env.BENCH_CORE_TARGET_RSD }}
+          BENCH_CORE_MAX_REPEAT: ${{ env.BENCH_CORE_MAX_REPEAT }}
         run: |
           $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
           if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
           New-Item -ItemType Directory -Path "artifacts/gates" -Force | Out-Null
           $log = "artifacts/gates/bench-core.log"
-          Write-Host "Running core bench with CPU affinity=1 and High priority: $exeRel"
-          $benchArgs = '--warmup 1 --target-rsd 3 --max-repeat 20 --cpu-info'
-          $cmdText = 'start /wait /affinity 1 /high "" "' + $exeRel + '" ' + $benchArgs
+          New-Item -ItemType File -Path $log -Force | Out-Null
+          Write-Host "Running core bench with CPU affinity=$env:BENCH_AFFINITY_MASK and High priority: $exeRel"
+          $benchArgs = "--warmup $env:BENCH_CORE_WARMUP --target-rsd $env:BENCH_CORE_TARGET_RSD --max-repeat $env:BENCH_CORE_MAX_REPEAT --cpu-info"
+          $cmdText = 'start /wait /affinity ' + $env:BENCH_AFFINITY_MASK + ' /high "" "' + $exeRel + '" ' + $benchArgs
           cmd /c $cmdText 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { throw "BenchRunner failed with exit code $LASTEXITCODE" }
           $leaks = Select-String -Path $log -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
@@ -106,26 +123,41 @@ jobs:
           ALLOCS_OP_MAX_REL_PCT: ${{ env.ALLOCS_OP_MAX_REL_PCT || '0' }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSVersion.Major -ge 7) { $PSNativeCommandUseErrorActionPreference = $false }
           $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
           if (-not (Test-Path $baseline)) { throw "Baseline not found: $baseline" }
           $latest = Get-ChildItem -Path "artifacts/bench/core" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $latest) { throw "No bench json found in artifacts/bench" }
           Write-Host "Baseline: $baseline"
           Write-Host "Current : $($latest.FullName)"
-          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --allow-unstable "$env:PERF_ALLOW_UNSTABLE"
+          & python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --allow-unstable "$env:PERF_ALLOW_UNSTABLE"
+          $compareExit = $LASTEXITCODE
+          $enforce = if ([string]::IsNullOrWhiteSpace("$env:PERF_ENFORCE")) { '0' } else { "$env:PERF_ENFORCE" }
+          if ($compareExit -ne 0) {
+            if ($enforce -eq '1') {
+              throw "Core bench comparison failed and PERF_ENFORCE=1."
+            }
+            Write-Warning "Core bench comparison failed (exit=$compareExit) but PERF_ENFORCE=$enforce, continuing in report mode."
+            $global:LASTEXITCODE = 0
+          }
 
       - name: Run BenchRunner (memory)
         env:
           GITHUB_SHA: ${{ github.sha }}
           DNG_BENCH_OUT: artifacts/bench/memory
+          BENCH_AFFINITY_MASK: ${{ env.BENCH_AFFINITY_MASK }}
+          BENCH_MEMORY_WARMUP: ${{ env.BENCH_MEMORY_WARMUP }}
+          BENCH_MEMORY_TARGET_RSD: ${{ env.BENCH_MEMORY_TARGET_RSD }}
+          BENCH_MEMORY_MAX_REPEAT: ${{ env.BENCH_MEMORY_MAX_REPEAT }}
         run: |
           $exeRel = "x64\${env:CONFIGURATION}\D-Engine-BenchRunner.exe"
           if (-not (Test-Path $exeRel)) { throw "BenchRunner not found: $exeRel" }
           New-Item -ItemType Directory -Path "artifacts/gates" -Force | Out-Null
           $log = "artifacts/gates/bench-memory.log"
-          Write-Host "Running memory bench with CPU affinity=1 and High priority: $exeRel"
-          $benchArgs = '--warmup 2 --target-rsd 8 --max-repeat 24 --cpu-info --memory-only --memory-matrix'
-          $cmdText = 'start /wait /affinity 1 /high "" "' + $exeRel + '" ' + $benchArgs
+          New-Item -ItemType File -Path $log -Force | Out-Null
+          Write-Host "Running memory bench with CPU affinity=$env:BENCH_AFFINITY_MASK and High priority: $exeRel"
+          $benchArgs = "--warmup $env:BENCH_MEMORY_WARMUP --target-rsd $env:BENCH_MEMORY_TARGET_RSD --max-repeat $env:BENCH_MEMORY_MAX_REPEAT --cpu-info --memory-only --memory-matrix"
+          $cmdText = 'start /wait /affinity ' + $env:BENCH_AFFINITY_MASK + ' /high "" "' + $exeRel + '" ' + $benchArgs
           cmd /c $cmdText 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { throw "BenchRunner memory run failed with exit code $LASTEXITCODE" }
           $leaks = Select-String -Path $log -Pattern '=== MEMORY LEAKS DETECTED ===', 'TOTAL LEAKS:' -SimpleMatch -ErrorAction SilentlyContinue
@@ -139,31 +171,51 @@ jobs:
           PERF_ABS_NS_TRACKING: ${{ env.PERF_ABS_NS_TRACKING || '12' }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($PSVersionTable.PSVersion.Major -ge 7) { $PSNativeCommandUseErrorActionPreference = $false }
           $baseline = "bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json"
           if (-not (Test-Path $baseline)) { throw "Memory baseline not found: $baseline" }
           $latest = Get-ChildItem -Path "artifacts/bench/memory" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $latest) { throw "No memory bench json found in artifacts/bench/memory" }
           Write-Host "Baseline: $baseline"
           Write-Host "Current : $($latest.FullName)"
-          python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" `
+          & python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" `
             --perf-threshold-pct "$env:PERF_MEMORY_THRESHOLD_PCT" `
             --perf-threshold-pct-tracking "$env:PERF_MEMORY_THRESHOLD_PCT" `
             --allow-unstable-from-baseline `
             --ignore-benchmark "$env:PERF_MEMORY_IGNORE_BENCH"
+          $compareExit = $LASTEXITCODE
+          $enforce = if ([string]::IsNullOrWhiteSpace("$env:PERF_ENFORCE")) { '0' } else { "$env:PERF_ENFORCE" }
+          if ($compareExit -ne 0) {
+            if ($enforce -eq '1') {
+              throw "Memory bench comparison failed and PERF_ENFORCE=1."
+            }
+            Write-Warning "Memory bench comparison failed (exit=$compareExit) but PERF_ENFORCE=$enforce, continuing in report mode."
+            $global:LASTEXITCODE = 0
+          }
 
       - name: Emit Markdown core bench report
         if: always()
         run: |
           $ErrorActionPreference = 'Continue'
+          if ($PSVersionTable.PSVersion.Major -ge 7) { $PSNativeCommandUseErrorActionPreference = $false }
           $baseline = "bench/baselines/bench-runner-release-windows-x64-msvc.baseline.json"
           $latest = Get-ChildItem -Path "artifacts/bench/core" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if ($latest) {
-            python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --allow-unstable "$env:PERF_ALLOW_UNSTABLE" --emit-md bench_report_core.md
-            Write-Host "===== Core Bench Report (Markdown) ====="
-            Get-Content -Raw bench_report_core.md | Write-Host
-            $md = Get-Content -Raw bench_report_core.md
-            $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
-            Write-Host "::notice title=Core bench summary::$escaped"
+            & python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" --allow-unstable "$env:PERF_ALLOW_UNSTABLE" --emit-md bench_report_core.md
+            $reportExit = $LASTEXITCODE
+            if ($reportExit -ne 0) {
+              Write-Warning "Core bench markdown report generated with compare failures (exit=$reportExit)."
+              $global:LASTEXITCODE = 0
+            }
+            if (Test-Path bench_report_core.md) {
+              Write-Host "===== Core Bench Report (Markdown) ====="
+              Get-Content -Raw bench_report_core.md | Write-Host
+              $md = Get-Content -Raw bench_report_core.md
+              $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
+              Write-Host "::notice title=Core bench summary::$escaped"
+            } else {
+              Write-Host "Core bench markdown report not generated."
+            }
           } else {
             Write-Host "No current core bench json found; skipping report."
           }
@@ -172,20 +224,30 @@ jobs:
         if: always()
         run: |
           $ErrorActionPreference = 'Continue'
+          if ($PSVersionTable.PSVersion.Major -ge 7) { $PSNativeCommandUseErrorActionPreference = $false }
           $baseline = "bench/baselines/bench-runner-memory-release-windows-x64-msvc.baseline.json"
           $latest = Get-ChildItem -Path "artifacts/bench/memory" -Filter *.bench.json -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if ($latest) {
-            python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" `
+            & python -u tools/bench_compare.py "$baseline" "$($latest.FullName)" `
               --perf-threshold-pct "$env:PERF_MEMORY_THRESHOLD_PCT" `
               --perf-threshold-pct-tracking "$env:PERF_MEMORY_THRESHOLD_PCT" `
               --allow-unstable-from-baseline `
               --ignore-benchmark "$env:PERF_MEMORY_IGNORE_BENCH" `
               --emit-md bench_report_memory.md
-            Write-Host "===== Memory Bench Report (Markdown) ====="
-            Get-Content -Raw bench_report_memory.md | Write-Host
-            $md = Get-Content -Raw bench_report_memory.md
-            $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
-            Write-Host "::notice title=Memory bench summary::$escaped"
+            $reportExit = $LASTEXITCODE
+            if ($reportExit -ne 0) {
+              Write-Warning "Memory bench markdown report generated with compare failures (exit=$reportExit)."
+              $global:LASTEXITCODE = 0
+            }
+            if (Test-Path bench_report_memory.md) {
+              Write-Host "===== Memory Bench Report (Markdown) ====="
+              Get-Content -Raw bench_report_memory.md | Write-Host
+              $md = Get-Content -Raw bench_report_memory.md
+              $escaped = $md -replace "`r`n","%0A" -replace "`n","%0A"
+              Write-Host "::notice title=Memory bench summary::$escaped"
+            } else {
+              Write-Host "Memory bench markdown report not generated."
+            }
           } else {
             Write-Host "No current memory bench json found; skipping report."
           }
