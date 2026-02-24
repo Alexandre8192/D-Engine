@@ -10,8 +10,8 @@ This file is intentionally small to avoid duplicating rules.
 
 Build (MSVC):
 
-- `tools/build.ps1 -Config Debug`
-- `tools/build.ps1 -Config Release`
+- `msbuild D-Engine.sln /p:Configuration=Debug /p:Platform=x64 /m`
+- `msbuild D-Engine.sln /p:Configuration=Release /p:Platform=x64 /m`
 
 Run local gates:
 
