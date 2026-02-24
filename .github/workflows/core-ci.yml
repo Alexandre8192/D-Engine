@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   build-and-smoke:
     runs-on: windows-latest
@@ -12,10 +15,12 @@ jobs:
     env:
       REQUIRE_MODULE_SMOKE: ${{ vars.DNG_REQUIRE_MODULE_SMOKE }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v1.3.1
+        uses: microsoft/setup-msbuild@1ff57057b5cfdc39105cd07a01d78e9b0ea0c14c # v1.3.1
 
       - name: Build Debug
         run: msbuild D-Engine.sln /p:Configuration=Debug /p:Platform=x64 /m
