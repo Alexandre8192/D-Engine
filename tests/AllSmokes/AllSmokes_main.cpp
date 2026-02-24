@@ -19,7 +19,9 @@ int RunJobsSmoke();
 int RunAudioSmoke();
 int RunAudioPlaybackSmoke();
 int RunCoreRuntimeSmoke();
+int RunCrowdRendererSubmissionSmoke();
 int RunDeterminismReplaySmoke();
+int RunCrowdDeterminismSmoke();
 int RunArenaAllocatorSmoke();
 int RunFrameAllocatorSmoke();
 int RunStackAllocatorSmoke();
@@ -59,7 +61,9 @@ int main()
         {"Audio", &RunAudioSmoke},
         {"AudioPlayback", &RunAudioPlaybackSmoke},
         {"CoreRuntime", &RunCoreRuntimeSmoke},
+        {"CrowdRendererSubmission", &RunCrowdRendererSubmissionSmoke},
         {"DeterminismReplay", &RunDeterminismReplaySmoke},
+        {"CrowdDeterminism", &RunCrowdDeterminismSmoke},
         {"ArenaAllocator", &RunArenaAllocatorSmoke},
         {"FrameAllocator", &RunFrameAllocatorSmoke},
         {"StackAllocator", &RunStackAllocatorSmoke},

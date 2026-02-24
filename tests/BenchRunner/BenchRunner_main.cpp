@@ -11,10 +11,14 @@
 #include "Core/Audio/AudioSystem.hpp"
 #include "Core/Contracts/FileSystem.hpp"
 #include "Core/Diagnostics/Bench.hpp"
+#include "Core/Jobs/NullJobs.hpp"
 #include "Core/Memory/ArenaAllocator.hpp"
 #include "Core/Memory/FrameAllocator.hpp"
 #include "Core/Memory/MemorySystem.hpp"
 #include "Core/Memory/PoolAllocator.hpp"
+#include "Core/Simulation/CrowdSim.hpp"
+#include "Core/Simulation/CrowdSimJobs.hpp"
+#include "Core/Simulation/CrowdSubmit.hpp"
 
 #include <algorithm>
 #include <array>
@@ -473,6 +477,213 @@ namespace
             }
         }
         sink ^= acc;
+        return true;
+    }
+
+    bool Bench_CrowdTick2000(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (iterations < 0)
+        {
+            outReason = "iterations must be non-negative";
+            return false;
+        }
+
+        constexpr dng::u32 kAgentCount = 2000u;
+
+        struct CrowdBenchState
+        {
+            dng::sim::CrowdParams params{};
+            dng::sim::CrowdSoAView view{};
+            dng::i32 posX[kAgentCount]{};
+            dng::i32 posY[kAgentCount]{};
+            dng::i32 velX[kAgentCount]{};
+            dng::i32 velY[kAgentCount]{};
+            dng::u32 rng[kAgentCount]{};
+            bool initialized = false;
+
+            CrowdBenchState() noexcept
+            {
+                params.worldMinX = -4096;
+                params.worldMaxX = 4096;
+                params.worldMinY = -4096;
+                params.worldMaxY = 4096;
+                params.maxSpeed = 7;
+                params.seed = 0x5a17b3cdu;
+
+                view.posX = posX;
+                view.posY = posY;
+                view.velX = velX;
+                view.velY = velY;
+                view.rng = rng;
+                view.count = kAgentCount;
+            }
+        };
+
+        static CrowdBenchState state{};
+        if (!state.initialized)
+        {
+            dng::sim::InitCrowd(state.view, state.params);
+            state.initialized = true;
+        }
+
+        for (int i = 0; i < iterations; ++i)
+        {
+            dng::sim::StepCrowd(state.view, state.params, static_cast<dng::u32>(i));
+        }
+
+        const dng::u64 hash = dng::sim::HashCrowd(state.view);
+        sink ^= static_cast<std::uint64_t>(hash);
+        return true;
+    }
+
+    bool Bench_CrowdTick2000JobsShape(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (iterations < 0)
+        {
+            outReason = "iterations must be non-negative";
+            return false;
+        }
+
+        constexpr dng::u32 kAgentCount = 2000u;
+
+        struct CrowdJobsBenchState
+        {
+            dng::sim::CrowdParams params{};
+            dng::sim::CrowdSoAView view{};
+            dng::i32 posX[kAgentCount]{};
+            dng::i32 posY[kAgentCount]{};
+            dng::i32 velX[kAgentCount]{};
+            dng::i32 velY[kAgentCount]{};
+            dng::u32 rng[kAgentCount]{};
+            dng::i32 scratchAccX[kAgentCount]{};
+            dng::i32 scratchAccY[kAgentCount]{};
+            dng::jobs::NullJobs nullJobs{};
+            dng::jobs::JobsInterface jobs{};
+            bool initialized = false;
+
+            CrowdJobsBenchState() noexcept
+            {
+                params.worldMinX = -4096;
+                params.worldMaxX = 4096;
+                params.worldMinY = -4096;
+                params.worldMaxY = 4096;
+                params.maxSpeed = 7;
+                params.seed = 0x5a17b3cdu;
+
+                view.posX = posX;
+                view.posY = posY;
+                view.velX = velX;
+                view.velY = velY;
+                view.rng = rng;
+                view.count = kAgentCount;
+
+                jobs = dng::jobs::MakeNullJobsInterface(nullJobs);
+            }
+        };
+
+        static CrowdJobsBenchState state{};
+        if (!state.initialized)
+        {
+            dng::sim::InitCrowd(state.view, state.params);
+            state.initialized = true;
+        }
+
+        for (int i = 0; i < iterations; ++i)
+        {
+            dng::sim::StepCrowdJobs(
+                state.jobs,
+                state.view,
+                state.params,
+                static_cast<dng::u32>(i),
+                state.scratchAccX,
+                state.scratchAccY);
+        }
+
+        const dng::u64 hash = dng::sim::HashCrowd(state.view);
+        sink ^= static_cast<std::uint64_t>(hash);
+        sink ^= static_cast<std::uint64_t>(static_cast<dng::u32>(state.scratchAccX[0]));
+        sink ^= static_cast<std::uint64_t>(static_cast<dng::u32>(state.scratchAccY[kAgentCount - 1u]));
+        return true;
+    }
+
+    bool Bench_CrowdSubmit2000(int iterations, volatile std::uint64_t& sink, const char*& outReason) noexcept
+    {
+        outReason = nullptr;
+        if (iterations < 0)
+        {
+            outReason = "iterations must be non-negative";
+            return false;
+        }
+
+        constexpr dng::u32 kAgentCount = 2000u;
+
+        struct CrowdSubmitBenchState
+        {
+            dng::sim::CrowdParams params{};
+            dng::sim::CrowdSoAView view{};
+            dng::i32 posX[kAgentCount]{};
+            dng::i32 posY[kAgentCount]{};
+            dng::i32 velX[kAgentCount]{};
+            dng::i32 velY[kAgentCount]{};
+            dng::u32 rng[kAgentCount]{};
+            dng::render::RenderInstance instances[kAgentCount]{};
+            bool initialized = false;
+
+            CrowdSubmitBenchState() noexcept
+            {
+                params.worldMinX = -4096;
+                params.worldMaxX = 4096;
+                params.worldMinY = -4096;
+                params.worldMaxY = 4096;
+                params.maxSpeed = 7;
+                params.seed = 0x5a17b3cdu;
+
+                view.posX = posX;
+                view.posY = posY;
+                view.velX = velX;
+                view.velY = velY;
+                view.rng = rng;
+                view.count = kAgentCount;
+            }
+        };
+
+        static CrowdSubmitBenchState state{};
+        if (!state.initialized)
+        {
+            dng::sim::InitCrowd(state.view, state.params);
+            state.initialized = true;
+        }
+
+        std::uint64_t countAcc = 0ull;
+        std::uint64_t sampleAcc = 0ull;
+
+        for (int i = 0; i < iterations; ++i)
+        {
+            dng::sim::StepCrowd(state.view, state.params, static_cast<dng::u32>(i));
+            const dng::u32 written = dng::sim::BuildCrowdRenderInstances(
+                state.view,
+                state.instances,
+                kAgentCount,
+                101u,
+                202u);
+            if (written != kAgentCount)
+            {
+                outReason = "crowd submission count mismatch";
+                return false;
+            }
+
+            countAcc += static_cast<std::uint64_t>(written);
+            sampleAcc += static_cast<std::uint64_t>(state.instances[0].instanceUserData);
+            sampleAcc += static_cast<std::uint64_t>(state.instances[written - 1u].instanceUserData);
+            sampleAcc += static_cast<std::uint64_t>(static_cast<dng::i64>(state.instances[0].worldMatrix.m[3][0]));
+            sampleAcc += static_cast<std::uint64_t>(static_cast<dng::i64>(state.instances[written - 1u].worldMatrix.m[3][1]));
+        }
+
+        const dng::u64 crowdHash = dng::sim::HashCrowd(state.view);
+        sink ^= static_cast<std::uint64_t>(crowdHash);
+        sink ^= (countAcc << 1ull) ^ (sampleAcc << 3ull);
         return true;
     }
 
@@ -1791,9 +2002,12 @@ int main(int argc, char** argv)
     const int memoryMatrixIter = args.iterations > 7000 ? args.iterations / 7000 : 2500;
     const int audioMixIter = args.iterations > 1000 ? args.iterations / 1000 : 1000;
     const int audioPlatformIter = args.iterations > 2000 ? args.iterations / 2000 : 500;
+    const int crowdIter = (args.iterations > 200000) ? (args.iterations / 200000) : 1000;
+    const int crowdJobsShapeIter = (args.iterations > 200000) ? (args.iterations / 200000) : 1000;
+    const int crowdSubmitIter = (args.iterations > 200000) ? (args.iterations / 200000) : 1000;
 
     std::vector<Benchmark> benches;
-    benches.reserve(args.memoryMatrix ? 24u : 11u);
+    benches.reserve(args.memoryMatrix ? 28u : 14u);
 
     const auto addBench = [&](std::string_view name, int iterations, BenchFn fn, bool isMemory) {
         benches.push_back(Benchmark{name, iterations, fn, isMemory});
@@ -1802,6 +2016,9 @@ int main(int argc, char** argv)
     addBench("baseline_loop", baseIter, &Bench_BaselineLoop, false);
     addBench("vec3_dot", vecIter, &Bench_Vec3Dot, false);
     addBench("memcpy_64", memcpyIter, &Bench_Memcpy64, false);
+    addBench("crowd_tick_2000", crowdIter, &Bench_CrowdTick2000, false);
+    addBench("crowd_tick_2000_jobs_shape", crowdJobsShapeIter, &Bench_CrowdTick2000JobsShape, false);
+    addBench("crowd_submit_2000", crowdSubmitIter, &Bench_CrowdSubmit2000, false);
     addBench("arena_alloc_reset", arenaIter, &Bench_ArenaAllocReset, true);
     addBench("frame_alloc_reset", frameIter, &Bench_FrameAllocReset, true);
     addBench("pool_alloc_free_fixed", poolIter, &Bench_PoolAllocFreeFixed, true);
