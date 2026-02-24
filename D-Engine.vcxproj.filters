@@ -28,6 +28,9 @@
     <Filter Include="Source\Core\Diagnostics">
       <UniqueIdentifier>{3537924e-0f22-4c11-91be-df4dedee9b6d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Core\Simulation">
+      <UniqueIdentifier>{0bde8332-cbb1-41ff-9af3-4e6f44ee4532}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\Core\Containers">
       <UniqueIdentifier>{5a2c35f2-669e-4f4a-8fbb-47ec6c7a4582}</UniqueIdentifier>
     </Filter>
@@ -135,6 +138,15 @@
     <ClInclude Include="Source\Core\Diagnostics\Bench.hpp">
       <Filter>Source\Core\Diagnostics</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Simulation\CrowdSim.hpp">
+      <Filter>Source\Core\Simulation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Simulation\CrowdSimJobs.hpp">
+      <Filter>Source\Core\Simulation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Simulation\CrowdSubmit.hpp">
+      <Filter>Source\Core\Simulation</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp">
@@ -219,6 +231,12 @@
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\Abi\AbiLayout_v1.c">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Smoke\Determinism\CrowdReplayHash_smoke.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\Smoke\Subsystems\CrowdRendererSubmission_smoke.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
   </ItemGroup>

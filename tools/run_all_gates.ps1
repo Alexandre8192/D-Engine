@@ -1,11 +1,16 @@
 # run_all_gates.ps1
 # Purpose : Local one-shot runner for D-Engine gates (lint, build, smokes, ABI smoke, bench, leak checks).
 # Modes   :
-#   -Fast          : policy lint (strict+modules), Release build, AllSmokes, ModuleSmoke; bench skipped.
+#   -Fast          : policy lint (strict+modules), Release build, AllSmokes, ModuleSmoke; memory stress + bench skipped.
 #   -RequireBench  : bench is required; missing BenchRunner fails. Runs both core and memory perf compares.
 #   -RustModule    : build/copy Rust NullWindowModule via cargo before ModuleSmoke; fails if cargo missing.
 #   -RequireRealBench     : fail if BenchRunner artifact is a placeholder stub.
 #   -RequireBenchBaseline : fail if bench baseline is missing.
+# Bench tuning env vars:
+#   - BENCH_AFFINITY_MASK (default 1)
+#   - BENCH_NORMAL_PRIORITY=1 (default High priority)
+#   - BENCH_CORE_WARMUP / BENCH_CORE_TARGET_RSD / BENCH_CORE_MAX_REPEAT
+#   - BENCH_MEMORY_WARMUP / BENCH_MEMORY_TARGET_RSD / BENCH_MEMORY_MAX_REPEAT
 # Exit codes : PASS=0 (no skips), PARTIAL=2 (required gates pass, optional skipped), FAIL=1.
 
 [CmdletBinding()]
@@ -22,21 +27,24 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $repoRoot
 
 $benchRequired = [bool]($RequireBench -or $RequireRealBench -or $RequireBenchBaseline)
+$memoryStressRequired = [bool](-not $Fast)
 
 $gateState = [ordered]@{
-    Policy      = [pscustomobject]@{ Status = 'PENDING'; Required = $true }
-    Compile     = [pscustomobject]@{ Status = 'PENDING'; Required = $true }
-    AllSmokes   = [pscustomobject]@{ Status = 'PENDING'; Required = $true }
-    ModuleSmoke = [pscustomobject]@{ Status = 'PENDING'; Required = $true }
-    Bench       = [pscustomobject]@{ Status = 'PENDING'; Required = $benchRequired }
+    Policy             = [pscustomobject]@{ Status = 'PENDING'; Required = $true }
+    Compile            = [pscustomobject]@{ Status = 'PENDING'; Required = $true }
+    AllSmokes          = [pscustomobject]@{ Status = 'PENDING'; Required = $true }
+    MemoryStressSmokes = [pscustomobject]@{ Status = 'PENDING'; Required = $memoryStressRequired }
+    ModuleSmoke        = [pscustomobject]@{ Status = 'PENDING'; Required = $true }
+    Bench              = [pscustomobject]@{ Status = 'PENDING'; Required = $benchRequired }
 }
 
 $gateTiming = [ordered]@{
-    Policy      = [timespan]::Zero
-    Compile     = [timespan]::Zero
-    AllSmokes   = [timespan]::Zero
-    ModuleSmoke = [timespan]::Zero
-    Bench       = [timespan]::Zero
+    Policy             = [timespan]::Zero
+    Compile            = [timespan]::Zero
+    AllSmokes          = [timespan]::Zero
+    MemoryStressSmokes = [timespan]::Zero
+    ModuleSmoke        = [timespan]::Zero
+    Bench              = [timespan]::Zero
 }
 
 function Measure-Gate([string]$name, [scriptblock]$action) {
@@ -296,9 +304,15 @@ function Run-Bench {
 
     $coreLog = Join-Path $gateLogDir ("Bench-core-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".log")
     $env:DNG_BENCH_OUT = $coreOut
-    $coreArgs = '--warmup 1 --target-rsd 3 --max-repeat 20 --cpu-info'
-    Write-Host "Running BenchRunner (core): $($benchExe.FullName) $coreArgs (affinity=1, priority=High, log=$coreLog)"
-    $coreCmd = 'start /wait /affinity 1 /high "" "' + $benchExe.FullName + '" ' + $coreArgs
+    $benchAffinity = if ($env:BENCH_AFFINITY_MASK) { $env:BENCH_AFFINITY_MASK } else { '1' }
+    $benchPriorityArg = if ($env:BENCH_NORMAL_PRIORITY -eq '1') { '' } else { ' /high' }
+    $benchPriorityLabel = if ($env:BENCH_NORMAL_PRIORITY -eq '1') { 'Normal' } else { 'High' }
+    $coreWarmup = if ($env:BENCH_CORE_WARMUP) { $env:BENCH_CORE_WARMUP } else { '1' }
+    $coreTargetRsd = if ($env:BENCH_CORE_TARGET_RSD) { $env:BENCH_CORE_TARGET_RSD } else { '3' }
+    $coreMaxRepeat = if ($env:BENCH_CORE_MAX_REPEAT) { $env:BENCH_CORE_MAX_REPEAT } else { '20' }
+    $coreArgs = '--warmup ' + $coreWarmup + ' --target-rsd ' + $coreTargetRsd + ' --max-repeat ' + $coreMaxRepeat + ' --cpu-info'
+    Write-Host "Running BenchRunner (core): $($benchExe.FullName) $coreArgs (affinity=$benchAffinity, priority=$benchPriorityLabel, log=$coreLog)"
+    $coreCmd = 'start /wait /affinity ' + $benchAffinity + $benchPriorityArg + ' "" "' + $benchExe.FullName + '" ' + $coreArgs
     & cmd.exe /c $coreCmd 2>&1 | Tee-Object -FilePath $coreLog
     if ($LASTEXITCODE -ne 0) {
         Set-GateStatus 'Bench' 'FAIL'
@@ -345,9 +359,12 @@ function Run-Bench {
 
     $memoryLog = Join-Path $gateLogDir ("Bench-memory-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + ".log")
     $env:DNG_BENCH_OUT = $memoryOut
-    $memoryArgs = '--warmup 2 --target-rsd 8 --max-repeat 24 --cpu-info --memory-only --memory-matrix'
-    Write-Host "Running BenchRunner (memory): $($benchExe.FullName) $memoryArgs (affinity=1, priority=High, log=$memoryLog)"
-    $memoryCmd = 'start /wait /affinity 1 /high "" "' + $benchExe.FullName + '" ' + $memoryArgs
+    $memoryWarmup = if ($env:BENCH_MEMORY_WARMUP) { $env:BENCH_MEMORY_WARMUP } else { '2' }
+    $memoryTargetRsd = if ($env:BENCH_MEMORY_TARGET_RSD) { $env:BENCH_MEMORY_TARGET_RSD } else { '8' }
+    $memoryMaxRepeat = if ($env:BENCH_MEMORY_MAX_REPEAT) { $env:BENCH_MEMORY_MAX_REPEAT } else { '24' }
+    $memoryArgs = '--warmup ' + $memoryWarmup + ' --target-rsd ' + $memoryTargetRsd + ' --max-repeat ' + $memoryMaxRepeat + ' --cpu-info --memory-only --memory-matrix'
+    Write-Host "Running BenchRunner (memory): $($benchExe.FullName) $memoryArgs (affinity=$benchAffinity, priority=$benchPriorityLabel, log=$memoryLog)"
+    $memoryCmd = 'start /wait /affinity ' + $benchAffinity + $benchPriorityArg + ' "" "' + $benchExe.FullName + '" ' + $memoryArgs
     & cmd.exe /c $memoryCmd 2>&1 | Tee-Object -FilePath $memoryLog
     if ($LASTEXITCODE -ne 0) {
         Set-GateStatus 'Bench' 'FAIL'
@@ -402,6 +419,18 @@ try {
         $allSmokesPreferred = @('x64\Release\AllSmokes.exe', 'x64\Debug\AllSmokes.exe')
         Run-Exe 'AllSmokes*.exe' 'AllSmokes' $allSmokesPreferred -LeakCheck
         Set-GateStatus 'AllSmokes' 'OK'
+    }
+
+    Measure-Gate 'MemoryStressSmokes' {
+        if ($Fast) {
+            Set-GateStatus 'MemoryStressSmokes' 'SKIPPED'
+            return
+        }
+
+        Write-Host "=== Runtime gate (MemoryStressSmokes) ==="
+        $memoryStressPreferred = @('x64\Release\MemoryStressSmokes.exe', 'x64\Debug\MemoryStressSmokes.exe')
+        Run-Exe '*MemoryStressSmokes*.exe' 'MemoryStressSmokes' $memoryStressPreferred -LeakCheck
+        Set-GateStatus 'MemoryStressSmokes' 'OK'
     }
 
     Measure-Gate 'ModuleSmoke' {

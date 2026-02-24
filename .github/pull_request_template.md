@@ -5,6 +5,7 @@
 - [ ] policy_lint (strict) passes
 - [ ] Build Debug/Release succeeds
 - [ ] Smokes (AllSmokes) pass
+- [ ] Memory stress smokes pass
 - [ ] Leak gates pass (no `MEMORY LEAKS DETECTED` markers)
 - [ ] Bench gates pass for touched perf surfaces (core and/or memory)
 - [ ] If Contracts touched: self-contain TU added/updated

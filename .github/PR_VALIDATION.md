@@ -7,6 +7,7 @@ This document defines the minimum checks expected before merging to `main`.
 - `msbuild D-Engine.sln /p:Configuration=Debug /p:Platform=x64 /m`
 - `msbuild D-Engine.sln /p:Configuration=Release /p:Platform=x64 /m`
 - `x64\Release\AllSmokes.exe`
+- `x64\Release\MemoryStressSmokes.exe`
 - `x64\Release\ModuleSmoke.exe`
 - `tools/run_all_gates.ps1 -RequireBench`
 - Optional when Rust module changes are touched:
@@ -30,6 +31,10 @@ This document defines the minimum checks expected before merging to `main`.
 ## Baseline maintenance
 - Update baselines only after a deliberate perf review.
 - Keep historical snapshots in `artifacts/bench/` for traceability.
+- Safe baseline capture command (no overwrite):
+  - `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both`
+- Baseline promotion command (explicit overwrite):
+  - `powershell -ExecutionPolicy Bypass -File tools/bench_update_baseline.ps1 -Mode both -Promote`
 - When updating a baseline, include:
   - command used
   - machine context

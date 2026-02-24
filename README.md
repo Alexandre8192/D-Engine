@@ -5,14 +5,11 @@ Header-first C++ engine focused on contracts-first APIs and deterministic, audit
 ## Quickstart
 - Open D-Engine.sln in Visual Studio 2022 (or run `msbuild D-Engine.sln /p:Configuration=Debug /p:Platform=x64`).
 - Build Debug or Release on x64 to run the smoke/build checks.
+- Run `x64\Debug\AllSmokes.exe` for standard smoke coverage and `x64\Debug\MemoryStressSmokes.exe` for aggressive memory stress coverage.
 
 ## Read next
-- Handbook: D-Engine_Handbook.md
-- Implementation snapshot (living status): Docs/Implementation_Snapshot.md
-- Docs index: Docs/INDEX.md
-- Language policy: Docs/LanguagePolicy.md
-- ABI policy: Docs/ABI_Interop_Policy.md
-- ABI checklist: Docs/ABI_Review_Checklist.md
+- Handbook (single source of truth): D-Engine_Handbook.md
+- Docs index (historical + pointers): Docs/INDEX.md
 
 ## Historical milestone snapshots (can be stale)
 - Docs/Progress_Summary_v0.1.md
@@ -27,5 +24,5 @@ Header-first C++ engine focused on contracts-first APIs and deterministic, audit
 ## Repository map
 - Source/Core/: contracts, foundations, null backends, and interop helpers
 - Source/Modules/: optional modules and examples
-- Docs/: policies, living implementation snapshots, milestone snapshots, and vision notes
+- Docs/: historical milestone snapshots and backwards-compat pointers
 - tests/: smoke/build-only checks and header self-containment

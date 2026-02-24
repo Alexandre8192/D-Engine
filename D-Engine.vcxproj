@@ -28,6 +28,9 @@
     <ClInclude Include="Source\Core\Audio\WinMmAudio.hpp" />
     <ClInclude Include="Source\Core\Audio\AudioSystem.hpp" />
     <ClInclude Include="Source\Core\Runtime\CoreRuntime.hpp" />
+    <ClInclude Include="Source\Core\Simulation\CrowdSim.hpp" />
+    <ClInclude Include="Source\Core\Simulation\CrowdSimJobs.hpp" />
+    <ClInclude Include="Source\Core\Simulation\CrowdSubmit.hpp" />
     <ClInclude Include="Source\Core\Memory\Alignment.hpp" />
     <ClInclude Include="Source\Core\Memory\AllocatorAdapter.hpp" />
     <ClInclude Include="Source\Core\Memory\Allocator.hpp" />
@@ -88,6 +91,7 @@
     <ClCompile Include="tests\SelfContain\Audio_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\CoreRuntime_header_only.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Subsystems\CrowdRendererSubmission_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="tests\Renderer_BasicForwardRenderer_demo.cpp" />
@@ -102,6 +106,7 @@
     <ClCompile Include="tests\Smoke\Memory\small_object_tls_bins_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Memory\tracking_allocator_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Determinism\ReplayHash_smoke.cpp" />
+    <ClCompile Include="tests\Smoke\Determinism\CrowdReplayHash_smoke.cpp" />
     <ClCompile Include="tests\Math\Mat4_Convention_tests.cpp" />
     <ClCompile Include="tests\Math\Math_core_tests.cpp" />
     <ClCompile Include="tests\Smoke\Memory\Math_smoke.cpp" />

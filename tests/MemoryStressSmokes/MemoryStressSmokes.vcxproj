@@ -19,9 +19,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{7A4B3AE4-2D3E-4A56-9E29-3051A0D6AF5E}</ProjectGuid>
+    <ProjectGuid>{2F541D3D-7A26-41FA-9B56-4F7A5FA805C7}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>AllSmokes</RootNamespace>
+    <RootNamespace>MemoryStressSmokes</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -69,8 +69,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(Platform)\$(Configuration)\AllSmokes\</IntDir>
-    <TargetName>AllSmokes</TargetName>
+    <IntDir>$(Platform)\$(Configuration)\MemoryStressSmokes\</IntDir>
+    <TargetName>MemoryStressSmokes</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -153,34 +153,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="AllSmokes_main.cpp" />
-    <ClCompile Include="..\Smoke\Memory\AllocatorAdapter_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\arena_allocator_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\frame_allocator_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\frame_scope_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\guard_allocator_alignment_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\Logger_only.cpp" />
-    <ClCompile Include="..\Smoke\Memory\memory_system_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\new_delete_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\oom_policy_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\page_allocator_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\pool_allocator_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\small_object_allocator_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\small_object_tls_bins_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\stack_allocator_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Memory\tracking_allocator_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Determinism\ReplayHash_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\FileSystem_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Input_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Jobs_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Audio_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\AudioPlayback_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\CoreRuntime_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\RendererSystem_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\RendererSystem_BasicForwardRenderer_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Time_smoke.cpp" />
-    <ClCompile Include="..\Smoke\Subsystems\Window_smoke.cpp" />
+    <ClCompile Include="MemoryStressSmokes_main.cpp" />
+    <ClCompile Include="..\Smoke\Memory\small_object_thread_stress_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\small_object_fragmentation_longrun_smoke.cpp" />
+    <ClCompile Include="..\Smoke\Memory\memory_oom_alignment_extremes_smoke.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\D-Engine.vcxproj">

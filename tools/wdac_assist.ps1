@@ -59,7 +59,7 @@ function Get-BlockEvents
     } -ErrorAction SilentlyContinue |
         Select-Object -First $MaxEvents TimeCreated, Id, Message
 
-    $pattern = 'D-Engine|AllSmokes\.exe|ModuleSmoke\.exe|D-Engine-BenchRunner\.exe'
+    $pattern = 'D-Engine|AllSmokes\.exe|MemoryStressSmokes\.exe|ModuleSmoke\.exe|D-Engine-BenchRunner\.exe'
     return $events | Where-Object { $_.Message -match $pattern }
 }
 

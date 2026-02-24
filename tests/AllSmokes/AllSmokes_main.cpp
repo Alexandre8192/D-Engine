@@ -19,7 +19,9 @@ int RunJobsSmoke();
 int RunAudioSmoke();
 int RunAudioPlaybackSmoke();
 int RunCoreRuntimeSmoke();
+int RunCrowdRendererSubmissionSmoke();
 int RunDeterminismReplaySmoke();
+int RunCrowdDeterminismSmoke();
 int RunArenaAllocatorSmoke();
 int RunFrameAllocatorSmoke();
 int RunStackAllocatorSmoke();
@@ -35,9 +37,6 @@ int RunPageAllocatorSmoke();
 int RunPoolAllocatorSmoke();
 int RunSmallObjectTLSBinsSmoke();
 int RunTrackingAllocatorSmoke();
-int RunSmallObjectThreadStressSmoke();
-int RunSmallObjectFragmentationLongRunSmoke();
-int RunMemoryOOMAlignmentExtremesSmoke();
 
 namespace
 {
@@ -62,7 +61,9 @@ int main()
         {"Audio", &RunAudioSmoke},
         {"AudioPlayback", &RunAudioPlaybackSmoke},
         {"CoreRuntime", &RunCoreRuntimeSmoke},
+        {"CrowdRendererSubmission", &RunCrowdRendererSubmissionSmoke},
         {"DeterminismReplay", &RunDeterminismReplaySmoke},
+        {"CrowdDeterminism", &RunCrowdDeterminismSmoke},
         {"ArenaAllocator", &RunArenaAllocatorSmoke},
         {"FrameAllocator", &RunFrameAllocatorSmoke},
         {"StackAllocator", &RunStackAllocatorSmoke},
@@ -78,9 +79,6 @@ int main()
         {"PoolAllocator", &RunPoolAllocatorSmoke},
         {"SmallObjectTLSBins", &RunSmallObjectTLSBinsSmoke},
         {"TrackingAllocator", &RunTrackingAllocatorSmoke},
-        {"SmallObjectThreadStress", &RunSmallObjectThreadStressSmoke},
-        {"SmallObjectFragmentationLongRun", &RunSmallObjectFragmentationLongRunSmoke},
-        {"MemoryOOMAlignmentExtremes", &RunMemoryOOMAlignmentExtremesSmoke},
     };
 
     int failures = 0;
