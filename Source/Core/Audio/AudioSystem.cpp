@@ -3,9 +3,10 @@
 // ----------------------------------------------------------------------------
 // Purpose : Out-of-line AudioSystem implementation that keeps backend details
 //           and heavy logic out of the public facade.
-// Contract: No exceptions/RTTI. Built-in backends are placement-new'd inside
-//           AudioSystemState opaque storage. Shutdown is idempotent and always
-//           releases any owned backend before zeroing the state.
+// Contract: No exceptions/RTTI. Built-in backends are heap-allocated during
+//           initialization behind an opaque state pointer. Shutdown is
+//           idempotent and always releases any owned backend before zeroing the
+//           state.
 // Notes   : External interfaces remain injectable through
 //           InitAudioSystemWithInterface(); built-in backend-specific helpers
 //           only operate when AudioSystemState owns that backend instance.
@@ -22,59 +23,38 @@ namespace dng::audio
 {
     namespace
     {
-        static_assert(sizeof(NullAudio) <= kAudioSystemOwnedBackendStorageBytes,
-                      "AudioSystem owned backend storage is too small for NullAudio.");
-        static_assert(alignof(NullAudio) <= kAudioSystemOwnedBackendStorageAlign,
-                      "AudioSystem owned backend storage alignment is too small for NullAudio.");
-        static_assert(sizeof(WinMmAudio) <= kAudioSystemOwnedBackendStorageBytes,
-                      "AudioSystem owned backend storage is too small for WinMmAudio.");
-        static_assert(alignof(WinMmAudio) <= kAudioSystemOwnedBackendStorageAlign,
-                      "AudioSystem owned backend storage alignment is too small for WinMmAudio.");
-
-        template <typename Backend>
-        [[nodiscard]] Backend* StorageAs(AudioSystemOwnedBackendStorage& storage) noexcept
-        {
-            return std::launder(reinterpret_cast<Backend*>(storage.bytes));
-        }
-
-        template <typename Backend>
-        [[nodiscard]] const Backend* StorageAs(const AudioSystemOwnedBackendStorage& storage) noexcept
-        {
-            return std::launder(reinterpret_cast<const Backend*>(storage.bytes));
-        }
-
         [[nodiscard]] NullAudio* GetOwnedNullBackend(AudioSystemState& state) noexcept
         {
-            return (state.ownedBackend == AudioSystemBackend::Null)
-                ? StorageAs<NullAudio>(state.ownedBackendStorage)
+            return (state.backend == AudioSystemBackend::Null)
+                ? static_cast<NullAudio*>(state.ownedBackendState)
                 : nullptr;
         }
 
         [[nodiscard]] const NullAudio* GetOwnedNullBackend(const AudioSystemState& state) noexcept
         {
-            return (state.ownedBackend == AudioSystemBackend::Null)
-                ? StorageAs<NullAudio>(state.ownedBackendStorage)
+            return (state.backend == AudioSystemBackend::Null)
+                ? static_cast<const NullAudio*>(state.ownedBackendState)
                 : nullptr;
         }
 
         [[nodiscard]] WinMmAudio* GetOwnedPlatformBackend(AudioSystemState& state) noexcept
         {
-            return (state.ownedBackend == AudioSystemBackend::Platform)
-                ? StorageAs<WinMmAudio>(state.ownedBackendStorage)
+            return (state.backend == AudioSystemBackend::Platform)
+                ? static_cast<WinMmAudio*>(state.ownedBackendState)
                 : nullptr;
         }
 
         [[nodiscard]] const WinMmAudio* GetOwnedPlatformBackend(const AudioSystemState& state) noexcept
         {
-            return (state.ownedBackend == AudioSystemBackend::Platform)
-                ? StorageAs<WinMmAudio>(state.ownedBackendStorage)
+            return (state.backend == AudioSystemBackend::Platform)
+                ? static_cast<const WinMmAudio*>(state.ownedBackendState)
                 : nullptr;
         }
 
         [[nodiscard]] bool HasOwnedPlatformBackend(const AudioSystemState& state) noexcept
         {
             return state.backend == AudioSystemBackend::Platform &&
-                   state.ownedBackend == AudioSystemBackend::Platform;
+                   state.ownedBackendState != nullptr;
         }
 
         [[nodiscard]] bool IsValidInterface(const AudioInterface& interface) noexcept
@@ -93,13 +73,13 @@ namespace dng::audio
 
         inline void DestroyOwnedBackend(AudioSystemState& state) noexcept
         {
-            switch (state.ownedBackend)
+            switch (state.backend)
             {
                 case AudioSystemBackend::Null:
                 {
                     if (NullAudio* backend = GetOwnedNullBackend(state))
                     {
-                        backend->~NullAudio();
+                        delete backend;
                     }
                     break;
                 }
@@ -108,7 +88,7 @@ namespace dng::audio
                     if (WinMmAudio* backend = GetOwnedPlatformBackend(state))
                     {
                         backend->Shutdown();
-                        backend->~WinMmAudio();
+                        delete backend;
                     }
                     break;
                 }
@@ -118,18 +98,21 @@ namespace dng::audio
                     break;
                 }
             }
-
-            state.ownedBackend = AudioSystemBackend::External;
+            state.ownedBackendState = nullptr;
         }
 
         [[nodiscard]] NullAudio* ConstructOwnedNullBackend(AudioSystemState& state) noexcept
         {
-            return ::new (static_cast<void*>(state.ownedBackendStorage.bytes)) NullAudio{};
+            NullAudio* backend = new (std::nothrow) NullAudio{};
+            state.ownedBackendState = backend;
+            return backend;
         }
 
         [[nodiscard]] WinMmAudio* ConstructOwnedPlatformBackend(AudioSystemState& state) noexcept
         {
-            return ::new (static_cast<void*>(state.ownedBackendStorage.bytes)) WinMmAudio{};
+            WinMmAudio* backend = new (std::nothrow) WinMmAudio{};
+            state.ownedBackendState = backend;
+            return backend;
         }
 
         [[nodiscard]] AudioStatus MapFsStatus(fs::FsStatus status) noexcept
@@ -547,8 +530,7 @@ namespace dng::audio
     }
 
     bool InitAudioSystemWithInterface(AudioSystemState& state,
-                                      AudioInterface interface,
-                                      AudioSystemBackend backend) noexcept
+                                      AudioInterface interface) noexcept
     {
         ShutdownAudioSystem(state);
 
@@ -558,8 +540,7 @@ namespace dng::audio
         }
 
         state.interface = interface;
-        state.backend = backend;
-        state.ownedBackend = AudioSystemBackend::External;
+        state.backend = AudioSystemBackend::External;
         state.isInitialized = true;
         return true;
     }
@@ -573,7 +554,11 @@ namespace dng::audio
             case AudioSystemBackend::Null:
             {
                 NullAudio* backend = ConstructOwnedNullBackend(state);
-                state.ownedBackend = AudioSystemBackend::Null;
+                if (backend == nullptr)
+                {
+                    state = AudioSystemState{};
+                    return false;
+                }
                 state.interface = MakeNullAudioInterface(*backend);
                 state.backend = AudioSystemBackend::Null;
                 state.isInitialized = true;
@@ -582,8 +567,7 @@ namespace dng::audio
             case AudioSystemBackend::Platform:
             {
                 WinMmAudio* backend = ConstructOwnedPlatformBackend(state);
-                state.ownedBackend = AudioSystemBackend::Platform;
-                if (backend->Init(ToWinMmAudioConfig(config.platform)))
+                if (backend != nullptr && backend->Init(ToWinMmAudioConfig(config.platform)))
                 {
                     state.interface = MakeWinMmAudioInterface(*backend);
                     state.backend = AudioSystemBackend::Platform;
@@ -591,13 +575,20 @@ namespace dng::audio
                     return true;
                 }
 
-                backend->~WinMmAudio();
-                state.ownedBackend = AudioSystemBackend::External;
+                if (backend != nullptr)
+                {
+                    delete backend;
+                    state.ownedBackendState = nullptr;
+                }
 
                 if (config.fallbackToNullOnInitFailure)
                 {
                     NullAudio* nullBackend = ConstructOwnedNullBackend(state);
-                    state.ownedBackend = AudioSystemBackend::Null;
+                    if (nullBackend == nullptr)
+                    {
+                        state = AudioSystemState{};
+                        return false;
+                    }
                     state.interface = MakeNullAudioInterface(*nullBackend);
                     state.backend = AudioSystemBackend::Null;
                     state.isInitialized = true;

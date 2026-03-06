@@ -102,13 +102,22 @@
     <ClInclude Include="Source\Core\Platform\PlatformCompiler.hpp">
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Platform\PlatformCrt.hpp">
+      <Filter>Source\Core\Platform</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Platform\PlatformDefines.hpp">
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\Platform\PlatformMacros.hpp">
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Platform\PlatformProcess.hpp">
+      <Filter>Source\Core\Platform</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Platform\PlatformTypes.hpp">
+      <Filter>Source\Core\Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Platform\WindowsApi.hpp">
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\Containers\StdAliases.hpp">

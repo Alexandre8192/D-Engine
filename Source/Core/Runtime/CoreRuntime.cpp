@@ -115,7 +115,7 @@ namespace dng::runtime
         state.stage = CoreRuntimeInitStage::FileSystem;
 
         const bool initAudioOk = (injected.audioSystem != nullptr)
-            ? audio::InitAudioSystemWithInterface(state.audio, *injected.audioSystem, injected.audioBackend)
+            ? audio::InitAudioSystemWithInterface(state.audio, *injected.audioSystem)
             : audio::InitAudioSystem(state.audio, config.audio);
         if (!initAudioOk)
         {

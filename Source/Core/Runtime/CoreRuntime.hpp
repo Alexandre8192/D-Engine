@@ -80,7 +80,6 @@ namespace dng::runtime
         const fs::FileSystemInterface*   fileSystem = nullptr;
         const audio::AudioInterface*     audioSystem = nullptr;
         const render::RendererInterface* rendererSystem = nullptr;
-        audio::AudioSystemBackend        audioBackend = audio::AudioSystemBackend::External;
     };
 
     struct CoreRuntimeState

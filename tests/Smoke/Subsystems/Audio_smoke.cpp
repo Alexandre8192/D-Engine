@@ -5,11 +5,19 @@ int RunAudioSmoke()
 {
     using namespace dng::audio;
 
+    const auto isReset = [](const AudioSystemState& state) noexcept
+    {
+        const AudioCaps caps = QueryCaps(state);
+        return !state.isInitialized &&
+               state.backend == AudioSystemBackend::Null &&
+               state.ownedBackendState == nullptr &&
+               caps.determinism == dng::DeterminismMode::Unknown &&
+               caps.threadSafety == dng::ThreadSafetyMode::Unknown &&
+               !caps.stableMixOrder;
+    };
+
     AudioSystemState uninitialized{};
-    const AudioCaps uninitCaps = QueryCaps(uninitialized);
-    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
-        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
-        uninitCaps.stableMixOrder)
+    if (!isReset(uninitialized))
     {
         return 1;
     }
@@ -26,9 +34,18 @@ int RunAudioSmoke()
     AudioInterface brokenInterface = MakeNullAudioInterface(nullBackendForValidation);
     brokenInterface.vtable.getCaps = nullptr;
     AudioSystemState rejected{};
-    if (InitAudioSystemWithInterface(rejected, brokenInterface, AudioSystemBackend::External))
+    AudioSystemConfig resetConfig{};
+    if (!InitAudioSystem(rejected, resetConfig))
     {
         return 3;
+    }
+    if (InitAudioSystemWithInterface(rejected, brokenInterface))
+    {
+        return 42;
+    }
+    if (!isReset(rejected))
+    {
+        return 43;
     }
 
     AudioSystemState state{};

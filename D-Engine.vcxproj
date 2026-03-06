@@ -49,9 +49,12 @@
     <ClInclude Include="Source\Core\Memory\ThreadSafety.hpp" />
     <ClInclude Include="Source\Core\Memory\TrackingAllocator.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformCompiler.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformCrt.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformDefines.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformMacros.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformProcess.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformTypes.hpp" />
+    <ClInclude Include="Source\Core\Platform\WindowsApi.hpp" />
     <ClInclude Include="Source\Core\Containers\StdAliases.hpp" />
     <ClInclude Include="Source\Core\Simd\Vec4.hpp" />
     <ClInclude Include="Source\Core\Types.hpp" />

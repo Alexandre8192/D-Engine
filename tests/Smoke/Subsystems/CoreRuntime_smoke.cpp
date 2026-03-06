@@ -208,7 +208,6 @@ int RunCoreRuntimeSmoke()
         injected.windowSystem = &windowIface;
         injected.fileSystem = &fileSystemIface;
         injected.audioSystem = &audioIface;
-        injected.audioBackend = dng::audio::AudioSystemBackend::External;
         injected.rendererSystem = &rendererIface;
 
         if (InitCoreRuntime(injectedState, config, injected) != CoreRuntimeStatus::Ok)
@@ -393,7 +392,6 @@ int RunCoreRuntimeSmoke()
 
         CoreRuntimeInjectedInterfaces injected{};
         injected.audioSystem = &badIface;
-        injected.audioBackend = dng::audio::AudioSystemBackend::External;
         const int result = expectFailureReset(CoreRuntimeStatus::AudioInitFailed, config, injected, 30);
         if (result != 0)
         {

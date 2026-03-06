@@ -4,9 +4,10 @@
 // Purpose : High-level audio system facade that owns built-in backends and
 //           exposes unified frame mixing to the rest of the engine.
 // Contract: Self-contained public header, no exceptions/RTTI. Built-in backend
-//           ownership lives in opaque fixed-size storage carried by
-//           AudioSystemState; platform-specific work is implemented in
-//           AudioSystem.cpp. Hot paths remain allocation-free once initialized.
+//           ownership stays opaque to callers through an implementation-owned
+//           pointer carried by AudioSystemState; platform-specific work is
+//           implemented in AudioSystem.cpp. Hot paths remain allocation-free
+//           once initialized.
 // Notes   : Defaults to NullAudio. Platform backend can be selected via a
 //           generic audio-platform config with optional fallback to NullAudio
 //           when initialization fails. Voice control is command-queued through
@@ -31,9 +32,6 @@ namespace dng::audio
     inline constexpr dng::u32 kAudioSystemMaxInlineClipSamples = 65536u;
     inline constexpr dng::u32 kAudioSystemWavLoadScratchBytes =
         (kAudioSystemMaxInlineClipSamples * static_cast<dng::u32>(sizeof(dng::i16))) + 4096u;
-    inline constexpr dng::u32 kAudioSystemOwnedBackendStorageBytes = 65536u;
-    inline constexpr dng::u32 kAudioSystemOwnedBackendStorageAlign = 16u;
-
     enum class AudioSystemBackend : dng::u8
     {
         Null,
@@ -89,32 +87,25 @@ namespace dng::audio
         dng::u32    generation = 1;
     };
 
-    struct alignas(kAudioSystemOwnedBackendStorageAlign) AudioSystemOwnedBackendStorage
-    {
-        dng::u8 bytes[kAudioSystemOwnedBackendStorageBytes]{};
-    };
-
     static_assert(std::is_trivially_copyable_v<AudioCommand>);
     static_assert(std::is_trivially_copyable_v<AudioVoiceState>);
-    static_assert(std::is_trivially_copyable_v<AudioSystemOwnedBackendStorage>);
 
     struct AudioSystemState
     {
-        AudioInterface                 interface{};
-        AudioSystemBackend             backend = AudioSystemBackend::Null;
-        AudioSystemBackend             ownedBackend = AudioSystemBackend::External;
-        AudioSystemOwnedBackendStorage ownedBackendStorage{};
-        AudioVoiceState                voices[kAudioSystemMaxVoices]{};
-        AudioCommand                   commandQueue[kAudioSystemMaxCommands]{};
-        dng::u32                       commandReadIndex = 0;
-        dng::u32                       commandWriteIndex = 0;
-        dng::u32                       commandCount = 0;
-        dng::u32                       activeVoiceCount = 0;
-        fs::FileSystemInterface        streamFileSystem{};
-        float                          busGains[kAudioSystemBusCount]{1.0f, 1.0f, 1.0f};
-        bool                           hasStreamFileSystem = false;
-        bool                           isInitialized = false;
-        dng::u8                        reserved[2]{};
+        AudioInterface          interface{};
+        AudioSystemBackend      backend = AudioSystemBackend::Null;
+        void*                   ownedBackendState = nullptr;
+        AudioVoiceState         voices[kAudioSystemMaxVoices]{};
+        AudioCommand            commandQueue[kAudioSystemMaxCommands]{};
+        dng::u32                commandReadIndex = 0;
+        dng::u32                commandWriteIndex = 0;
+        dng::u32                commandCount = 0;
+        dng::u32                activeVoiceCount = 0;
+        fs::FileSystemInterface streamFileSystem{};
+        float                   busGains[kAudioSystemBusCount]{1.0f, 1.0f, 1.0f};
+        bool                    hasStreamFileSystem = false;
+        bool                    isInitialized = false;
+        dng::u8                 reserved[6]{};
     };
 
     [[nodiscard]] inline bool IsVoiceHandleInRange(AudioVoiceId voice) noexcept
@@ -187,8 +178,7 @@ namespace dng::audio
                                                      const char* path,
                                                      AudioClipId& outClip) noexcept;
     [[nodiscard]] bool InitAudioSystemWithInterface(AudioSystemState& state,
-                                                    AudioInterface interface,
-                                                    AudioSystemBackend backend) noexcept;
+                                                    AudioInterface interface) noexcept;
     [[nodiscard]] bool InitAudioSystem(AudioSystemState& state,
                                        const AudioSystemConfig& config) noexcept;
     void ShutdownAudioSystem(AudioSystemState& state) noexcept;

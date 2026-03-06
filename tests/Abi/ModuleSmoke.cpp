@@ -2,15 +2,16 @@
 #include "Core/Interop/ModuleAbi.hpp"
 #include "Core/Interop/ModuleLoader.hpp"
 #include "Core/Interop/WindowAbi.hpp"
+#include "Core/Platform/PlatformCrt.hpp"
+#include "Core/Platform/PlatformDefines.hpp"
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
-#if defined(_WIN32) || defined(_WIN64)
-    #include <malloc.h>
+#if DNG_PLATFORM_WINDOWS
     static const char* kModulePath = "NullWindowModule.dll";
-#elif defined(__APPLE__)
+#elif DNG_PLATFORM_APPLE
     static const char* kModulePath = "libNullWindowModule.dylib";
 #else
     static const char* kModulePath = "libNullWindowModule.so";
@@ -20,20 +21,7 @@
 static void* DNG_ABI_CALL TestAlloc(void* user, dng_u64 size, dng_u64 align)
 {
     (void)user;
-    if (align < sizeof(void*))
-    {
-        align = sizeof(void*);
-    }
-#if defined(_WIN32) || defined(_WIN64)
-    return _aligned_malloc((size_t)size, (size_t)align);
-#else
-    void* ptr = NULL;
-    if (posix_memalign(&ptr, (size_t)align, (size_t)size) != 0)
-    {
-        return NULL;
-    }
-    return ptr;
-#endif
+    return dng::platform::AllocAligned((size_t)size, (size_t)align);
 }
 
 static void DNG_ABI_CALL TestFree(void* user, void* ptr, dng_u64 size, dng_u64 align)
@@ -41,11 +29,7 @@ static void DNG_ABI_CALL TestFree(void* user, void* ptr, dng_u64 size, dng_u64 a
     (void)user;
     (void)size;
     (void)align;
-#if defined(_WIN32) || defined(_WIN64)
-    _aligned_free(ptr);
-#else
-    free(ptr);
-#endif
+    dng::platform::FreeAligned(ptr);
 }
 
 static void DNG_ABI_CALL TestLog(void* user, dng_u32 level, dng_str_view_v1 msg)

@@ -20,6 +20,7 @@
 #include "Core/Memory/SmallObjectAllocator.hpp"
 #include "Core/Memory/ThreadSafety.hpp"
 #include "Core/Memory/TrackingAllocator.hpp"
+#include "Core/Platform/PlatformCrt.hpp"
 
 #include <cerrno>
 #include <cstddef>
@@ -158,25 +159,13 @@ namespace detail
     static constexpr const char* kEnvTrackingShards = "DNG_MEM_TRACKING_SHARDS";
     static constexpr const char* kEnvSmallObjectBatch = "DNG_SOALLOC_BATCH";
 
-    [[nodiscard]] const char* GetEnvNoWarn(const char* name) noexcept
-    {
-#if DNG_COMPILER_MSVC
-#  pragma warning(push)
-#  pragma warning(disable:4996)
-#endif
-        return std::getenv(name);
-#if DNG_COMPILER_MSVC
-#  pragma warning(pop)
-#endif
-    }
-
     [[nodiscard]] OverrideResult ResolveTrackingSampling(const MemoryConfig& cfg) noexcept
     {
         OverrideResult result{};
         result.value = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SAMPLING_RATE);
         result.source = OverrideSource::Macro;
 
-        const char* envText = GetEnvNoWarn(kEnvTrackingSampling);
+        const char* envText = platform::GetEnvNoWarn(kEnvTrackingSampling);
         if (envText && *envText)
         {
             std::uint32_t parsed = 0;
@@ -215,7 +204,7 @@ namespace detail
         result.value = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
         result.source = OverrideSource::Macro;
 
-        const char* envText = GetEnvNoWarn(kEnvTrackingShards);
+        const char* envText = platform::GetEnvNoWarn(kEnvTrackingShards);
         if (envText && *envText)
         {
             std::uint32_t parsed = 0;
@@ -270,7 +259,7 @@ namespace detail
 
         constexpr std::uint32_t kMaxBatch = static_cast<std::uint32_t>(DNG_SOA_TLS_MAG_CAPACITY);
 
-        const char* envText = GetEnvNoWarn(kEnvSmallObjectBatch);
+        const char* envText = platform::GetEnvNoWarn(kEnvSmallObjectBatch);
         if (envText && *envText)
         {
             std::uint32_t parsed = 0;
