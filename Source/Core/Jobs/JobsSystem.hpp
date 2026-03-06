@@ -37,52 +37,68 @@ namespace dng::jobs
         bool              isInitialized = false;
     };
 
-    [[nodiscard]] inline bool InitJobsSystemWithInterface(JobsSystemState& state,
-                                                          JobsInterface interface,
-                                                          JobsSystemBackend backend) noexcept
+    namespace detail
     {
-        if (interface.userData == nullptr ||
-            interface.vtable.getCaps == nullptr ||
-            interface.vtable.submit == nullptr ||
-            interface.vtable.submitBatch == nullptr ||
-            interface.vtable.wait == nullptr)
+        [[nodiscard]] inline bool IsValidJobsSystemInterface(const JobsInterface& interface) noexcept
         {
-            return false;
+            return interface.userData != nullptr &&
+                   interface.vtable.getCaps != nullptr &&
+                   interface.vtable.submit != nullptr &&
+                   interface.vtable.submitBatch != nullptr &&
+                   interface.vtable.wait != nullptr;
         }
 
-        state.interface     = interface;
-        state.backend       = backend;
-        state.isInitialized = true;
-        return true;
+        inline void ResetJobsSystemState(JobsSystemState& state) noexcept
+        {
+            state = JobsSystemState{};
+        }
+
+        [[nodiscard]] inline bool BindJobsSystemState(JobsSystemState& state,
+                                                      JobsInterface interface,
+                                                      JobsSystemBackend backend) noexcept
+        {
+            if (!IsValidJobsSystemInterface(interface))
+            {
+                return false;
+            }
+
+            state.interface     = interface;
+            state.backend       = backend;
+            state.isInitialized = true;
+            return true;
+        }
+    } // namespace detail
+
+    [[nodiscard]] inline bool InitJobsSystemWithInterface(JobsSystemState& state,
+                                                          JobsInterface interface) noexcept
+    {
+        detail::ResetJobsSystemState(state);
+        return detail::BindJobsSystemState(state, interface, JobsSystemBackend::External);
     }
 
     [[nodiscard]] inline bool InitJobsSystem(JobsSystemState& state,
                                              const JobsSystemConfig& config) noexcept
     {
+        detail::ResetJobsSystemState(state);
+
         switch (config.backend)
         {
             case JobsSystemBackend::Null:
-            default:
             {
                 JobsInterface iface = MakeNullJobsInterface(state.nullBackend);
-                return InitJobsSystemWithInterface(state, iface, JobsSystemBackend::Null);
+                return detail::BindJobsSystemState(state, iface, JobsSystemBackend::Null);
             }
             case JobsSystemBackend::External:
+            default:
             {
-                // External backends must be injected via InitJobsSystemWithInterface.
                 return false;
             }
         }
-
-        return false;
     }
 
     inline void ShutdownJobsSystem(JobsSystemState& state) noexcept
     {
-        state.interface     = JobsInterface{};
-        state.backend       = JobsSystemBackend::Null;
-        state.nullBackend   = NullJobs{};
-        state.isInitialized = false;
+        detail::ResetJobsSystemState(state);
     }
 
     [[nodiscard]] inline JobsCaps QueryCaps(const JobsSystemState& state) noexcept

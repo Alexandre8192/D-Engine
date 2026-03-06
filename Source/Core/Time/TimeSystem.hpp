@@ -40,37 +40,58 @@ namespace dng::time
         bool               isInitialized = false;
     };
 
+    namespace detail
+    {
+        [[nodiscard]] inline bool IsValidTimeSystemInterface(const TimeInterface& interface) noexcept
+        {
+            return interface.userData != nullptr &&
+                   interface.vtable.getCaps != nullptr &&
+                   interface.vtable.nowMonotonic != nullptr &&
+                   interface.vtable.beginFrame != nullptr &&
+                   interface.vtable.endFrame != nullptr;
+        }
+
+        inline void ResetTimeSystemState(TimeSystemState& state) noexcept
+        {
+            state = TimeSystemState{};
+        }
+
+        [[nodiscard]] inline bool BindTimeSystemState(TimeSystemState& state,
+                                                      TimeInterface interface,
+                                                      TimeSystemBackend backend,
+                                                      bool primeOnInit) noexcept
+        {
+            if (!IsValidTimeSystemInterface(interface))
+            {
+                return false;
+            }
+
+            state.interface     = interface;
+            state.backend       = backend;
+            state.isInitialized = true;
+            state.lastFrameTime = FrameTime{};
+
+            if (primeOnInit)
+            {
+                state.lastFrameTime.totalNs = NowMonotonicNs(state.interface);
+            }
+
+            return true;
+        }
+    } // namespace detail
+
     [[nodiscard]] inline bool InitTimeSystemWithInterface(TimeSystemState& state,
                                                           TimeInterface interface,
-                                                          TimeSystemBackend backend,
                                                           bool primeOnInit = true) noexcept
     {
-        if (interface.userData == nullptr ||
-            interface.vtable.getCaps == nullptr ||
-            interface.vtable.nowMonotonic == nullptr ||
-            interface.vtable.beginFrame == nullptr ||
-            interface.vtable.endFrame == nullptr)
-        {
-            return false;
-        }
-
-        state.interface     = interface;
-        state.backend       = backend;
-        state.isInitialized = true;
-        state.lastFrameTime = FrameTime{};
-
-        if (primeOnInit)
-        {
-            state.lastFrameTime.totalNs = NowMonotonicNs(state.interface);
-        }
-
-        return true;
+        detail::ResetTimeSystemState(state);
+        return detail::BindTimeSystemState(state, interface, TimeSystemBackend::External, primeOnInit);
     }
 
     [[nodiscard]] inline bool InitTimeSystem(TimeSystemState& state,
                                              const TimeSystemConfig& config) noexcept
     {
-        state = TimeSystemState{};
+        detail::ResetTimeSystemState(state);
 
         switch (config.backend)
         {
@@ -78,29 +99,19 @@ namespace dng::time
             {
                 state.nullBackend.stepNs = config.nullStepNs;
                 TimeInterface iface = MakeNullTimeInterface(state.nullBackend);
-                return InitTimeSystemWithInterface(state, iface, TimeSystemBackend::Null, config.primeOnInit);
+                return detail::BindTimeSystemState(state, iface, TimeSystemBackend::Null, config.primeOnInit);
             }
             case TimeSystemBackend::External:
-            {
-                // External backends must be injected via InitTimeSystemWithInterface.
-                return false;
-            }
             default:
             {
                 return false;
             }
         }
-
-        return false;
     }
 
     inline void ShutdownTimeSystem(TimeSystemState& state) noexcept
     {
-        state.interface     = TimeInterface{};
-        state.backend       = TimeSystemBackend::Null;
-        state.nullBackend   = NullTime{};
-        state.lastFrameTime = FrameTime{};
-        state.isInitialized = false;
+        detail::ResetTimeSystemState(state);
     }
 
     [[nodiscard]] inline TimeCaps QueryCaps(const TimeSystemState& state) noexcept
