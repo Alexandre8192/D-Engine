@@ -66,7 +66,7 @@ int main()
     host.free = &TestFree;
 
     dng::ModuleLoader loader;
-    dng_module_api_v1 module_api = {};
+    dng_module_api_v2 module_api = {};
     dng_status_v1 status = loader.Load(kModulePath, &host, &module_api);
     if (status != DNG_STATUS_OK)
     {
