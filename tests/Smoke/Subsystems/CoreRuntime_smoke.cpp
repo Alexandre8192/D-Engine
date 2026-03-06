@@ -1,3 +1,4 @@
+#include "Core/Audio/NullAudio.hpp"
 #include "Core/Runtime/CoreRuntime.hpp"
 
 namespace
@@ -129,7 +130,7 @@ int RunCoreRuntimeSmoke()
 
     if (audioMix.writtenSamples != 64 ||
         audioMix.frameIndex != tick.frame.frameIndex ||
-        state.audio.nullBackend.lastFrameIndex != tick.frame.frameIndex)
+        state.audio.backend != dng::audio::AudioSystemBackend::Null)
     {
         ShutdownCoreRuntime(state);
         return 9;

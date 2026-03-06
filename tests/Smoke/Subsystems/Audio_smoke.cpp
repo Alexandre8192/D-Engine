@@ -1,4 +1,5 @@
 #include "Core/Audio/AudioSystem.hpp"
+#include "Core/Audio/NullAudio.hpp"
 
 int RunAudioSmoke()
 {
@@ -276,7 +277,7 @@ int RunAudioSmoke()
         }
     }
 
-    if (state.nullBackend.lastFrameIndex != 3)
+    if (state.backend != AudioSystemBackend::Null)
     {
         ShutdownAudioSystem(state);
         return 8;
