@@ -1,11 +1,13 @@
 // ============================================================================
 // D-Engine - Core/Abi/DngModuleApi.h
 // ----------------------------------------------------------------------------
-// Purpose : Module entrypoint and generic subsystem export catalogue for ABI v1.
+// Purpose : Module entrypoint and generic subsystem export catalogue for ABI v2.
 // Contract: C99 ABI; structs start with { struct_size, abi_version }; POD-only;
 //           functions return dng_status_v1; no exceptions/RTTI/unwinding.
-// Notes   : ABI v1 uses a module-level context plus a list of typed interface
-//           tables so modules are not biased toward any specific subsystem.
+// Notes   : Module ABI v2 uses a module-level context plus a list of typed
+//           interface tables so modules are not biased toward any subsystem.
+//           Module ABI v1 was retired after an incompatible layout change;
+//           callers must resolve the v2 entrypoint symbol explicitly.
 //           Thread-safety/determinism remain defined by host usage. ASCII-only.
 // ============================================================================
 #ifndef DNG_ABI_DNG_MODULE_API_H
@@ -19,6 +21,9 @@ extern "C" {
 #include "DngHostApi.h"
 
 #define DNG_MODULE_INTERFACE_NAME_WINDOW "dng.window"
+#define DNG_MODULE_GET_API_V2_NAME       "dngModuleGetApi_v2"
+
+enum { DNG_MODULE_API_VERSION_V2 = 2u };
 
 typedef struct dng_module_interface_v1 {
     dng_str_view_v1          interface_name;    // Stable identifier, e.g. "dng.window"
@@ -26,7 +31,7 @@ typedef struct dng_module_interface_v1 {
     const dng_abi_header_v1* api;               // Points to a subsystem table whose first field is dng_abi_header_v1
 } dng_module_interface_v1;
 
-typedef struct dng_module_api_v1 {
+typedef struct dng_module_api_v2 {
     dng_abi_header_v1 header; // { struct_size, abi_version }
 
     dng_str_view_v1 module_name;
@@ -46,11 +51,11 @@ typedef struct dng_module_api_v1 {
     //           undefined because the context may already be freed.
     // Notes   : If NULL, module uses static storage and no cleanup is needed.
     dng_status_v1 (DNG_ABI_CALL *shutdown)(void* module_ctx, const dng_host_api_v1* host);
-} dng_module_api_v1;
+} dng_module_api_v2;
 
-DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v1(
+DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v2(
     const dng_host_api_v1* host,
-    dng_module_api_v1* out_api);
+    dng_module_api_v2* out_api);
 
 #ifdef __cplusplus
 } // extern "C"

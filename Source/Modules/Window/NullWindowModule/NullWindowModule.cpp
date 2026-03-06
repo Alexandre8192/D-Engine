@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // Purpose : Minimal loadable module implementing the Window ABI v1 (null impl).
 // Contract: C ABI; POD-only ABI structs; no exceptions/RTTI; single-window only;
-//           context allocated via host->alloc in dngModuleGetApi_v1 and freed
+//           context allocated via host->alloc in dngModuleGetApi_v2 and freed
 //           in shutdown; host allocator used for title copies; caller must call
 //           shutdown exactly once before module unload.
 // Notes   : set_title allocates via host->alloc and frees previous via host->free;
@@ -190,10 +190,10 @@ static dng_status_v1 DNG_ABI_CALL NullWindow_Shutdown(void* raw_ctx, const dng_h
     return DNG_STATUS_OK;
 }
 
-static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v1* api)
+static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v2* api)
 {
-    api->header.struct_size = (dng_u32)sizeof(dng_module_api_v1);
-    api->header.abi_version = DNG_ABI_VERSION_V1;
+    api->header.struct_size = (dng_u32)sizeof(dng_module_api_v2);
+    api->header.abi_version = DNG_MODULE_API_VERSION_V2;
 
     api->module_name.data = "NullWindowModule";
     api->module_name.size = NullWindow_StrLen(api->module_name.data);
@@ -213,11 +213,21 @@ static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v1* api)
     ctx->interface_entry.api = (const dng_abi_header_v1*)&ctx->window_api;
 }
 
-DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v1(const dng_host_api_v1* host, dng_module_api_v1* out_api)
+DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v2(const dng_host_api_v1* host, dng_module_api_v2* out_api)
 {
     if (!host || !out_api || !host->alloc || !host->free)
     {
         return DNG_STATUS_INVALID_ARG;
+    }
+
+    if (out_api->header.struct_size != 0u && out_api->header.struct_size < sizeof(dng_module_api_v2))
+    {
+        return DNG_STATUS_UNSUPPORTED;
+    }
+
+    if (out_api->header.abi_version != 0u && out_api->header.abi_version != DNG_MODULE_API_VERSION_V2)
+    {
+        return DNG_STATUS_UNSUPPORTED;
     }
 
     // Allocate module context via host allocator (caller owns lifetime).

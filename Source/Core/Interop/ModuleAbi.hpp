@@ -5,7 +5,7 @@
 // Contract: Inline wrappers only; no allocations; no ownership changes; caller
 //           remains responsible for module lifetime and shutdown ordering.
 // Notes   : Provides lookup helpers for typed subsystem tables exported through
-//           dng_module_api_v1.
+//           dng_module_api_v2.
 // ============================================================================
 #ifndef DNG_INTEROP_MODULE_ABI_HPP
 #define DNG_INTEROP_MODULE_ABI_HPP
@@ -50,7 +50,7 @@ template <std::size_t N>
     return std::memcmp(lhs.data, rhs.data, lhs.size) == 0;
 }
 
-[[nodiscard]] inline const dng_module_interface_v1* FindModuleInterface(const dng_module_api_v1& moduleApi,
+[[nodiscard]] inline const dng_module_interface_v1* FindModuleInterface(const dng_module_api_v2& moduleApi,
     dng_str_view_v1 interfaceName,
     dng_u32 interfaceVersion) noexcept
 {
@@ -76,7 +76,7 @@ template <std::size_t N>
     return nullptr;
 }
 
-[[nodiscard]] inline const dng_window_api_v1* GetWindowApiV1(const dng_module_api_v1& moduleApi) noexcept
+[[nodiscard]] inline const dng_window_api_v1* GetWindowApiV1(const dng_module_api_v2& moduleApi) noexcept
 {
     const dng_module_interface_v1* entry =
         FindModuleInterface(moduleApi, ModuleAbiLiteral(DNG_MODULE_INTERFACE_NAME_WINDOW), DNG_ABI_VERSION_V1);

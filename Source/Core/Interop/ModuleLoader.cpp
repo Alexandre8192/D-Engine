@@ -5,7 +5,7 @@
 // Contract: No exceptions/RTTI; C ABI entrypoint; returns status codes only;
 //           cold-path usage; ASCII-only logging via host log callback.
 // Notes   : Caller manages thread-safety. Loader owns the module handle until
-//           Unload. ABI v1 entrypoint name is dngModuleGetApi_v1.
+//           Unload. The generic module catalogue uses the v2 entrypoint.
 // ============================================================================
 #include "Core/Interop/ModuleLoader.hpp"
 #include "Core/Abi/DngWindowApi.h"
@@ -24,6 +24,15 @@ namespace dng
 {
 namespace
 {
+    static constexpr dng_u64 kModuleApiScratchCanary = 0xD6E74F135A91C2B7ull;
+    static constexpr dng_u32 kModuleApiScratchCanaryCount = 8u;
+
+    struct ModuleApiScratchBufferV2
+    {
+        dng_module_api_v2 api;
+        dng_u64           tail_canary[kModuleApiScratchCanaryCount];
+    };
+
     static dng_u32 StrLen32(const char* cstr) noexcept
     {
         if (!cstr)
@@ -196,20 +205,20 @@ namespace
         return DNG_STATUS_OK;
     }
 
-    static dng_status_v1 ValidateModuleApiV1(const dng_module_api_v1* api, const dng_host_api_v1* host) noexcept
+    static dng_status_v1 ValidateModuleApiV2(const dng_module_api_v2* api, const dng_host_api_v1* host) noexcept
     {
         if (!api)
         {
             return DNG_STATUS_INVALID_ARG;
         }
 
-        if (api->header.struct_size != sizeof(dng_module_api_v1))
+        if (api->header.struct_size != sizeof(dng_module_api_v2))
         {
             LogIssue(host, "ModuleApi struct_size mismatch");
             return DNG_STATUS_INVALID_ARG;
         }
 
-        if (api->header.abi_version != DNG_ABI_VERSION_V1)
+        if (api->header.abi_version != DNG_MODULE_API_VERSION_V2)
         {
             LogIssue(host, "ModuleApi abi_version mismatch");
             return DNG_STATUS_UNSUPPORTED;
@@ -296,12 +305,14 @@ void ModuleLoader::Log(const dng_host_api_v1* host, dng_u32 level, const char* m
     }
 }
 
-dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, dng_module_api_v1* outApi) noexcept
+dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, dng_module_api_v2* outApi) noexcept
 {
     if (!path || !host || !outApi)
     {
         return DNG_STATUS_INVALID_ARG;
     }
+
+    ::memset(outApi, 0, sizeof(*outApi));
 
     const dng_status_v1 host_ok = ValidateHostApiV1(host);
     if (host_ok != DNG_STATUS_OK)
@@ -322,21 +333,21 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
         return DNG_STATUS_FAIL;
     }
 
-    FARPROC proc = ::GetProcAddress(lib, "dngModuleGetApi_v1");
+    FARPROC proc = ::GetProcAddress(lib, DNG_MODULE_GET_API_V2_NAME);
     if (!proc)
     {
         // Optional x86 fallback: some toolchains decorate __cdecl exports with a leading underscore.
-        proc = ::GetProcAddress(lib, "_dngModuleGetApi_v1");
+        proc = ::GetProcAddress(lib, "_" DNG_MODULE_GET_API_V2_NAME);
     }
 
     if (!proc)
     {
-        Log(host, 1u, "dngModuleGetApi_v1 not found");
+        Log(host, 1u, "dngModuleGetApi_v2 not found");
         ::FreeLibrary(lib);
         return DNG_STATUS_UNSUPPORTED;
     }
 
-    auto entry = reinterpret_cast<dng_status_v1 (DNG_ABI_CALL *)(const dng_host_api_v1*, dng_module_api_v1*)>(proc);
+    auto entry = reinterpret_cast<dng_status_v1 (DNG_ABI_CALL *)(const dng_host_api_v1*, dng_module_api_v2*)>(proc);
 #else
     // RTLD_NOW resolves relocations at load time; RTLD_LOCAL avoids exporting symbols globally.
     void* lib = ::dlopen(path, RTLD_NOW | RTLD_LOCAL);
@@ -349,7 +360,7 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
 
     // Clear any prior error before calling dlsym.
     (void)::dlerror();
-    void* sym = ::dlsym(lib, "dngModuleGetApi_v1");
+    void* sym = ::dlsym(lib, DNG_MODULE_GET_API_V2_NAME);
     const char* sym_err = ::dlerror();
     if (sym_err != nullptr)
     {
@@ -359,20 +370,58 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     }
     if (!sym)
     {
-        Log(host, 1u, "dlsym returned null for dngModuleGetApi_v1");
+        Log(host, 1u, "dlsym returned null for dngModuleGetApi_v2");
         ::dlclose(lib);
         return DNG_STATUS_UNSUPPORTED;
     }
 
-    auto entry = reinterpret_cast<dng_status_v1 (DNG_ABI_CALL *)(const dng_host_api_v1*, dng_module_api_v1*)>(sym);
+    auto entry = reinterpret_cast<dng_status_v1 (DNG_ABI_CALL *)(const dng_host_api_v1*, dng_module_api_v2*)>(sym);
 #endif
 
-    // Zero output before fill and provide header defaults (caller-owned size/version handshake).
-    ::memset(outApi, 0, sizeof(*outApi));
-    outApi->header.struct_size = sizeof(*outApi);
-    outApi->header.abi_version = DNG_ABI_VERSION_V1;
+    ModuleApiScratchBufferV2* scratch = static_cast<ModuleApiScratchBufferV2*>(
+        host->alloc(host->user, sizeof(ModuleApiScratchBufferV2), alignof(ModuleApiScratchBufferV2)));
+    if (!scratch)
+    {
+#if DNG_PLATFORM_WINDOWS
+        ::FreeLibrary(lib);
+#else
+        ::dlclose(lib);
+#endif
+        return DNG_STATUS_OUT_OF_MEMORY;
+    }
 
-    const dng_status_v1 status = entry(host, outApi);
+    ::memset(scratch, 0, sizeof(*scratch));
+    for (dng_u32 i = 0u; i < kModuleApiScratchCanaryCount; ++i)
+    {
+        scratch->tail_canary[i] = kModuleApiScratchCanary;
+    }
+    scratch->api.header.struct_size = sizeof(scratch->api);
+    scratch->api.header.abi_version = DNG_MODULE_API_VERSION_V2;
+
+    const dng_status_v1 status = entry(host, &scratch->api);
+
+    bool scratch_intact = true;
+    for (dng_u32 i = 0u; i < kModuleApiScratchCanaryCount; ++i)
+    {
+        if (scratch->tail_canary[i] != kModuleApiScratchCanary)
+        {
+            scratch_intact = false;
+            break;
+        }
+    }
+
+    if (!scratch_intact)
+    {
+        Log(host, 1u, "Module entrypoint overwrote the ABI scratch buffer");
+#if DNG_PLATFORM_WINDOWS
+        ::FreeLibrary(lib);
+#else
+        ::dlclose(lib);
+#endif
+        host->free(host->user, scratch, sizeof(ModuleApiScratchBufferV2), alignof(ModuleApiScratchBufferV2));
+        return DNG_STATUS_UNSUPPORTED;
+    }
+
     if (status != DNG_STATUS_OK)
     {
 #if DNG_PLATFORM_WINDOWS
@@ -380,10 +429,11 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
 #else
         ::dlclose(lib);
 #endif
+        host->free(host->user, scratch, sizeof(ModuleApiScratchBufferV2), alignof(ModuleApiScratchBufferV2));
         return status;
     }
 
-    const dng_status_v1 api_ok = ValidateModuleApiV1(outApi, host);
+    const dng_status_v1 api_ok = ValidateModuleApiV2(&scratch->api, host);
     if (api_ok != DNG_STATUS_OK)
     {
         Log(host, 1u, "Module returned an invalid API table");
@@ -392,10 +442,12 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
 #else
         ::dlclose(lib);
 #endif
-        ::memset(outApi, 0, sizeof(*outApi));
+        host->free(host->user, scratch, sizeof(ModuleApiScratchBufferV2), alignof(ModuleApiScratchBufferV2));
         return api_ok;
     }
 
+    *outApi = scratch->api;
+    host->free(host->user, scratch, sizeof(ModuleApiScratchBufferV2), alignof(ModuleApiScratchBufferV2));
     m_handle = lib;
     return DNG_STATUS_OK;
 }
