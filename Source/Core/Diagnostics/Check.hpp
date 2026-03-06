@@ -84,8 +84,13 @@
 // ----------------------------------------------------------------------------
 #if defined(DNG_DEFINE_MINIMAL_ASSERT) && !defined(DNG_ASSERT)
 #  if DNG_DEBUG
-#    define DNG_ASSERT(cond) do { if(!(cond)) { DNG_INTERNAL_DEBUG_BREAK(); } } while(0)
+#    define DNG_ASSERT_FALLBACK_EXPAND(x) x
+#    define DNG_ASSERT_FALLBACK_GET_MACRO(_1,_2,NAME,...) NAME
+#    define DNG_ASSERT_FALLBACK_1(cond) do { if(!(cond)) { DNG_INTERNAL_DEBUG_BREAK(); } } while(0)
+#    define DNG_ASSERT_FALLBACK_2(cond, msg) do { if(!(cond)) { DNG_INTERNAL_DEBUG_BREAK(); } } while(0)
+#    define DNG_ASSERT(...) \
+        DNG_ASSERT_FALLBACK_EXPAND(DNG_ASSERT_FALLBACK_GET_MACRO(__VA_ARGS__, DNG_ASSERT_FALLBACK_2, DNG_ASSERT_FALLBACK_1)(__VA_ARGS__))
 #  else
-#    define DNG_ASSERT(cond) ((void)0)
+#    define DNG_ASSERT(...) ((void)0)
 #  endif
 #endif

@@ -17,9 +17,10 @@
 //           primarily by GuardAllocator.
 // ============================================================================
 
-#include "Core/CoreMinimal.hpp"
-#include "Core/Memory/Alignment.hpp"
+#include "Core/Platform/PlatformDefines.hpp"
 #include "Core/Diagnostics/Check.hpp"
+#include "Core/Logger.hpp"
+#include "Core/Memory/Alignment.hpp"
 
 // ------------------------------------------------------------------------
 // Platform includes (minimal)
