@@ -35,33 +35,72 @@ int RunJobsSmoke()
 {
     using namespace dng::jobs;
 
+    const auto isReset = [](const JobsSystemState& state) noexcept
+    {
+        const JobsCaps caps = QueryCaps(state);
+        return !state.isInitialized &&
+               state.backend == JobsSystemBackend::Null &&
+               caps.determinismMode == dng::DeterminismMode::Unknown &&
+               caps.threadSafety == dng::ThreadSafetyMode::Unknown &&
+               !caps.stableSubmissionOrder;
+    };
+
     JobsSystemState uninitialized{};
-    const JobsCaps uninitCaps = QueryCaps(uninitialized);
-    if (uninitCaps.determinismMode != dng::DeterminismMode::Unknown ||
-        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
-        uninitCaps.stableSubmissionOrder)
+    if (!isReset(uninitialized))
     {
         return 7;
     }
+
+    JobsSystemConfig config{};
 
     NullJobs nullBackendForValidation{};
     JobsInterface brokenInterface = MakeNullJobsInterface(nullBackendForValidation);
     brokenInterface.vtable.getCaps = nullptr;
     JobsSystemState rejected{};
-    if (InitJobsSystemWithInterface(rejected, brokenInterface, JobsSystemBackend::External))
+    if (!InitJobsSystem(rejected, config))
     {
         return 8;
     }
+    if (InitJobsSystemWithInterface(rejected, brokenInterface))
+    {
+        return 9;
+    }
+    if (!isReset(rejected))
+    {
+        return 10;
+    }
+
+    JobsSystemConfig rejectedConfig{};
+    rejectedConfig.backend = JobsSystemBackend::External;
+    if (!InitJobsSystem(rejected, config))
+    {
+        return 11;
+    }
+    if (InitJobsSystem(rejected, rejectedConfig))
+    {
+        return 12;
+    }
+    if (!isReset(rejected))
+    {
+        return 13;
+    }
 
     JobsSystemState state{};
-    JobsSystemConfig config{};
-
     if (!InitJobsSystem(state, config))
     {
         return 1;
     }
 
-    const JobsCaps caps = QueryCaps(state.interface);
+    const NullJobs::Stats& initialStats = state.nullBackend.GetStats();
+    if (initialStats.submitCalls != 0U ||
+        initialStats.submitBatchCalls != 0U ||
+        initialStats.parallelForCalls != 0U ||
+        initialStats.jobsExecuted != 0U)
+    {
+        return 9;
+    }
+
+    const JobsCaps caps = QueryCaps(state);
     if (!caps.deterministic ||
         caps.multithreaded ||
         caps.determinismMode != dng::DeterminismMode::Replay ||
@@ -85,6 +124,15 @@ int RunJobsSmoke()
         return 2;
     }
 
+    const NullJobs::Stats& afterSubmitStats = state.nullBackend.GetStats();
+    if (afterSubmitStats.submitCalls != 1U ||
+        afterSubmitStats.submitBatchCalls != 0U ||
+        afterSubmitStats.parallelForCalls != 0U ||
+        afterSubmitStats.jobsExecuted != 1U)
+    {
+        return 10;
+    }
+
     JobDesc batch[3];
     for (dng::u32 i = 0; i < 3; ++i)
     {
@@ -96,6 +144,15 @@ int RunJobsSmoke()
     if (!batchCounter.IsComplete() || counter != 4)
     {
         return 3;
+    }
+
+    const NullJobs::Stats& afterBatchStats = state.nullBackend.GetStats();
+    if (afterBatchStats.submitCalls != 1U ||
+        afterBatchStats.submitBatchCalls != 1U ||
+        afterBatchStats.parallelForCalls != 0U ||
+        afterBatchStats.jobsExecuted != 4U)
+    {
+        return 11;
     }
 
     dng::u32 parallelSum = 0;
@@ -111,9 +168,28 @@ int RunJobsSmoke()
         return 4;
     }
 
+    const NullJobs::Stats& afterParallelForStats = state.nullBackend.GetStats();
+    if (afterParallelForStats.submitCalls != 1U ||
+        afterParallelForStats.submitBatchCalls != 1U ||
+        afterParallelForStats.parallelForCalls != 1U ||
+        afterParallelForStats.jobsExecuted != 8U)
+    {
+        return 12;
+    }
+
     WaitForCounter(state, jobCounter);
     WaitForCounter(state, batchCounter);
     WaitForCounter(state, pfCounter);
+
+    state.nullBackend.ResetStats();
+    const NullJobs::Stats& resetStats = state.nullBackend.GetStats();
+    if (resetStats.submitCalls != 0U ||
+        resetStats.submitBatchCalls != 0U ||
+        resetStats.parallelForCalls != 0U ||
+        resetStats.jobsExecuted != 0U)
+    {
+        return 13;
+    }
 
     ShutdownJobsSystem(state);
     return 0;

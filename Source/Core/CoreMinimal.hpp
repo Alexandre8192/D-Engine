@@ -1,25 +1,20 @@
-// =============================
-// CoreMinimal.h
-// =============================
+// ============================================================================
+// D-Engine - Source/Core/CoreMinimal.hpp
+// ----------------------------------------------------------------------------
+// Purpose : Publish the smallest stable umbrella include for files that only
+//           need platform/compiler flags, canonical types, and basic macros.
+// Contract: No runtime systems, no logging, no timers, and no memory subsystem
+//           abstractions are pulled in transitively. This header must remain
+//           self-contained and side-effect free.
+// Notes   : Use this only when a translation unit genuinely needs the shared
+//           low-level baseline. Higher-level facilities such as Logger,
+//           allocators, math, and timing must be included explicitly.
+// ============================================================================
+
 #pragma once
 
-// This header is the minimal set of includes that any file in the engine can include safely.
-// It is meant to avoid having to include every small file manually.
-// Only headers with ZERO dependencies and stable purpose should be included here.
-//
-// Intent: Cross-platform, lightweight, no side effects, no runtime logic.
-
-#include "Core/Platform/PlatformDefines.hpp"	// Defines platform flags (Windows, Linux, 64-bit, etc.)
-#include "Core/Platform/PlatformCompiler.hpp"	// Detects compiler and defines FORCEINLINE etc.
-#include "Core/Platform/PlatformTypes.hpp"		// Platform pointer-size-safe types (SIZE_T, PTRINT, etc.)
-#include "Core/Platform/PlatformMacros.hpp"		// Likely, Unlikely, check/assert macros
-#include "Core/Types.hpp"						// Core typedefs (int32, float32, etc.)
-#include "Core/Logger.hpp"						// Basic logging system (safe for all modules)
-#include "Core/Timer.hpp"						// Simple stopwatch and timing utilities
-
-// Memory subsystem - core utilities only (other allocators are opt-in)
-#include "Core/Memory/Alignment.hpp"		// Alignment utilities (constexpr, zero dependencies)
-#include "Core/Memory/Allocator.hpp"		// Core allocator interface and AllocatorRef
-
-// Other includes should be added only if they are minimal and always needed
+#include "Core/Platform/PlatformDefines.hpp"
+#include "Core/Platform/PlatformCompiler.hpp"
+#include "Core/Platform/PlatformMacros.hpp"
+#include "Core/Types.hpp"
 

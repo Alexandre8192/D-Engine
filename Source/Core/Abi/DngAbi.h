@@ -6,6 +6,8 @@
 //           with explicit calling/export macros; thread-safety and ownership
 //           defined by higher-level APIs; ASCII-only.
 // Notes   : ABI v1 is frozen once published. Do not modify existing v1 entries.
+//           The `abi_version` field in dng_abi_header_v1 is interpreted by the
+//           containing contract; not every table in this codebase uses `v1`.
 // ============================================================================
 #ifndef DNG_ABI_DNG_ABI_H
 #define DNG_ABI_DNG_ABI_H
@@ -15,23 +17,11 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include "Core/Platform/PlatformCAbi.h"
 
 // Platform exports and calling convention ------------------------------------------------
-#if defined(_WIN32) || defined(_WIN64)
-    #define DNG_ABI_CALL __cdecl
-    #if defined(DNG_ABI_EXPORTS)
-        #define DNG_ABI_API __declspec(dllexport)
-    #else
-        #define DNG_ABI_API __declspec(dllimport)
-    #endif
-#else
-    #define DNG_ABI_CALL
-    #if defined(__GNUC__) || defined(__clang__)
-        #define DNG_ABI_API __attribute__((visibility("default")))
-    #else
-        #define DNG_ABI_API
-    #endif
-#endif
+#define DNG_ABI_CALL DNG_CABI_CALL
+#define DNG_ABI_API  DNG_CABI_API
 
 // Fixed-width primitive aliases -----------------------------------------------------------
 typedef uint8_t  dng_u8;
@@ -45,7 +35,7 @@ enum { DNG_ABI_VERSION_V1 = 1u };
 
 typedef struct dng_abi_header_v1 {
     dng_u32 struct_size; // Caller sets to sizeof(the containing struct) before use.
-    dng_u32 abi_version; // Must equal DNG_ABI_VERSION_V1 for v1 tables.
+    dng_u32 abi_version; // Version tag defined by the containing ABI contract.
 } dng_abi_header_v1;
 
 typedef dng_u32 dng_status_v1;

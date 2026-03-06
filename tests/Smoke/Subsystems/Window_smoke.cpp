@@ -4,33 +4,63 @@ int RunWindowSmoke()
 {
     using namespace dng::win;
 
+    const auto isReset = [](const WindowSystemState& state) noexcept
+    {
+        const WindowCaps caps = QueryCaps(state);
+        return !state.isInitialized &&
+               state.backend == WindowSystemBackend::Null &&
+               caps.determinism == dng::DeterminismMode::Unknown &&
+               caps.threadSafety == dng::ThreadSafetyMode::Unknown &&
+               !caps.stableEventOrder;
+    };
+
     WindowSystemState uninitialized{};
-    const WindowCaps uninitCaps = QueryCaps(uninitialized);
-    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
-        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
-        uninitCaps.stableEventOrder)
+    if (!isReset(uninitialized))
     {
         return 7;
     }
+
+    WindowSystemConfig config{};
 
     NullWindow nullBackendForValidation{};
     WindowInterface brokenInterface = MakeNullWindowInterface(nullBackendForValidation);
     brokenInterface.vtable.getCaps = nullptr;
     WindowSystemState rejected{};
-    if (InitWindowSystemWithInterface(rejected, brokenInterface, WindowSystemBackend::External))
+    if (!InitWindowSystem(rejected, config))
     {
         return 8;
     }
+    if (InitWindowSystemWithInterface(rejected, brokenInterface))
+    {
+        return 9;
+    }
+    if (!isReset(rejected))
+    {
+        return 10;
+    }
+
+    WindowSystemConfig rejectedConfig{};
+    rejectedConfig.backend = WindowSystemBackend::External;
+    if (!InitWindowSystem(rejected, config))
+    {
+        return 11;
+    }
+    if (InitWindowSystem(rejected, rejectedConfig))
+    {
+        return 12;
+    }
+    if (!isReset(rejected))
+    {
+        return 13;
+    }
 
     WindowSystemState state{};
-    WindowSystemConfig config{};
-
     if (!InitWindowSystem(state, config))
     {
         return 1;
     }
 
-    const WindowCaps caps = QueryCaps(state.interface);
+    const WindowCaps caps = QueryCaps(state);
     if (caps.determinism != dng::DeterminismMode::Replay ||
         caps.threadSafety != dng::ThreadSafetyMode::ExternalSync ||
         !caps.stableEventOrder)

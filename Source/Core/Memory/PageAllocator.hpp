@@ -17,9 +17,10 @@
 //           primarily by GuardAllocator.
 // ============================================================================
 
-#include "Core/CoreMinimal.hpp"
-#include "Core/Memory/Alignment.hpp"
+#include "Core/Platform/PlatformDefines.hpp"
 #include "Core/Diagnostics/Check.hpp"
+#include "Core/Logger.hpp"
+#include "Core/Memory/Alignment.hpp"
 
 // ------------------------------------------------------------------------
 // Platform includes (minimal)
@@ -61,7 +62,7 @@ namespace memory
     static size_t cached = 0;
         if (cached == 0)
         {
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
             SYSTEM_INFO sysInfo{};
             ::GetSystemInfo(&sysInfo);
             cached = static_cast<size_t>(sysInfo.dwPageSize);
@@ -96,7 +97,7 @@ namespace memory
             return nullptr;
         }
 
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
         void* ptr = ::VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_NOACCESS);
         if (!ptr)
         {
@@ -136,7 +137,7 @@ namespace memory
         DNG_ASSERT(::dng::core::IsAligned<std::uintptr_t>(reinterpret_cast<std::uintptr_t>(ptr), pageSize),
             "Commit() expects a page-aligned pointer");
 
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
         void* result = ::VirtualAlloc(ptr, size, MEM_COMMIT, PAGE_READWRITE);
         if (!result)
         {
@@ -171,7 +172,7 @@ namespace memory
         DNG_ASSERT(::dng::core::IsAligned<std::uintptr_t>(reinterpret_cast<std::uintptr_t>(ptr), pageSize),
             "Decommit() expects a page-aligned pointer");
 
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
         if (!::VirtualFree(ptr, size, MEM_DECOMMIT))
         {
             DNG_LOG_ERROR(DNG_PAGE_ALLOCATOR_LOG_CATEGORY, "Decommit() failed (Windows): {}", ::GetLastError());
@@ -209,7 +210,7 @@ namespace memory
         DNG_ASSERT(::dng::core::IsAligned<std::uintptr_t>(reinterpret_cast<std::uintptr_t>(ptr), pageSize),
             "Release() expects a page-aligned pointer");
 
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
         if (!::VirtualFree(ptr, 0, MEM_RELEASE))
         {
             DNG_LOG_ERROR(DNG_PAGE_ALLOCATOR_LOG_CATEGORY, "Release() failed (Windows): {}", ::GetLastError());

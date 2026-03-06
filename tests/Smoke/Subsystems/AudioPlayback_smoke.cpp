@@ -1,5 +1,6 @@
 #include "Core/Audio/AudioSystem.hpp"
 #include "Core/Contracts/FileSystem.hpp"
+#include "Core/Platform/PlatformCrt.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -37,15 +38,7 @@ namespace
         }
 
         std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-        if (fopen_s(&file, path, "wb") != 0)
-        {
-            file = nullptr;
-        }
-#else
-        file = std::fopen(path, "wb");
-#endif
-        if (file == nullptr)
+        if (!dng::platform::OpenFileWriteBinary(path, file))
         {
             return false;
         }
@@ -162,15 +155,7 @@ namespace
             }
 
             std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-            if (fopen_s(&file, cPath, "rb") != 0)
-            {
-                file = nullptr;
-            }
-#else
-            file = std::fopen(cPath, "rb");
-#endif
-            if (file == nullptr)
+            if (!dng::platform::OpenFileReadBinary(cPath, file))
             {
                 return dng::fs::FsStatus::NotFound;
             }
@@ -189,15 +174,7 @@ namespace
             }
 
             std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-            if (fopen_s(&file, cPath, "rb") != 0)
-            {
-                file = nullptr;
-            }
-#else
-            file = std::fopen(cPath, "rb");
-#endif
-            if (file == nullptr)
+            if (!dng::platform::OpenFileReadBinary(cPath, file))
             {
                 return dng::fs::FsStatus::NotFound;
             }
@@ -237,15 +214,7 @@ namespace
             }
 
             std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-            if (fopen_s(&file, cPath, "rb") != 0)
-            {
-                file = nullptr;
-            }
-#else
-            file = std::fopen(cPath, "rb");
-#endif
-            if (file == nullptr)
+            if (!dng::platform::OpenFileReadBinary(cPath, file))
             {
                 return dng::fs::FsStatus::NotFound;
             }
@@ -299,15 +268,7 @@ namespace
             }
 
             std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-            if (fopen_s(&file, cPath, "rb") != 0)
-            {
-                file = nullptr;
-            }
-#else
-            file = std::fopen(cPath, "rb");
-#endif
-            if (file == nullptr)
+            if (!dng::platform::OpenFileReadBinary(cPath, file))
             {
                 return dng::fs::FsStatus::NotFound;
             }

@@ -49,12 +49,14 @@
     <ClInclude Include="Source\Core\Memory\ThreadSafety.hpp" />
     <ClInclude Include="Source\Core\Memory\TrackingAllocator.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformCompiler.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformCrt.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformDefines.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformMacros.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformProcess.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformTypes.hpp" />
+    <ClInclude Include="Source\Core\Platform\WindowsApi.hpp" />
     <ClInclude Include="Source\Core\Containers\StdAliases.hpp" />
     <ClInclude Include="Source\Core\Simd\Vec4.hpp" />
-    <ClInclude Include="Source\Core\Timer.hpp" />
     <ClInclude Include="Source\Core\Types.hpp" />
     <ClInclude Include="Source\Core\Math\Math.hpp" />
     <ClInclude Include="Source\Core\Math\Vector.hpp" />
@@ -63,8 +65,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp" />
+    <ClCompile Include="Source\Core\Audio\AudioSystem.cpp" />
     <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp" />
-    <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp" />
+    <ClCompile Include="Source\Core\Runtime\CoreRuntime.cpp" />
+    <ClCompile Include="Source\Core\Memory\MemorySystem.cpp" />
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp" />
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
     <ClCompile Include="Source\Core\Interop\ModuleLoader.cpp" />
@@ -89,7 +93,9 @@
     <ClCompile Include="tests\SelfContain\Renderer_BasicForwardRenderer_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\Renderer_RendererSystem_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\Audio_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\CoreMinimal_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\CoreRuntime_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\MemorySystem_header_only.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\CrowdRendererSubmission_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_smoke.cpp" />

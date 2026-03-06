@@ -60,9 +60,6 @@
     <ClInclude Include="Source\Core\Runtime\CoreRuntime.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Timer.hpp">
-      <Filter>Source\Core</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Core\Types.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
@@ -105,13 +102,22 @@
     <ClInclude Include="Source\Core\Platform\PlatformCompiler.hpp">
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Platform\PlatformCrt.hpp">
+      <Filter>Source\Core\Platform</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Platform\PlatformDefines.hpp">
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\Platform\PlatformMacros.hpp">
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Core\Platform\PlatformProcess.hpp">
+      <Filter>Source\Core\Platform</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Core\Platform\PlatformTypes.hpp">
+      <Filter>Source\Core\Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Core\Platform\WindowsApi.hpp">
       <Filter>Source\Core\Platform</Filter>
     </ClInclude>
     <ClInclude Include="Source\Core\Containers\StdAliases.hpp">
@@ -152,10 +158,16 @@
     <ClCompile Include="Source\Core\Memory\Allocator.cpp">
       <Filter>Source\Core\Memory</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Core\Audio\AudioSystem.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp">
+    <ClCompile Include="Source\Core\Runtime\CoreRuntime.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Core\Memory\MemorySystem.cpp">
       <Filter>Source\Core\Memory</Filter>
     </ClCompile>
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp">
@@ -209,7 +221,13 @@
     <ClCompile Include="tests\SelfContain\Audio_header_only.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
+    <ClCompile Include="tests\SelfContain\CoreMinimal_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
     <ClCompile Include="tests\SelfContain\CoreRuntime_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\SelfContain\MemorySystem_header_only.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp">
