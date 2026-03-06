@@ -10,7 +10,7 @@ int RunRendererSystemBasicForwardRendererSmoke()
     RendererInterface iface = MakeBasicForwardRendererInterface(backend);
 
     RendererSystemState state{};
-    if (!InitRendererSystemWithInterface(state, iface, RendererSystemBackend::External))
+    if (!InitRendererSystemWithInterface(state, iface))
     {
         return 1;
     }

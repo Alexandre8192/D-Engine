@@ -35,27 +35,57 @@ int RunJobsSmoke()
 {
     using namespace dng::jobs;
 
+    const auto isReset = [](const JobsSystemState& state) noexcept
+    {
+        const JobsCaps caps = QueryCaps(state);
+        return !state.isInitialized &&
+               state.backend == JobsSystemBackend::Null &&
+               caps.determinismMode == dng::DeterminismMode::Unknown &&
+               caps.threadSafety == dng::ThreadSafetyMode::Unknown &&
+               !caps.stableSubmissionOrder;
+    };
+
     JobsSystemState uninitialized{};
-    const JobsCaps uninitCaps = QueryCaps(uninitialized);
-    if (uninitCaps.determinismMode != dng::DeterminismMode::Unknown ||
-        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
-        uninitCaps.stableSubmissionOrder)
+    if (!isReset(uninitialized))
     {
         return 7;
     }
+
+    JobsSystemConfig config{};
 
     NullJobs nullBackendForValidation{};
     JobsInterface brokenInterface = MakeNullJobsInterface(nullBackendForValidation);
     brokenInterface.vtable.getCaps = nullptr;
     JobsSystemState rejected{};
-    if (InitJobsSystemWithInterface(rejected, brokenInterface, JobsSystemBackend::External))
+    if (!InitJobsSystem(rejected, config))
     {
         return 8;
     }
+    if (InitJobsSystemWithInterface(rejected, brokenInterface))
+    {
+        return 9;
+    }
+    if (!isReset(rejected))
+    {
+        return 10;
+    }
+
+    JobsSystemConfig rejectedConfig{};
+    rejectedConfig.backend = JobsSystemBackend::External;
+    if (!InitJobsSystem(rejected, config))
+    {
+        return 11;
+    }
+    if (InitJobsSystem(rejected, rejectedConfig))
+    {
+        return 12;
+    }
+    if (!isReset(rejected))
+    {
+        return 13;
+    }
 
     JobsSystemState state{};
-    JobsSystemConfig config{};
-
     if (!InitJobsSystem(state, config))
     {
         return 1;
@@ -70,7 +100,7 @@ int RunJobsSmoke()
         return 9;
     }
 
-    const JobsCaps caps = QueryCaps(state.interface);
+    const JobsCaps caps = QueryCaps(state);
     if (!caps.deterministic ||
         caps.multithreaded ||
         caps.determinismMode != dng::DeterminismMode::Replay ||

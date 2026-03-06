@@ -38,42 +38,59 @@ namespace dng::win
         bool                  isInitialized = false;
     };
 
-    [[nodiscard]] inline bool InitWindowSystemWithInterface(WindowSystemState& state,
-                                                            WindowInterface interface,
-                                                            WindowSystemBackend backend) noexcept
+    namespace detail
     {
-        if (interface.userData == nullptr ||
-            interface.vtable.getCaps == nullptr ||
-            interface.vtable.createWindow == nullptr ||
-            interface.vtable.destroyWindow == nullptr ||
-            interface.vtable.pollEvents == nullptr ||
-            interface.vtable.getSurfaceSize == nullptr)
+        [[nodiscard]] inline bool IsValidWindowSystemInterface(const WindowInterface& interface) noexcept
         {
-            return false;
+            return interface.userData != nullptr &&
+                   interface.vtable.getCaps != nullptr &&
+                   interface.vtable.createWindow != nullptr &&
+                   interface.vtable.destroyWindow != nullptr &&
+                   interface.vtable.pollEvents != nullptr &&
+                   interface.vtable.getSurfaceSize != nullptr;
         }
 
-        state.interface     = interface;
-        state.backend       = backend;
-        state.isInitialized = true;
-        return true;
+        inline void ResetWindowSystemState(WindowSystemState& state) noexcept
+        {
+            state = WindowSystemState{};
+        }
+
+        [[nodiscard]] inline bool BindWindowSystemState(WindowSystemState& state,
+                                                        WindowInterface interface,
+                                                        WindowSystemBackend backend) noexcept
+        {
+            if (!IsValidWindowSystemInterface(interface))
+            {
+                return false;
+            }
+
+            state.interface     = interface;
+            state.backend       = backend;
+            state.isInitialized = true;
+            return true;
+        }
+    } // namespace detail
+
+    [[nodiscard]] inline bool InitWindowSystemWithInterface(WindowSystemState& state,
+                                                            WindowInterface interface) noexcept
+    {
+        detail::ResetWindowSystemState(state);
+        return detail::BindWindowSystemState(state, interface, WindowSystemBackend::External);
     }
 
     [[nodiscard]] inline bool InitWindowSystem(WindowSystemState& state,
                                                const WindowSystemConfig& config) noexcept
     {
-        state = WindowSystemState{};
+        detail::ResetWindowSystemState(state);
 
         switch (config.backend)
         {
             case WindowSystemBackend::Null:
             {
                 WindowInterface iface = MakeNullWindowInterface(state.nullBackend);
-                return InitWindowSystemWithInterface(state, iface, WindowSystemBackend::Null);
+                return detail::BindWindowSystemState(state, iface, WindowSystemBackend::Null);
             }
             case WindowSystemBackend::External:
-            {
-                return false; // Must be injected via InitWindowSystemWithInterface.
-            }
             default:
             {
                 return false;
@@ -83,10 +100,7 @@ namespace dng::win
 
     inline void ShutdownWindowSystem(WindowSystemState& state) noexcept
     {
-        state.interface     = WindowInterface{};
-        state.backend       = WindowSystemBackend::Null;
-        state.nullBackend   = NullWindow{};
-        state.isInitialized = false;
+        detail::ResetWindowSystemState(state);
     }
 
     [[nodiscard]] inline WindowStatus CreateWindow(WindowSystemState& state, const WindowDesc& desc, WindowHandle& outHandle) noexcept

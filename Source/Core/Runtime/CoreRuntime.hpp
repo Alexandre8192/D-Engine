@@ -81,7 +81,6 @@ namespace dng::runtime
         const audio::AudioInterface*     audioSystem = nullptr;
         const render::RendererInterface* rendererSystem = nullptr;
         audio::AudioSystemBackend        audioBackend = audio::AudioSystemBackend::External;
-        render::RendererSystemBackend    rendererBackend = render::RendererSystemBackend::External;
     };
 
     struct CoreRuntimeState
@@ -167,7 +166,6 @@ namespace dng::runtime
         const bool initTimeOk = (injected.timeSystem != nullptr)
             ? time::InitTimeSystemWithInterface(state.time,
                                                 *injected.timeSystem,
-                                                time::TimeSystemBackend::External,
                                                 config.time.primeOnInit)
             : time::InitTimeSystem(state.time, config.time);
         if (!initTimeOk)
@@ -179,8 +177,7 @@ namespace dng::runtime
 
         const bool initJobsOk = (injected.jobsSystem != nullptr)
             ? jobs::InitJobsSystemWithInterface(state.jobs,
-                                                *injected.jobsSystem,
-                                                jobs::JobsSystemBackend::External)
+                                                *injected.jobsSystem)
             : jobs::InitJobsSystem(state.jobs, config.jobs);
         if (!initJobsOk)
         {
@@ -191,8 +188,7 @@ namespace dng::runtime
 
         const bool initInputOk = (injected.inputSystem != nullptr)
             ? input::InitInputSystemWithInterface(state.input,
-                                                  *injected.inputSystem,
-                                                  input::InputSystemBackend::External)
+                                                  *injected.inputSystem)
             : input::InitInputSystem(state.input, config.input);
         if (!initInputOk)
         {
@@ -203,8 +199,7 @@ namespace dng::runtime
 
         const bool initWindowOk = (injected.windowSystem != nullptr)
             ? win::InitWindowSystemWithInterface(state.window,
-                                                 *injected.windowSystem,
-                                                 win::WindowSystemBackend::External)
+                                                 *injected.windowSystem)
             : win::InitWindowSystem(state.window, config.window);
         if (!initWindowOk)
         {
@@ -215,8 +210,7 @@ namespace dng::runtime
 
         const bool initFileSystemOk = (injected.fileSystem != nullptr)
             ? fs::InitFileSystemSystemWithInterface(state.fileSystem,
-                                                    *injected.fileSystem,
-                                                    fs::FileSystemSystemBackend::External)
+                                                    *injected.fileSystem)
             : fs::InitFileSystemSystem(state.fileSystem, config.fileSystem);
         if (!initFileSystemOk)
         {
@@ -239,8 +233,7 @@ namespace dng::runtime
 
         const bool initRendererOk = (injected.rendererSystem != nullptr)
             ? render::InitRendererSystemWithInterface(state.renderer,
-                                                      *injected.rendererSystem,
-                                                      injected.rendererBackend)
+                                                      *injected.rendererSystem)
             : render::InitRendererSystem(state.renderer, config.renderer);
         if (!initRendererOk)
         {

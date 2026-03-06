@@ -19,7 +19,7 @@ int main()
     RendererInterface iface = MakeBasicForwardRendererInterface(backend);
 
     RendererSystemState systemState{};
-    if (!InitRendererSystemWithInterface(systemState, iface, RendererSystemBackend::External))
+    if (!InitRendererSystemWithInterface(systemState, iface))
     {
         return 1;
     }

@@ -21,10 +21,8 @@ namespace dng::render
 {
     enum class RendererSystemBackend : dng::u8
     {
-        Null = 0,
-        External = 1,
-        Forward = External
-        // `Forward` is kept as a compatibility alias for older injected callsites.
+        Null,
+        External
     };
 
     struct RendererSystemConfig
@@ -41,31 +39,50 @@ namespace dng::render
         bool                  isInitialized = false;
     };
 
-    // Purpose : Initialize the system from a caller-provided renderer interface.
-    // Contract: Does not allocate or throw. Caller retains ownership of the
-    //           backend object referenced by `interface`. State must not outlive it.
-    // Notes   : Preferred entry point for modules to plug into Core without
-    //           adding new dependencies.
-    [[nodiscard]] inline bool InitRendererSystemWithInterface(RendererSystemState& state,
-                                                             RendererInterface interface,
-                                                             RendererSystemBackend backend) noexcept
+    namespace detail
     {
-        state              = RendererSystemState{};
-        if (interface.userData == nullptr ||
-            interface.vtable.getCaps == nullptr ||
-            interface.vtable.beginFrame == nullptr ||
-            interface.vtable.submitInstances == nullptr ||
-            interface.vtable.endFrame == nullptr ||
-            interface.vtable.resizeSurface == nullptr)
+        [[nodiscard]] inline bool IsValidRendererSystemInterface(const RendererInterface& interface) noexcept
         {
-            return false;
+            return interface.userData != nullptr &&
+                   interface.vtable.getCaps != nullptr &&
+                   interface.vtable.beginFrame != nullptr &&
+                   interface.vtable.submitInstances != nullptr &&
+                   interface.vtable.endFrame != nullptr &&
+                   interface.vtable.resizeSurface != nullptr;
         }
 
-        state.interface    = interface;
-        state.backend      = backend;
-        state.isInitialized = true;
-        return true;
+        inline void ResetRendererSystemState(RendererSystemState& state) noexcept
+        {
+            state = RendererSystemState{};
+        }
 
+        [[nodiscard]] inline bool BindRendererSystemState(RendererSystemState& state,
+                                                          RendererInterface interface,
+                                                          RendererSystemBackend backend) noexcept
+        {
+            if (!IsValidRendererSystemInterface(interface))
+            {
+                return false;
+            }
+
+            state.interface      = interface;
+            state.backend        = backend;
+            state.isInitialized  = true;
+            return true;
+        }
+    } // namespace detail
+
+    // Purpose : Initialize the system from a caller-provided renderer interface.
+    // Contract: Does not allocate or throw. Caller retains ownership of the
+    //           injected backend object referenced by `interface`. State must
+    //           not outlive it.
+    // Notes   : Preferred entry point for external modules to plug into Core without
+    //           adding new dependencies.
+    [[nodiscard]] inline bool InitRendererSystemWithInterface(RendererSystemState& state,
+                                                              RendererInterface interface) noexcept
+    {
+        detail::ResetRendererSystemState(state);
+        return detail::BindRendererSystemState(state, interface, RendererSystemBackend::External);
     }
 
     // Purpose : Initialize the renderer system with the requested backend.
@@ -75,13 +92,16 @@ namespace dng::render
     [[nodiscard]] inline bool InitRendererSystem(RendererSystemState& state,
                                                  const RendererSystemConfig& config) noexcept
     {
+        detail::ResetRendererSystemState(state);
+
         switch (config.backend)
         {
             case RendererSystemBackend::Null:
             {
                 RendererInterface iface = MakeNullRendererInterface(state.nullBackend);
-                return InitRendererSystemWithInterface(state, iface, RendererSystemBackend::Null);
+                return detail::BindRendererSystemState(state, iface, RendererSystemBackend::Null);
             }
+            case RendererSystemBackend::External:
             default:
             {
                 // Non-null renderers are injected via InitRendererSystemWithInterface.
@@ -96,10 +116,7 @@ namespace dng::render
     // Notes   : Future backends can release API-specific resources here.
     inline void ShutdownRendererSystem(RendererSystemState& state) noexcept
     {
-        state.interface     = RendererInterface{};
-        state.backend       = RendererSystemBackend::Null;
-        state.nullBackend   = NullRenderer{};
-        state.isInitialized = false;
+        detail::ResetRendererSystemState(state);
     }
 
     // Purpose : Drive the active backend for a single frame.

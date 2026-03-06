@@ -210,7 +210,6 @@ int RunCoreRuntimeSmoke()
         injected.audioSystem = &audioIface;
         injected.audioBackend = dng::audio::AudioSystemBackend::External;
         injected.rendererSystem = &rendererIface;
-        injected.rendererBackend = dng::render::RendererSystemBackend::External;
 
         if (InitCoreRuntime(injectedState, config, injected) != CoreRuntimeStatus::Ok)
         {
