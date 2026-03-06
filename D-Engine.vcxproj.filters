@@ -155,7 +155,7 @@
     <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp">
+    <ClCompile Include="Source\Core\Memory\MemorySystem.cpp">
       <Filter>Source\Core\Memory</Filter>
     </ClCompile>
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp">
@@ -213,6 +213,9 @@
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\SelfContain\CoreRuntime_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\SelfContain\MemorySystem_header_only.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp">

@@ -37,6 +37,9 @@ static_assert(offsetof(dng_window_api_v1, header) == 0u, "dng_window_api_v1.head
 static_assert(sizeof(((dng_window_api_v1*)0)->header) == sizeof(dng_abi_header_v1), "dng_window_api_v1.header size");
 static_assert(_Alignof(dng_window_api_v1) == _Alignof(void*), "dng_window_api_v1 align");
 
+static_assert(offsetof(dng_module_interface_v1, interface_name) == 0u, "dng_module_interface_v1.interface_name offset");
+static_assert(_Alignof(dng_module_interface_v1) == _Alignof(void*), "dng_module_interface_v1 align");
+
 static_assert(offsetof(dng_module_api_v1, header) == 0u, "dng_module_api_v1.header offset");
 static_assert(sizeof(((dng_module_api_v1*)0)->header) == sizeof(dng_abi_header_v1), "dng_module_api_v1.header size");
 static_assert(_Alignof(dng_module_api_v1) == _Alignof(void*), "dng_module_api_v1 align");
@@ -53,10 +56,26 @@ int AbiLayout_v1_CompileSentinel(void)
 {
     // Provide a tiny runtime check that struct_size expectations match sizeof.
     const dng_window_api_v1 window_api = { { (dng_u32)sizeof(dng_window_api_v1), DNG_ABI_VERSION_V1 }, NULL, NULL, NULL, NULL, NULL, NULL };
-    const dng_module_api_v1 module_api = { { (dng_u32)sizeof(dng_module_api_v1), DNG_ABI_VERSION_V1 }, { NULL, 0u }, 0u, 0u, 0u, window_api, NULL };
+    const dng_module_interface_v1 interfaces[1] = {
+        { { DNG_MODULE_INTERFACE_NAME_WINDOW, (dng_u32)(sizeof(DNG_MODULE_INTERFACE_NAME_WINDOW) - 1u) },
+          DNG_ABI_VERSION_V1,
+          (const dng_abi_header_v1*)&window_api }
+    };
+    const dng_module_api_v1 module_api = {
+        { (dng_u32)sizeof(dng_module_api_v1), DNG_ABI_VERSION_V1 },
+        { NULL, 0u },
+        0u,
+        0u,
+        0u,
+        NULL,
+        interfaces,
+        1u,
+        NULL
+    };
 
     int ok = 0;
     ok |= (window_api.header.struct_size == sizeof(dng_window_api_v1)) ? 0 : 1;
     ok |= (module_api.header.struct_size == sizeof(dng_module_api_v1)) ? 0 : 1;
+    ok |= (module_api.interface_count == 1u) ? 0 : 1;
     return ok;
 }

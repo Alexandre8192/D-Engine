@@ -13,6 +13,7 @@ static_assert(offsetof(dng_abi_header_v1, abi_version) == sizeof(dng_u32), "abi_
 static_assert(sizeof(dng_abi_header_v1) == sizeof(dng_u32) * 2u, "header size");
 
 static_assert(std::is_pod<dng_str_view_v1>::value, "string view must be POD");
+static_assert(std::is_standard_layout<dng_module_interface_v1>::value, "module interface layout");
 static_assert(std::is_standard_layout<dng_window_api_v1>::value, "window api layout");
 
 int main()

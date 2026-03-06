@@ -8,6 +8,7 @@
 //           Unload. ABI v1 entrypoint name is dngModuleGetApi_v1.
 // ============================================================================
 #include "Core/Interop/ModuleLoader.hpp"
+#include "Core/Abi/DngWindowApi.h"
 #include "Core/Platform/PlatformDefines.hpp"
 
 #if DNG_PLATFORM_WINDOWS
@@ -124,6 +125,77 @@ namespace
         return DNG_STATUS_OK;
     }
 
+    static bool StrViewEquals(const dng_str_view_v1& lhs, const dng_str_view_v1& rhs) noexcept
+    {
+        if (lhs.size != rhs.size)
+        {
+            return false;
+        }
+
+        if (lhs.size == 0u)
+        {
+            return true;
+        }
+
+        if (!lhs.data || !rhs.data)
+        {
+            return false;
+        }
+
+        return ::memcmp(lhs.data, rhs.data, lhs.size) == 0;
+    }
+
+    static bool StrViewEqualsLiteral(const dng_str_view_v1& view, const char* literal) noexcept
+    {
+        if (!literal)
+        {
+            return false;
+        }
+
+        const dng_str_view_v1 rhs{ literal, StrLen32(literal) };
+        return StrViewEquals(view, rhs);
+    }
+
+    static dng_status_v1 ValidateModuleInterfaceV1(const dng_module_interface_v1* entry, const dng_host_api_v1* host) noexcept
+    {
+        if (!entry)
+        {
+            return DNG_STATUS_INVALID_ARG;
+        }
+
+        if (entry->interface_name.size == 0u || entry->interface_name.data == nullptr)
+        {
+            LogIssue(host, "Module interface name invalid");
+            return DNG_STATUS_INVALID_ARG;
+        }
+
+        if (!entry->api)
+        {
+            LogIssue(host, "Module interface api pointer is null");
+            return DNG_STATUS_INVALID_ARG;
+        }
+
+        if (entry->api->struct_size < sizeof(dng_abi_header_v1))
+        {
+            LogIssue(host, "Module interface struct_size invalid");
+            return DNG_STATUS_INVALID_ARG;
+        }
+
+        if (entry->api->abi_version != entry->interface_version)
+        {
+            LogIssue(host, "Module interface version mismatch");
+            return DNG_STATUS_UNSUPPORTED;
+        }
+
+        if (StrViewEqualsLiteral(entry->interface_name, DNG_MODULE_INTERFACE_NAME_WINDOW) &&
+            entry->interface_version == DNG_ABI_VERSION_V1)
+        {
+            return ValidateWindowApiV1(reinterpret_cast<const dng_window_api_v1*>(entry->api), host);
+        }
+
+        return DNG_STATUS_OK;
+    }
+
     static dng_status_v1 ValidateModuleApiV1(const dng_module_api_v1* api, const dng_host_api_v1* host) noexcept
     {
         if (!api)
@@ -148,7 +220,38 @@ namespace
             return DNG_STATUS_INVALID_ARG;
         }
 
-        return ValidateWindowApiV1(&api->window, host);
+        if (api->shutdown && !api->module_ctx)
+        {
+            LogIssue(host, "ModuleApi module_ctx is null");
+            return DNG_STATUS_INVALID_ARG;
+        }
+
+        if ((api->interface_count != 0u) && !api->interfaces)
+        {
+            LogIssue(host, "ModuleApi interface catalogue missing");
+            return DNG_STATUS_INVALID_ARG;
+        }
+
+        for (dng_u32 i = 0u; i < api->interface_count; ++i)
+        {
+            const dng_status_v1 interface_ok = ValidateModuleInterfaceV1(&api->interfaces[i], host);
+            if (interface_ok != DNG_STATUS_OK)
+            {
+                return interface_ok;
+            }
+
+            for (dng_u32 j = i + 1u; j < api->interface_count; ++j)
+            {
+                if (api->interfaces[i].interface_version == api->interfaces[j].interface_version &&
+                    StrViewEquals(api->interfaces[i].interface_name, api->interfaces[j].interface_name))
+                {
+                    LogIssue(host, "ModuleApi duplicate interface export");
+                    return DNG_STATUS_INVALID_ARG;
+                }
+            }
+        }
+
+        return DNG_STATUS_OK;
     }
 
 #if DNG_PLATFORM_WINDOWS
@@ -268,8 +371,6 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     ::memset(outApi, 0, sizeof(*outApi));
     outApi->header.struct_size = sizeof(*outApi);
     outApi->header.abi_version = DNG_ABI_VERSION_V1;
-    outApi->window.header.struct_size = sizeof(outApi->window);
-    outApi->window.header.abi_version = DNG_ABI_VERSION_V1;
 
     const dng_status_v1 status = entry(host, outApi);
     if (status != DNG_STATUS_OK)

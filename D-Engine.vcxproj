@@ -64,7 +64,7 @@
     <ClCompile Include="Source\Core\Memory\Allocator.cpp" />
     <ClCompile Include="Source\Core\Audio\AudioSystem.cpp" />
     <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp" />
-    <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp" />
+    <ClCompile Include="Source\Core\Memory\MemorySystem.cpp" />
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp" />
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
     <ClCompile Include="Source\Core\Interop\ModuleLoader.cpp" />
@@ -91,6 +91,7 @@
     <ClCompile Include="tests\SelfContain\Audio_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\CoreMinimal_header_only.cpp" />
     <ClCompile Include="tests\SelfContain\CoreRuntime_header_only.cpp" />
+    <ClCompile Include="tests\SelfContain\MemorySystem_header_only.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\BasicForwardRenderer_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\CrowdRendererSubmission_smoke.cpp" />
     <ClCompile Include="tests\Smoke\Subsystems\RendererSystem_smoke.cpp" />

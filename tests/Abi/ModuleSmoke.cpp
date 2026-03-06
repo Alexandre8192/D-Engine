@@ -1,4 +1,5 @@
 // Basic smoke test for ABI module loading and Window API calls.
+#include "Core/Interop/ModuleAbi.hpp"
 #include "Core/Interop/ModuleLoader.hpp"
 #include "Core/Interop/WindowAbi.hpp"
 
@@ -74,6 +75,19 @@ int main()
         return 1;
     }
 
+    const dng_window_api_v1* window_api = dng::GetWindowApiV1(module_api);
+    if (!window_api)
+    {
+        printf("Module did not expose dng.window v1\n");
+        return 2;
+    }
+
+    if (dng::FindModuleInterface(module_api, dng::ModuleAbiLiteral("dng.audio"), DNG_ABI_VERSION_V1) != nullptr)
+    {
+        printf("Unexpected audio interface export\n");
+        return 3;
+    }
+
     dng_window_desc_v1 desc = {};
     desc.width = 640u;
     desc.height = 480u;
@@ -87,85 +101,87 @@ int main()
     dng_window_desc_v1 bad_desc = desc;
     bad_desc.flags = 1u;
     dng_window_handle_v1 bad_handle = 0u;
-    status = dng::WindowCreate(module_api.window, &bad_desc, &bad_handle);
+    status = dng::WindowCreate(*window_api, &bad_desc, &bad_handle);
     if (status != DNG_STATUS_INVALID_ARG || bad_handle != 0u)
     {
         printf("Create with invalid flags did not fail as expected: %u\n", (unsigned)status);
-        return 2;
-    }
-
-    status = dng::WindowCreate(module_api.window, &desc, &handle);
-    if (status != DNG_STATUS_OK || handle == 0u)
-    {
-        printf("Create failed: %u\n", (unsigned)status);
-        return 3;
-    }
-
-    dng_window_size_v1 size = {};
-    status = dng::WindowGetSize(module_api.window, handle, &size);
-    if (status != DNG_STATUS_OK || size.width != desc.width || size.height != desc.height)
-    {
-        printf("GetSize failed: %u\n", (unsigned)status);
         return 4;
     }
 
+    status = dng::WindowCreate(*window_api, &desc, &handle);
+    if (status != DNG_STATUS_OK || handle == 0u)
+    {
+        printf("Create failed: %u\n", (unsigned)status);
+        return 5;
+    }
+
+    dng_window_size_v1 size = {};
+    status = dng::WindowGetSize(*window_api, handle, &size);
+    if (status != DNG_STATUS_OK || size.width != desc.width || size.height != desc.height)
+    {
+        printf("GetSize failed: %u\n", (unsigned)status);
+        return 6;
+    }
+
     dng_str_view_v1 new_title = { "Updated", 7u };
-    status = dng::WindowSetTitle(module_api.window, handle, new_title);
+    status = dng::WindowSetTitle(*window_api, handle, new_title);
     if (status != DNG_STATUS_OK)
     {
         printf("SetTitle failed: %u\n", (unsigned)status);
-        return 5;
+        return 7;
     }
 
     // Negative: non-empty title requires non-null pointer.
     dng_str_view_v1 bad_title = { NULL, 1u };
-    status = dng::WindowSetTitle(module_api.window, handle, bad_title);
+    status = dng::WindowSetTitle(*window_api, handle, bad_title);
     if (status != DNG_STATUS_INVALID_ARG)
     {
         printf("SetTitle with invalid view did not fail as expected: %u\n", (unsigned)status);
-        return 6;
+        return 8;
     }
 
-    status = dng::WindowPoll(module_api.window);
+    status = dng::WindowPoll(*window_api);
     if (status != DNG_STATUS_OK)
     {
         printf("Poll failed: %u\n", (unsigned)status);
-        return 7;
+        return 9;
     }
 
-    status = dng::WindowDestroy(module_api.window, handle);
+    status = dng::WindowDestroy(*window_api, handle);
     if (status != DNG_STATUS_OK)
     {
         printf("Destroy failed: %u\n", (unsigned)status);
-        return 8;
+        return 10;
     }
 
     // Negative: window handle is invalid once destroyed.
     dng_window_size_v1 size_after_destroy = {};
-    status = dng::WindowGetSize(module_api.window, handle, &size_after_destroy);
+    status = dng::WindowGetSize(*window_api, handle, &size_after_destroy);
     if (status != DNG_STATUS_INVALID_ARG)
     {
         printf("GetSize after destroy did not fail as expected: %u\n", (unsigned)status);
-        return 9;
+        return 11;
     }
 
-    status = dng::WindowDestroy(module_api.window, handle);
+    status = dng::WindowDestroy(*window_api, handle);
     if (status != DNG_STATUS_INVALID_ARG)
     {
         printf("Destroy twice did not fail as expected: %u\n", (unsigned)status);
-        return 10;
+        return 12;
     }
 
     if (module_api.shutdown)
     {
-        status = module_api.shutdown(module_api.window.ctx, &host);
+        status = module_api.shutdown(module_api.module_ctx, &host);
         if (status != DNG_STATUS_OK)
         {
             printf("Shutdown failed: %u\n", (unsigned)status);
-            return 11;
+            return 13;
         }
         // Shutdown is single-use for dynamically allocated contexts.
-        module_api.window.ctx = NULL;
+        module_api.module_ctx = NULL;
+        module_api.interfaces = NULL;
+        module_api.interface_count = 0u;
         module_api.shutdown = NULL;
     }
 

@@ -12,6 +12,7 @@
 // ============================================================================
 #define DNG_ABI_EXPORTS
 #include "Core/Abi/DngModuleApi.h"
+#include "Core/Abi/DngWindowApi.h"
 
 #include <string.h>
 
@@ -21,6 +22,8 @@ typedef struct NullWindowCtx {
     dng_window_size_v1     size;
     char*                  title;
     dng_u32                title_size;
+    dng_window_api_v1      window_api;
+    dng_module_interface_v1 interface_entry;
 } NullWindowCtx;
 
 // Context and title allocation constants (size and align must match free).
@@ -198,9 +201,16 @@ static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v1* api)
     api->module_version_minor = 0u;
     api->module_version_patch = 0u;
 
+    api->module_ctx = ctx;
+    api->interfaces = &ctx->interface_entry;
+    api->interface_count = 1u;
     api->shutdown = &NullWindow_Shutdown;
 
-    NullWindow_InitWindowApi(ctx, &api->window);
+    NullWindow_InitWindowApi(ctx, &ctx->window_api);
+    ctx->interface_entry.interface_name.data = DNG_MODULE_INTERFACE_NAME_WINDOW;
+    ctx->interface_entry.interface_name.size = NullWindow_StrLen(DNG_MODULE_INTERFACE_NAME_WINDOW);
+    ctx->interface_entry.interface_version = DNG_ABI_VERSION_V1;
+    ctx->interface_entry.api = (const dng_abi_header_v1*)&ctx->window_api;
 }
 
 DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v1(const dng_host_api_v1* host, dng_module_api_v1* out_api)
