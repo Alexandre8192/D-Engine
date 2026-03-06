@@ -8,6 +8,8 @@
 //           must call module_api.shutdown(module_api.module_ctx, host) before
 //           Unload when the module exports shutdown.
 // Notes   : Dynamic loading is slow/cold-path. Thread-safety is caller-managed.
+//           Validation here is intentionally limited to the generic module
+//           catalogue contract; typed subsystem table checks live elsewhere.
 // ============================================================================
 #ifndef DNG_INTEROP_MODULE_LOADER_HPP
 #define DNG_INTEROP_MODULE_LOADER_HPP
