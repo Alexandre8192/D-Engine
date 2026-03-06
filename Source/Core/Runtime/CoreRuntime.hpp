@@ -29,6 +29,7 @@ namespace dng::runtime
     {
         Ok = 0,
         AlreadyInitialized,
+        MemoryConfigConflict,
         TimeInitFailed,
         JobsInitFailed,
         InputInitFailed,
@@ -80,7 +81,7 @@ namespace dng::runtime
         const audio::AudioInterface*     audioSystem = nullptr;
         const render::RendererInterface* rendererSystem = nullptr;
         audio::AudioSystemBackend        audioBackend = audio::AudioSystemBackend::External;
-        render::RendererSystemBackend    rendererBackend = render::RendererSystemBackend::Forward;
+        render::RendererSystemBackend    rendererBackend = render::RendererSystemBackend::External;
     };
 
     struct CoreRuntimeState
@@ -155,6 +156,11 @@ namespace dng::runtime
         state = CoreRuntimeState{};
 
         state.ownsMemorySystem = !memory::MemorySystem::IsInitialized();
+        if (!state.ownsMemorySystem && !memory::MemorySystem::IsConfigCompatible(config.memory))
+        {
+            state = CoreRuntimeState{};
+            return CoreRuntimeStatus::MemoryConfigConflict;
+        }
         memory::MemorySystem::Init(config.memory);
         state.stage = CoreRuntimeInitStage::Memory;
 

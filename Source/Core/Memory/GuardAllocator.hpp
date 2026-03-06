@@ -40,7 +40,7 @@ namespace memory
 {
     namespace detail
     {
-        using usize = std::size_t;
+        using usize = ::dng::usize;
 
         // ---
         // Purpose : Pack the metadata required to tear down a guarded allocation.

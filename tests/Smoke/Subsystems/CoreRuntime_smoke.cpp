@@ -209,7 +209,7 @@ int RunCoreRuntimeSmoke()
         injected.audioSystem = &audioIface;
         injected.audioBackend = dng::audio::AudioSystemBackend::External;
         injected.rendererSystem = &rendererIface;
-        injected.rendererBackend = dng::render::RendererSystemBackend::Null;
+        injected.rendererBackend = dng::render::RendererSystemBackend::External;
 
         if (InitCoreRuntime(injectedState, config, injected) != CoreRuntimeStatus::Ok)
         {
@@ -223,7 +223,7 @@ int RunCoreRuntimeSmoke()
             injectedState.window.backend != dng::win::WindowSystemBackend::External ||
             injectedState.fileSystem.backend != dng::fs::FileSystemSystemBackend::External ||
             injectedState.audio.backend != dng::audio::AudioSystemBackend::External ||
-            injectedState.renderer.backend != dng::render::RendererSystemBackend::Null)
+            injectedState.renderer.backend != dng::render::RendererSystemBackend::External)
         {
             ShutdownCoreRuntime(injectedState);
             return 18;
@@ -233,6 +233,64 @@ int RunCoreRuntimeSmoke()
         if (!IsRuntimeReset(injectedState) || dng::memory::MemorySystem::IsInitialized())
         {
             return 19;
+        }
+    }
+
+    {
+        dng::core::MemoryConfig hostMemoryConfig{};
+        hostMemoryConfig.SetThreadFrameAllocatorBytes(4u * 1024u);
+        hostMemoryConfig.SetThreadFrameReturnNull(true);
+        dng::memory::MemorySystem::Init(hostMemoryConfig);
+
+        if (!dng::memory::MemorySystem::IsInitialized())
+        {
+            return 100;
+        }
+
+        CoreRuntimeState conflictingState{};
+        if (InitCoreRuntime(conflictingState, config) != CoreRuntimeStatus::MemoryConfigConflict)
+        {
+            ShutdownCoreRuntime(conflictingState);
+            dng::memory::MemorySystem::Shutdown();
+            return 101;
+        }
+
+        if (!IsRuntimeReset(conflictingState) || !dng::memory::MemorySystem::IsInitialized())
+        {
+            ShutdownCoreRuntime(conflictingState);
+            dng::memory::MemorySystem::Shutdown();
+            return 102;
+        }
+
+        CoreRuntimeConfig attachedConfig = config;
+        attachedConfig.memory = hostMemoryConfig;
+
+        CoreRuntimeState attachedState{};
+        if (InitCoreRuntime(attachedState, attachedConfig) != CoreRuntimeStatus::Ok)
+        {
+            ShutdownCoreRuntime(attachedState);
+            dng::memory::MemorySystem::Shutdown();
+            return 103;
+        }
+
+        if (attachedState.ownsMemorySystem)
+        {
+            ShutdownCoreRuntime(attachedState);
+            dng::memory::MemorySystem::Shutdown();
+            return 104;
+        }
+
+        ShutdownCoreRuntime(attachedState);
+        if (!IsRuntimeReset(attachedState) || !dng::memory::MemorySystem::IsInitialized())
+        {
+            dng::memory::MemorySystem::Shutdown();
+            return 105;
+        }
+
+        dng::memory::MemorySystem::Shutdown();
+        if (dng::memory::MemorySystem::IsInitialized())
+        {
+            return 106;
         }
     }
 
@@ -345,7 +403,7 @@ int RunCoreRuntimeSmoke()
 
     {
         CoreRuntimeConfig rendererFailConfig = config;
-        rendererFailConfig.renderer.backend = dng::render::RendererSystemBackend::Forward;
+        rendererFailConfig.renderer.backend = dng::render::RendererSystemBackend::External;
         const CoreRuntimeInjectedInterfaces injected{};
         const int result = expectFailureReset(CoreRuntimeStatus::RendererInitFailed, rendererFailConfig, injected, 32);
         if (result != 0)

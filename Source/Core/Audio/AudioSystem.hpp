@@ -11,7 +11,8 @@
 //           selected via config with optional fallback to NullAudio when
 //           platform initialization fails. Voice control is command-queued
 //           through a fixed-capacity pool to avoid allocations in Mix(). WAV
-//           loading supports in-memory clips and streamed clips via FileSystem.
+//           loading uses thread-local scratch storage and supports in-memory
+//           clips and streamed clips via FileSystem.
 //           Streamed clips require an explicit `BindStreamFileSystem()` and
 //           the bound FileSystem must outlive loaded streamed clips.
 // ============================================================================
@@ -199,8 +200,8 @@ namespace dng::audio
 
     namespace detail
     {
-        // Shared static scratch for WAV file loads (external sync required).
-        inline dng::u8 g_AudioWavLoadScratch[kAudioSystemWavLoadScratchBytes]{};
+        // Thread-local scratch keeps WAV loads allocation-free without forcing a giant buffer into AudioSystemState.
+        inline thread_local dng::u8 g_AudioWavLoadScratch[kAudioSystemWavLoadScratchBytes]{};
 
         [[nodiscard]] inline AudioStatus MapFsStatus(fs::FsStatus status) noexcept
         {

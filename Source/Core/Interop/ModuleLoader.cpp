@@ -8,8 +8,9 @@
 //           Unload. ABI v1 entrypoint name is dngModuleGetApi_v1.
 // ============================================================================
 #include "Core/Interop/ModuleLoader.hpp"
+#include "Core/Platform/PlatformDefines.hpp"
 
-#if defined(_WIN32) || defined(_WIN64)
+#if DNG_PLATFORM_WINDOWS
     #include <windows.h>
     #include <stdio.h>
 #else
@@ -150,7 +151,7 @@ namespace
         return ValidateWindowApiV1(&api->window, host);
     }
 
-#if defined(_WIN32) || defined(_WIN64)
+#if DNG_PLATFORM_WINDOWS
     static void LogWin32Error(const dng_host_api_v1* host, dng_u32 level, const char* prefix) noexcept
     {
         if (!host || !host->log || !prefix)
@@ -210,7 +211,7 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
         Unload();
     }
 
-#if defined(_WIN32) || defined(_WIN64)
+#if DNG_PLATFORM_WINDOWS
     HMODULE lib = ::LoadLibraryA(path);
     if (!lib)
     {
@@ -273,7 +274,7 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     const dng_status_v1 status = entry(host, outApi);
     if (status != DNG_STATUS_OK)
     {
-#if defined(_WIN32) || defined(_WIN64)
+#if DNG_PLATFORM_WINDOWS
         ::FreeLibrary(lib);
 #else
         ::dlclose(lib);
@@ -285,7 +286,7 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     if (api_ok != DNG_STATUS_OK)
     {
         Log(host, 1u, "Module returned an invalid API table");
-#if defined(_WIN32) || defined(_WIN64)
+#if DNG_PLATFORM_WINDOWS
         ::FreeLibrary(lib);
 #else
         ::dlclose(lib);
@@ -305,7 +306,7 @@ void ModuleLoader::Unload() noexcept
         return;
     }
 
-#if defined(_WIN32) || defined(_WIN64)
+#if DNG_PLATFORM_WINDOWS
     ::FreeLibrary(static_cast<HMODULE>(m_handle));
 #else
     ::dlclose(m_handle);

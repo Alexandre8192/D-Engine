@@ -16,6 +16,8 @@
 //   - DNG_DEFINE_MINIMAL_ASSERT : defines a minimal DNG_ASSERT fallback if not already defined
 //
 
+#include "Core/Platform/PlatformCompiler.hpp"
+
 // ----------------------------------------------------------------------------
 // Debug detection (respects user-defined DNG_DEBUG; falls back to !NDEBUG)
 // ----------------------------------------------------------------------------
@@ -28,17 +30,10 @@
 #endif
 
 // ----------------------------------------------------------------------------
- // Internal cross-compiler debug break helper (Debug only)
+// Internal debug break helper (Debug only)
 // ----------------------------------------------------------------------------
 #if DNG_DEBUG
-#  if defined(_MSC_VER)
-#    define DNG_INTERNAL_DEBUG_BREAK() __debugbreak()
-#  elif defined(__clang__) || defined(__GNUC__)
-#    define DNG_INTERNAL_DEBUG_BREAK() __builtin_trap()
-#  else
-#    include <cstdlib>
-#    define DNG_INTERNAL_DEBUG_BREAK() std::abort()
-#  endif
+#  define DNG_INTERNAL_DEBUG_BREAK() DNG_DEBUGBREAK()
 #else
 #  define DNG_INTERNAL_DEBUG_BREAK() ((void)0)
 #endif

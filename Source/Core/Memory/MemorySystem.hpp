@@ -208,12 +208,12 @@ namespace memory
     // Notes   : Header-safe wrapper to keep this file warning-clean on MSVC without globally defining _CRT_SECURE_NO_WARNINGS.
     [[nodiscard]] inline const char* GetEnvNoWarn(const char* name) noexcept
     {
-#if defined(_MSC_VER)
+#if DNG_COMPILER_MSVC
 #  pragma warning(push)
 #  pragma warning(disable:4996)
 #endif
         return std::getenv(name);
-#if defined(_MSC_VER)
+#if DNG_COMPILER_MSVC
 #  pragma warning(pop)
 #endif
     }
@@ -372,6 +372,100 @@ namespace memory
             }
 
             return result;
+        }
+
+        struct InitResolution
+        {
+            MemoryConfig effectiveConfig{};
+            FrameAllocatorConfig threadFrameConfig{};
+            std::size_t threadFrameBytes = 0;
+            OverrideResult sampling{};
+            OverrideResult shards{};
+            OverrideResult batch{};
+            bool trackingCompiled = false;
+            bool guardsCompiled = false;
+            bool tlsBinsCompiled = false;
+            bool trackingRequested = false;
+            bool guardsRequested = false;
+            bool tlsBinsRequested = false;
+        };
+
+        [[nodiscard]] inline InitResolution ResolveInitConfig(const MemoryConfig& config) noexcept
+        {
+            InitResolution resolution{};
+            resolution.effectiveConfig = config;
+
+            const std::size_t rawFrameBytes = resolution.effectiveConfig.thread_frame_allocator_bytes;
+            resolution.threadFrameBytes = (rawFrameBytes == 0u)
+                ? 0u
+                : ::dng::core::AlignUp<std::size_t>(rawFrameBytes, alignof(std::max_align_t));
+
+            resolution.threadFrameConfig.bReturnNullOnOOM = resolution.effectiveConfig.thread_frame_return_null;
+            resolution.threadFrameConfig.bDebugPoisonOnReset = resolution.effectiveConfig.thread_frame_poison_on_reset;
+            resolution.threadFrameConfig.DebugPoisonByte = resolution.effectiveConfig.thread_frame_poison_value;
+
+            resolution.effectiveConfig.thread_frame_allocator_bytes = resolution.threadFrameBytes;
+            resolution.effectiveConfig.thread_frame_return_null = resolution.threadFrameConfig.bReturnNullOnOOM;
+            resolution.effectiveConfig.thread_frame_poison_on_reset = resolution.threadFrameConfig.bDebugPoisonOnReset;
+            resolution.effectiveConfig.thread_frame_poison_value = resolution.threadFrameConfig.DebugPoisonByte;
+
+            resolution.sampling = ResolveTrackingSampling(resolution.effectiveConfig);
+            resolution.shards   = ResolveTrackingShards(resolution.effectiveConfig);
+            resolution.batch    = ResolveSmallObjectBatch(resolution.effectiveConfig);
+
+            std::uint32_t effectiveSampling = resolution.sampling.value;
+            if (effectiveSampling == 0u || effectiveSampling > 1u)
+            {
+                effectiveSampling = 1u;
+            }
+
+            std::uint32_t effectiveShards = resolution.shards.value;
+            if (!::dng::core::IsPowerOfTwo(effectiveShards))
+            {
+                effectiveShards = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
+            }
+
+            resolution.trackingCompiled = ::dng::core::CompiledTracking() || ::dng::core::CompiledStatsOnly();
+            resolution.guardsCompiled   = ::dng::core::CompiledGuards();
+            resolution.tlsBinsCompiled  = (DNG_SMALLOBJ_TLS_BINS != 0);
+            resolution.trackingRequested = resolution.effectiveConfig.enable_tracking;
+            resolution.guardsRequested   = resolution.effectiveConfig.enable_guards;
+            resolution.tlsBinsRequested  = resolution.effectiveConfig.enable_smallobj_tls_bins;
+
+            resolution.effectiveConfig.tracking_sampling_rate = effectiveSampling;
+            resolution.effectiveConfig.tracking_shard_count   = effectiveShards;
+            resolution.effectiveConfig.small_object_batch     = resolution.batch.value;
+            resolution.effectiveConfig.enable_tracking =
+                resolution.trackingCompiled && resolution.trackingRequested;
+            resolution.effectiveConfig.enable_guards =
+                resolution.guardsCompiled && resolution.guardsRequested;
+            resolution.effectiveConfig.enable_smallobj_tls_bins =
+                resolution.tlsBinsCompiled && resolution.tlsBinsRequested;
+
+            return resolution;
+        }
+
+        [[nodiscard]] inline bool AreEquivalentMemoryConfigs(const MemoryConfig& lhs,
+                                                             const MemoryConfig& rhs) noexcept
+        {
+            return lhs.enable_tracking == rhs.enable_tracking &&
+                   lhs.enable_stats_only == rhs.enable_stats_only &&
+                   lhs.fatal_on_oom == rhs.fatal_on_oom &&
+                   lhs.enable_guards == rhs.enable_guards &&
+                   lhs.poison_on_free == rhs.poison_on_free &&
+                   lhs.capture_callsite == rhs.capture_callsite &&
+                   lhs.report_on_exit == rhs.report_on_exit &&
+                   lhs.global_thread_safe == rhs.global_thread_safe &&
+                   lhs.global_thread_policy == rhs.global_thread_policy &&
+                   lhs.enable_smallobj_tls_bins == rhs.enable_smallobj_tls_bins &&
+                   lhs.tracking_sampling_rate == rhs.tracking_sampling_rate &&
+                   lhs.tracking_shard_count == rhs.tracking_shard_count &&
+                   lhs.small_object_batch == rhs.small_object_batch &&
+                   lhs.thread_frame_allocator_bytes == rhs.thread_frame_allocator_bytes &&
+                   lhs.thread_frame_return_null == rhs.thread_frame_return_null &&
+                   lhs.thread_frame_poison_on_reset == rhs.thread_frame_poison_on_reset &&
+                   lhs.thread_frame_poison_value == rhs.thread_frame_poison_value &&
+                   lhs.collect_stacks == rhs.collect_stacks;
         }
 
         [[nodiscard]] inline AllocatorRef MakeAllocatorRef(DefaultAllocator* alloc) noexcept
@@ -588,180 +682,128 @@ namespace memory
         {
             auto& globals = detail::Globals();
             detail::ThreadLock lock(globals.mutex);
+            const detail::InitResolution resolution = detail::ResolveInitConfig(config);
 
             if (globals.initialized)
             {
-                if (::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Warn, "Memory"))
+                if (!detail::AreEquivalentMemoryConfigs(globals.activeConfig, resolution.effectiveConfig) &&
+                    ::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Warn, "Memory"))
                 {
-                    DNG_LOG_WARNING("Memory", "MemorySystem::Init() called twice; ignoring.");
+                    DNG_LOG_WARNING("Memory",
+                        "MemorySystem::Init() ignored because the requested config does not match the active config.");
                 }
                 return;
             }
 
             auto& globalConfig = ::dng::core::MemoryConfig::GetGlobal();
-            globalConfig = config;
-
-            const std::size_t rawFrameBytes = globalConfig.thread_frame_allocator_bytes;
-            const std::size_t normalizedFrameBytes = (rawFrameBytes == 0u)
-                ? 0u
-                : ::dng::core::AlignUp<std::size_t>(rawFrameBytes, alignof(std::max_align_t));
-            globals.threadFrameBytes = normalizedFrameBytes;
-
-            ::dng::core::FrameAllocatorConfig frameCfg{};
-            frameCfg.bReturnNullOnOOM = globalConfig.thread_frame_return_null;
-            frameCfg.bDebugPoisonOnReset = globalConfig.thread_frame_poison_on_reset;
-            frameCfg.DebugPoisonByte = globalConfig.thread_frame_poison_value;
-            globals.threadFrameConfig = frameCfg;
-
-            globalConfig.thread_frame_allocator_bytes = normalizedFrameBytes;
-            globalConfig.thread_frame_return_null = frameCfg.bReturnNullOnOOM;
-            globalConfig.thread_frame_poison_on_reset = frameCfg.bDebugPoisonOnReset;
-            globalConfig.thread_frame_poison_value = frameCfg.DebugPoisonByte;
-
-            globals.activeConfig = globalConfig;
-
-            const auto sampling = detail::ResolveTrackingSampling(globals.activeConfig);
-            const auto shards   = detail::ResolveTrackingShards(globals.activeConfig);
-            const auto batch    = detail::ResolveSmallObjectBatch(globals.activeConfig);
+            globalConfig = resolution.effectiveConfig;
+            globals.threadFrameBytes = resolution.threadFrameBytes;
+            globals.threadFrameConfig = resolution.threadFrameConfig;
+            globals.activeConfig = resolution.effectiveConfig;
 
             const bool warnEnabled = ::dng::core::Logger::IsEnabled(::dng::core::LogLevel::Warn, "Memory");
             constexpr std::uint32_t kMaxSmallBatch = static_cast<std::uint32_t>(DNG_SOA_TLS_MAG_CAPACITY);
 
-            std::uint32_t effectiveSampling = sampling.value;
-            if (effectiveSampling == 0u)
+            if (resolution.sampling.value > 1u && warnEnabled)
             {
-                effectiveSampling = 1u;
+                DNG_LOG_WARNING("Memory",
+                    "Tracking sampling rates >1 are not yet supported; falling back to 1 (requested {}).",
+                    static_cast<unsigned long long>(resolution.sampling.value));
             }
-            else if (effectiveSampling > 1u)
-            {
-                if (warnEnabled)
-                {
-                    DNG_LOG_WARNING("Memory",
-                        "Tracking sampling rates >1 are not yet supported; falling back to 1 (requested {}).",
-                        static_cast<unsigned long long>(effectiveSampling));
-                }
-                effectiveSampling = 1u;
-            }
-
-            std::uint32_t effectiveShards = shards.value;
-            if (!::dng::core::IsPowerOfTwo(effectiveShards))
-            {
-                effectiveShards = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
-            }
-
-            const std::uint32_t effectiveBatch = batch.value;
-
-            const bool tlsBinsRequested = globalConfig.enable_smallobj_tls_bins;
-            const bool tlsBinsCompiled  = (DNG_SMALLOBJ_TLS_BINS != 0);
-            const bool tlsBinsEffective = tlsBinsCompiled && tlsBinsRequested;
-            const bool trackingCompiled = ::dng::core::CompiledTracking() || ::dng::core::CompiledStatsOnly();
-            const bool guardsCompiled   = ::dng::core::CompiledGuards();
-            const bool trackingRequested = globalConfig.enable_tracking;
-            const bool guardsRequested   = globalConfig.enable_guards;
-            const bool trackingEffective = trackingCompiled && trackingRequested;
-            const bool guardsEffective   = guardsCompiled && guardsRequested;
 
             // Truth table (CT = DNG_SMALLOBJ_TLS_BINS, RT = enable_smallobj_tls_bins):
             // CT RT | Effective
             //  0  x | false (feature compiled out)
             //  1  0 | false (runtime opts out)
             //  1  1 | true  (TLS bins enabled)
-
-            globalConfig.tracking_sampling_rate = effectiveSampling;
-            globalConfig.tracking_shard_count   = effectiveShards;
-            globalConfig.small_object_batch     = effectiveBatch;
-            globalConfig.enable_tracking        = trackingEffective;
-            globalConfig.enable_guards          = guardsEffective;
-            globalConfig.enable_smallobj_tls_bins = tlsBinsEffective;
-            globals.activeConfig = globalConfig;
             ::dng::core::SetFatalOnOOMPolicy(globals.activeConfig.fatal_on_oom);
 
             if (warnEnabled)
             {
-                if (trackingRequested && !trackingCompiled)
+                if (resolution.trackingRequested && !resolution.trackingCompiled)
                 {
                     DNG_LOG_WARNING("Memory",
                         "Ignoring MemoryConfig::enable_tracking request (tracking/statistics compiled out).");
                 }
-                if (guardsRequested && !guardsCompiled)
+                if (resolution.guardsRequested && !resolution.guardsCompiled)
                 {
                     DNG_LOG_WARNING("Memory",
                         "Ignoring MemoryConfig::enable_guards request (DNG_MEM_GUARDS=0).");
                 }
-                if (sampling.envInvalid)
+                if (resolution.sampling.envInvalid)
                 {
                     DNG_LOG_WARNING("Memory", "Ignoring DNG_MEM_TRACKING_SAMPLING_RATE environment override (must be >= 1).");
                 }
-                if (sampling.apiInvalid)
+                if (resolution.sampling.apiInvalid)
                 {
                     DNG_LOG_WARNING("Memory",
                         "Ignoring MemoryConfig::tracking_sampling_rate override {} (must be >= 1).",
-                        static_cast<unsigned long long>(sampling.apiRaw));
+                        static_cast<unsigned long long>(resolution.sampling.apiRaw));
                 }
 
-                if (shards.envInvalid)
+                if (resolution.shards.envInvalid)
                 {
-                    if (shards.envRaw != 0u)
+                    if (resolution.shards.envRaw != 0u)
                     {
                         DNG_LOG_WARNING("Memory",
                             "Ignoring DNG_MEM_TRACKING_SHARDS environment override {} (must be power-of-two).",
-                            static_cast<unsigned long long>(shards.envRaw));
+                            static_cast<unsigned long long>(resolution.shards.envRaw));
                     }
                     else
                     {
                         DNG_LOG_WARNING("Memory", "Ignoring DNG_MEM_TRACKING_SHARDS environment override (must be power-of-two).");
                     }
                 }
-                if (shards.apiInvalid)
+                if (resolution.shards.apiInvalid)
                 {
                     DNG_LOG_WARNING("Memory",
                         "Ignoring MemoryConfig::tracking_shard_count override {} (must be power-of-two).",
-                        static_cast<unsigned long long>(shards.apiRaw));
+                        static_cast<unsigned long long>(resolution.shards.apiRaw));
                 }
-                if (shards.clamped && !shards.envInvalid && !shards.apiInvalid)
+                if (resolution.shards.clamped && !resolution.shards.envInvalid && !resolution.shards.apiInvalid)
                 {
                     DNG_LOG_WARNING("Memory",
                         "Tracking shard count fell back to compile-time default {} (invalid override).",
                         static_cast<unsigned long long>(static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS)));
                 }
 
-                if (batch.envInvalid)
+                if (resolution.batch.envInvalid)
                 {
                     DNG_LOG_WARNING("Memory", "Ignoring DNG_SOALLOC_BATCH environment override (must be >= 1).");
                 }
-                if (batch.apiInvalid)
+                if (resolution.batch.apiInvalid)
                 {
                     DNG_LOG_WARNING("Memory",
                         "Ignoring MemoryConfig::small_object_batch override {} (must be >= 1).",
-                        static_cast<unsigned long long>(batch.apiRaw));
+                        static_cast<unsigned long long>(resolution.batch.apiRaw));
                 }
-                if (batch.clamped)
+                if (resolution.batch.clamped)
                 {
-                    switch (batch.source)
+                    switch (resolution.batch.source)
                     {
                     case detail::OverrideSource::Environment:
                         DNG_LOG_WARNING("Memory",
                             "Clamped DNG_SOALLOC_BATCH override {} to {} (max capacity {}).",
-                            static_cast<unsigned long long>(batch.envRaw),
-                            static_cast<unsigned long long>(batch.value),
+                            static_cast<unsigned long long>(resolution.batch.envRaw),
+                            static_cast<unsigned long long>(resolution.batch.value),
                             static_cast<unsigned long long>(kMaxSmallBatch));
                         break;
                     case detail::OverrideSource::Api:
                         DNG_LOG_WARNING("Memory",
                             "Clamped MemoryConfig::small_object_batch override {} to {} (max capacity {}).",
-                            static_cast<unsigned long long>(batch.apiRaw),
-                            static_cast<unsigned long long>(batch.value),
+                            static_cast<unsigned long long>(resolution.batch.apiRaw),
+                            static_cast<unsigned long long>(resolution.batch.value),
                             static_cast<unsigned long long>(kMaxSmallBatch));
                         break;
                     default:
                         DNG_LOG_WARNING("Memory",
                             "SmallObject batch default exceeded capacity; clamped to {}.",
-                            static_cast<unsigned long long>(batch.value));
+                            static_cast<unsigned long long>(resolution.batch.value));
                         break;
                     }
                 }
 #if !DNG_SMALLOBJ_TLS_BINS
-                if (tlsBinsRequested)
+                if (resolution.tlsBinsRequested)
                 {
                     DNG_LOG_WARNING("Memory",
                         "Ignoring MemoryConfig::enable_smallobj_tls_bins request (DNG_SMALLOBJ_TLS_BINS=0).");
@@ -828,15 +870,15 @@ namespace memory
                 DNG_LOG_INFO("Memory",
                     "Tracking sampling rate={} (source={})",
                     static_cast<unsigned long long>(globals.activeConfig.tracking_sampling_rate),
-                    detail::ToString(sampling.source));
+                    detail::ToString(resolution.sampling.source));
                 DNG_LOG_INFO("Memory",
                     "Tracking shard count={} (source={})",
                     static_cast<unsigned long long>(globals.activeConfig.tracking_shard_count),
-                    detail::ToString(shards.source));
+                    detail::ToString(resolution.shards.source));
                 DNG_LOG_INFO("Memory",
                     "SmallObject TLS batch={} (source={})",
                     static_cast<unsigned long long>(globals.activeConfig.small_object_batch),
-                    detail::ToString(batch.source));
+                    detail::ToString(resolution.batch.source));
                 DNG_LOG_INFO("Memory",
                     "Thread frame allocator bytes={} returnNull={} poisonOnReset={} poisonValue={}",
                     static_cast<unsigned long long>(globals.threadFrameBytes),
@@ -846,20 +888,20 @@ namespace memory
                 DNG_LOG_INFO("Memory",
                     "SMALLOBJ_TLS_BINS: CT={} RT={} EFFECTIVE={}",
                     DNG_SMALLOBJ_TLS_BINS ? "1" : "0",
-                    tlsBinsRequested ? "1" : "0",
+                    resolution.tlsBinsRequested ? "1" : "0",
                     globals.activeConfig.enable_smallobj_tls_bins ? "1" : "0");
             }
             if (logInfo)
             {
                 DNG_LOG_INFO("Memory",
                     "MemorySystem: Tracking CT={} RT={} EFFECTIVE={}",
-                    trackingCompiled ? "1" : "0",
-                    trackingRequested ? "1" : "0",
+                    resolution.trackingCompiled ? "1" : "0",
+                    resolution.trackingRequested ? "1" : "0",
                     globals.activeConfig.enable_tracking ? "1" : "0");
                 DNG_LOG_INFO("Memory",
                     "MemorySystem: GuardAllocator CT={} RT={} EFFECTIVE={}",
-                    guardsCompiled ? "1" : "0",
-                    guardsRequested ? "1" : "0",
+                    resolution.guardsCompiled ? "1" : "0",
+                    resolution.guardsRequested ? "1" : "0",
                     globals.activeConfig.enable_guards ? "1" : "0");
             }
 
@@ -938,6 +980,40 @@ namespace memory
             }
 
             detail::DetachThreadStateUnlocked(globals);
+        }
+
+        // Purpose : Query the normalized runtime config currently active inside MemorySystem.
+        // Contract: Thread-safe; returns false when the system is not initialized and leaves `outConfig` untouched.
+        // Notes   : Useful for hosts that want explicit attach semantics instead of blind re-init calls.
+        [[nodiscard]] static bool TryGetActiveConfig(MemoryConfig& outConfig) noexcept
+        {
+            auto& globals = detail::Globals();
+            detail::ThreadLock lock(globals.mutex);
+
+            if (!globals.initialized)
+            {
+                return false;
+            }
+
+            outConfig = globals.activeConfig;
+            return true;
+        }
+
+        // Purpose : Check whether a requested config resolves to the same effective runtime config.
+        // Contract: Thread-safe; returns false when the system is not initialized.
+        // Notes   : Comparison happens after environment/macro overrides and init-time normalization.
+        [[nodiscard]] static bool IsConfigCompatible(const MemoryConfig& config) noexcept
+        {
+            auto& globals = detail::Globals();
+            detail::ThreadLock lock(globals.mutex);
+
+            if (!globals.initialized)
+            {
+                return false;
+            }
+
+            const detail::InitResolution resolution = detail::ResolveInitConfig(config);
+            return detail::AreEquivalentMemoryConfigs(globals.activeConfig, resolution.effectiveConfig);
         }
 
         // Purpose : Report whether MemorySystem successfully completed initialization.

@@ -7,8 +7,8 @@
 //           Lifetime of the backend is tied to RendererSystemState.
 //           Thread-safety and determinism follow RendererCaps from the backend;
 //           callers must serialize access per instance.
-// Notes   : For now only the NullRenderer backend is owned directly. External
-//           backends (forward, RT, GPU-driven) can plug in via a renderer interface.
+// Notes   : For now only the NullRenderer backend is owned directly. All other
+//           renderer implementations are injected via a renderer interface.
 
 // ============================================================================
 
@@ -21,9 +21,10 @@ namespace dng::render
 {
     enum class RendererSystemBackend : dng::u8
     {
-        Null,
-        Forward
-        // Future options (VisibilityBuffer, RT, etc.) will be appended here.
+        Null = 0,
+        External = 1,
+        Forward = External
+        // `Forward` is kept as a compatibility alias for older injected callsites.
     };
 
     struct RendererSystemConfig
@@ -77,19 +78,16 @@ namespace dng::render
         switch (config.backend)
         {
             case RendererSystemBackend::Null:
-            default:
             {
                 RendererInterface iface = MakeNullRendererInterface(state.nullBackend);
                 return InitRendererSystemWithInterface(state, iface, RendererSystemBackend::Null);
             }
-            case RendererSystemBackend::Forward:
+            default:
             {
-                // Core does not own forward backends; caller must inject via InitRendererSystemWithInterface.
+                // Non-null renderers are injected via InitRendererSystemWithInterface.
                 return false;
             }
         }
-
-        return false;
     }
 
     // Purpose : Tear down the renderer system and reset state to defaults.

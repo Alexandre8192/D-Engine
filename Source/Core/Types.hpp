@@ -1,28 +1,30 @@
 #pragma once
 
-#include <cstdint>  // int32_t, uint32_t...
-#include <cstddef>  // size_t, ptrdiff_t
+#include <cstddef> // std::size_t, std::ptrdiff_t
+
+#include "Core/Platform/PlatformCompiler.hpp"
+#include "Core/Platform/PlatformTypes.hpp"
 
 // =============================
 // Types.hpp
 // =============================
-// This header defines fixed-size and platform-consistent types
-// used across the engine. All modules should rely on these aliases
-// instead of raw native types like 'int' or 'long'.
+// Legacy facade over the platform-backed type layer.
+// Keep domain-facing aliases in namespace dng while delegating the
+// low-level source of truth to Core/Platform.
 // =============================
 
 namespace dng
 {
 // ---- Integer types ----
-using int8 = std::int8_t;
-using int16 = std::int16_t;
-using int32 = std::int32_t;
-using int64 = std::int64_t;
+using int8 = ::int8;
+using int16 = ::int16;
+using int32 = ::int32;
+using int64 = ::int64;
 
-using uint8 = std::uint8_t;
-using uint16 = std::uint16_t;
-using uint32 = std::uint32_t;
-using uint64 = std::uint64_t;
+using uint8 = ::uint8;
+using uint16 = ::uint16;
+using uint32 = ::uint32;
+using uint64 = ::uint64;
 
 // ---- Short aliases (i*/u* pattern) ----
 using i8  = int8;
@@ -44,12 +46,12 @@ using usize = std::size_t;
 using isize = std::ptrdiff_t;
 
 // ---- Character types ----
-using char8 = char;
-using char16 = char16_t;
-using char32 = char32_t;
+using char8 = ::char8;
+using char16 = ::char16;
+using char32 = ::char32;
 
 // ---- Boolean alternatives ----
-using bool8 = uint8; // Optional compact bool
+using bool8 = ::bool8; // Optional compact bool
 
 // ---- Aliases for readability (optional) ----
 using byte = uint8;
@@ -72,7 +74,7 @@ enum class ThreadSafetyMode : u8
 
 
 // =============================
-// Internal macros (use only in engine internals)
+// Legacy internal macros (prefer DNG_* in new code)
 // =============================
 
 #ifndef DE_API
@@ -80,13 +82,11 @@ enum class ThreadSafetyMode : u8
 #endif
 
 #ifndef DE_FORCEINLINE
-#if defined(_MSC_VER)
-#define DE_FORCEINLINE __forceinline
-#elif defined(__clang__) || defined(__GNUC__)
-#define DE_FORCEINLINE inline __attribute__((always_inline))
-#else
-#define DE_FORCEINLINE inline
+#define DE_FORCEINLINE DNG_FORCEINLINE
 #endif
+
+#ifndef DE_NOINLINE
+#define DE_NOINLINE DNG_NOINLINE
 #endif
 
 #ifndef DE_ALIGN
@@ -94,5 +94,5 @@ enum class ThreadSafetyMode : u8
 #endif
 
 #ifndef DE_NULL
-#define DE_NULL nullptr
+#define DE_NULL DNG_NULL
 #endif

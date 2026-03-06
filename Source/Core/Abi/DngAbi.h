@@ -15,23 +15,11 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include "Core/Platform/PlatformCAbi.h"
 
 // Platform exports and calling convention ------------------------------------------------
-#if defined(_WIN32) || defined(_WIN64)
-    #define DNG_ABI_CALL __cdecl
-    #if defined(DNG_ABI_EXPORTS)
-        #define DNG_ABI_API __declspec(dllexport)
-    #else
-        #define DNG_ABI_API __declspec(dllimport)
-    #endif
-#else
-    #define DNG_ABI_CALL
-    #if defined(__GNUC__) || defined(__clang__)
-        #define DNG_ABI_API __attribute__((visibility("default")))
-    #else
-        #define DNG_ABI_API
-    #endif
-#endif
+#define DNG_ABI_CALL DNG_CABI_CALL
+#define DNG_ABI_API  DNG_CABI_API
 
 // Fixed-width primitive aliases -----------------------------------------------------------
 typedef uint8_t  dng_u8;

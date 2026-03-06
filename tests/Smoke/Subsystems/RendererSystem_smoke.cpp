@@ -18,7 +18,7 @@ int RunRendererSystemSmoke()
     RendererInterface brokenInterface = MakeNullRendererInterface(nullBackendForValidation);
     brokenInterface.vtable.getCaps = nullptr;
     RendererSystemState rejected{};
-    if (InitRendererSystemWithInterface(rejected, brokenInterface, RendererSystemBackend::Forward))
+    if (InitRendererSystemWithInterface(rejected, brokenInterface, RendererSystemBackend::External))
     {
         return 4;
     }
