@@ -155,6 +155,9 @@
     <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp">
       <Filter>Source\Core</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Core\Runtime\CoreRuntime.cpp">
+      <Filter>Source\Core</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp">
       <Filter>Source\Core\Memory</Filter>
     </ClCompile>

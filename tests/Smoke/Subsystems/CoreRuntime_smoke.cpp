@@ -235,6 +235,64 @@ int RunCoreRuntimeSmoke()
         }
     }
 
+    {
+        dng::core::MemoryConfig hostMemoryConfig{};
+        hostMemoryConfig.SetThreadFrameAllocatorBytes(4u * 1024u);
+        hostMemoryConfig.SetThreadFrameReturnNull(true);
+        dng::memory::MemorySystem::Init(hostMemoryConfig);
+
+        if (!dng::memory::MemorySystem::IsInitialized())
+        {
+            return 100;
+        }
+
+        CoreRuntimeState conflictingState{};
+        if (InitCoreRuntime(conflictingState, config) != CoreRuntimeStatus::MemoryConfigConflict)
+        {
+            ShutdownCoreRuntime(conflictingState);
+            dng::memory::MemorySystem::Shutdown();
+            return 101;
+        }
+
+        if (!IsRuntimeReset(conflictingState) || !dng::memory::MemorySystem::IsInitialized())
+        {
+            ShutdownCoreRuntime(conflictingState);
+            dng::memory::MemorySystem::Shutdown();
+            return 102;
+        }
+
+        CoreRuntimeConfig attachedConfig = config;
+        attachedConfig.memory = hostMemoryConfig;
+
+        CoreRuntimeState attachedState{};
+        if (InitCoreRuntime(attachedState, attachedConfig) != CoreRuntimeStatus::Ok)
+        {
+            ShutdownCoreRuntime(attachedState);
+            dng::memory::MemorySystem::Shutdown();
+            return 103;
+        }
+
+        if (attachedState.ownsMemorySystem)
+        {
+            ShutdownCoreRuntime(attachedState);
+            dng::memory::MemorySystem::Shutdown();
+            return 104;
+        }
+
+        ShutdownCoreRuntime(attachedState);
+        if (!IsRuntimeReset(attachedState) || !dng::memory::MemorySystem::IsInitialized())
+        {
+            dng::memory::MemorySystem::Shutdown();
+            return 105;
+        }
+
+        dng::memory::MemorySystem::Shutdown();
+        if (dng::memory::MemorySystem::IsInitialized())
+        {
+            return 106;
+        }
+    }
+
     auto expectFailureReset = [&](CoreRuntimeStatus expectedStatus,
                                   const CoreRuntimeConfig& expectedConfig,
                                   const CoreRuntimeInjectedInterfaces& expectedInjected,

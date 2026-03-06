@@ -64,6 +64,7 @@
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp" />
     <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp" />
+    <ClCompile Include="Source\Core\Runtime\CoreRuntime.cpp" />
     <ClCompile Include="Source\Core\Memory\MemorySystem.Logging.cpp" />
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp" />
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
