@@ -4,14 +4,14 @@
 // Purpose : Thin C++ helpers around the generic module ABI catalogue.
 // Contract: Inline wrappers only; no allocations; no ownership changes; caller
 //           remains responsible for module lifetime and shutdown ordering.
-// Notes   : Provides lookup helpers for typed subsystem tables exported through
-//           dng_module_api_v2.
+// Notes   : Provides generic lookup helpers for subsystem tables exported
+//           through dng_module_api_v2. Typed accessors live in subsystem-
+//           specific interop headers (WindowAbi, etc.).
 // ============================================================================
 #ifndef DNG_INTEROP_MODULE_ABI_HPP
 #define DNG_INTEROP_MODULE_ABI_HPP
 
 #include "Core/Abi/DngModuleApi.h"
-#include "Core/Abi/DngWindowApi.h"
 
 #include <cstddef>
 #include <cstring>
@@ -75,14 +75,6 @@ template <std::size_t N>
 
     return nullptr;
 }
-
-[[nodiscard]] inline const dng_window_api_v1* GetWindowApiV1(const dng_module_api_v2& moduleApi) noexcept
-{
-    const dng_module_interface_v1* entry =
-        FindModuleInterface(moduleApi, ModuleAbiLiteral(DNG_MODULE_INTERFACE_NAME_WINDOW), DNG_ABI_VERSION_V1);
-    return entry ? reinterpret_cast<const dng_window_api_v1*>(entry->api) : nullptr;
-}
-
 } // namespace dng
 
 #endif // DNG_INTEROP_MODULE_ABI_HPP

@@ -5,10 +5,10 @@
 // Contract: No exceptions/RTTI; C ABI entrypoint; returns status codes only;
 //           cold-path usage; ASCII-only logging via host log callback.
 // Notes   : Caller manages thread-safety. Loader owns the module handle until
-//           Unload. The generic module catalogue uses the v2 entrypoint.
+//           Unload. The loader validates only generic module catalogue shape;
+//           subsystem-specific table validation belongs to typed interop helpers.
 // ============================================================================
 #include "Core/Interop/ModuleLoader.hpp"
-#include "Core/Abi/DngWindowApi.h"
 #include "Core/Platform/PlatformDefines.hpp"
 
 #if DNG_PLATFORM_WINDOWS
@@ -100,40 +100,6 @@ namespace
         return DNG_STATUS_OK;
     }
 
-    static dng_status_v1 ValidateWindowApiV1(const dng_window_api_v1* api, const dng_host_api_v1* host) noexcept
-    {
-        if (!api)
-        {
-            return DNG_STATUS_INVALID_ARG;
-        }
-
-        if (api->header.struct_size != sizeof(dng_window_api_v1))
-        {
-            LogIssue(host, "WindowApi struct_size mismatch");
-            return DNG_STATUS_INVALID_ARG;
-        }
-
-        if (api->header.abi_version != DNG_ABI_VERSION_V1)
-        {
-            LogIssue(host, "WindowApi abi_version mismatch");
-            return DNG_STATUS_UNSUPPORTED;
-        }
-
-        if (!api->ctx)
-        {
-            LogIssue(host, "WindowApi ctx is null");
-            return DNG_STATUS_INVALID_ARG;
-        }
-
-        if (!api->create || !api->destroy || !api->poll || !api->get_size || !api->set_title)
-        {
-            LogIssue(host, "WindowApi missing function pointer");
-            return DNG_STATUS_INVALID_ARG;
-        }
-
-        return DNG_STATUS_OK;
-    }
-
     static bool StrViewEquals(const dng_str_view_v1& lhs, const dng_str_view_v1& rhs) noexcept
     {
         if (lhs.size != rhs.size)
@@ -152,17 +118,6 @@ namespace
         }
 
         return ::memcmp(lhs.data, rhs.data, lhs.size) == 0;
-    }
-
-    static bool StrViewEqualsLiteral(const dng_str_view_v1& view, const char* literal) noexcept
-    {
-        if (!literal)
-        {
-            return false;
-        }
-
-        const dng_str_view_v1 rhs{ literal, StrLen32(literal) };
-        return StrViewEquals(view, rhs);
     }
 
     static dng_status_v1 ValidateModuleInterfaceV1(const dng_module_interface_v1* entry, const dng_host_api_v1* host) noexcept
@@ -194,12 +149,6 @@ namespace
         {
             LogIssue(host, "Module interface version mismatch");
             return DNG_STATUS_UNSUPPORTED;
-        }
-
-        if (StrViewEqualsLiteral(entry->interface_name, DNG_MODULE_INTERFACE_NAME_WINDOW) &&
-            entry->interface_version == DNG_ABI_VERSION_V1)
-        {
-            return ValidateWindowApiV1(reinterpret_cast<const dng_window_api_v1*>(entry->api), host);
         }
 
         return DNG_STATUS_OK;
