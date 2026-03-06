@@ -12,6 +12,7 @@
 
 #include "Core/Platform/PlatformDefines.hpp"
 
+#include <cstdlib>
 #include <cstring>
 
 #if DNG_PLATFORM_WINDOWS
@@ -28,10 +29,6 @@
 
 namespace dng::audio
 {
-dng::i16 WinMmAudio::s_ClipSamplePool[WinMmAudio::kMaxClipSamplePool]{};
-WinMmAudio::StreamClipState WinMmAudio::s_StreamClips[WinMmAudio::kMaxStreamClips]{};
-bool WinMmAudio::s_GlobalClipPoolInUse = false;
-
 namespace
 {
     [[nodiscard]] constexpr dng::u32 MaxU32() noexcept
@@ -398,9 +395,14 @@ void WinMmAudio::ResetVoiceForInvalidClip(VoiceState& voice) noexcept
 
 dng::u16 WinMmAudio::AllocateStreamSlot() noexcept
 {
+    if (m_StreamClips == nullptr)
+    {
+        return kInvalidStreamSlot;
+    }
+
     for (dng::u16 i = 0; i < kMaxStreamClips; ++i)
     {
-        if (!s_StreamClips[i].valid)
+        if (!m_StreamClips[i].valid)
         {
             return i;
         }
@@ -515,8 +517,13 @@ AudioStatus WinMmAudio::LoadWavPcm16Clip(const dng::u8* fileData,
         return AudioStatus::InvalidArg;
     }
 
+    if (m_ClipSamplePool == nullptr)
+    {
+        return AudioStatus::UnknownError;
+    }
+
     const dng::u8* pcmData = fileData + static_cast<size_t>(info.dataOffsetBytes);
-    std::memcpy(&s_ClipSamplePool[sampleOffset], pcmData, static_cast<size_t>(info.dataSizeBytes));
+    std::memcpy(&m_ClipSamplePool[sampleOffset], pcmData, static_cast<size_t>(info.dataSizeBytes));
 
     ClipState& clipState = m_Clips[clipIndex];
     clipState.valid = true;
@@ -619,7 +626,12 @@ AudioStatus WinMmAudio::LoadWavPcm16StreamClip(fs::PathView path,
         return AudioStatus::NotSupported;
     }
 
-    StreamClipState& streamState = s_StreamClips[streamSlot];
+    if (m_StreamClips == nullptr)
+    {
+        return AudioStatus::UnknownError;
+    }
+
+    StreamClipState& streamState = m_StreamClips[streamSlot];
     streamState = StreamClipState{};
     streamState.valid = true;
     streamState.channelCount = info.channelCount;
@@ -699,14 +711,14 @@ AudioStatus WinMmAudio::UnloadClip(AudioClipId clip) noexcept
         const dng::u32 tailSamples = m_NextClipSample - tailOffset;
         if (tailSamples > 0)
         {
-            std::memmove(&s_ClipSamplePool[removeOffset],
-                         &s_ClipSamplePool[tailOffset],
+            std::memmove(&m_ClipSamplePool[removeOffset],
+                         &m_ClipSamplePool[tailOffset],
                          static_cast<size_t>(tailSamples) * sizeof(dng::i16));
         }
 
         if (removeSamples > 0 && m_NextClipSample >= removeSamples)
         {
-            std::memset(&s_ClipSamplePool[m_NextClipSample - removeSamples],
+            std::memset(&m_ClipSamplePool[m_NextClipSample - removeSamples],
                         0,
                         static_cast<size_t>(removeSamples) * sizeof(dng::i16));
         }
@@ -728,12 +740,13 @@ AudioStatus WinMmAudio::UnloadClip(AudioClipId clip) noexcept
     else if (removedClip.storage == ClipStorageKind::Stream)
     {
         if (removedClip.streamSlot >= kMaxStreamClips ||
-            !s_StreamClips[removedClip.streamSlot].valid)
+            m_StreamClips == nullptr ||
+            !m_StreamClips[removedClip.streamSlot].valid)
         {
             return AudioStatus::UnknownError;
         }
 
-        s_StreamClips[removedClip.streamSlot] = StreamClipState{};
+        m_StreamClips[removedClip.streamSlot] = StreamClipState{};
         if (m_LoadedStreamClipCount > 0)
         {
             --m_LoadedStreamClipCount;
@@ -769,8 +782,14 @@ bool WinMmAudio::Init(const WinMmAudioConfig& config) noexcept
         return false;
     }
 
-    if (s_GlobalClipPoolInUse)
+    dng::i16* clipSamplePool =
+        static_cast<dng::i16*>(std::calloc(kMaxClipSamplePool, sizeof(dng::i16)));
+    StreamClipState* streamClips =
+        static_cast<StreamClipState*>(std::calloc(kMaxStreamClips, sizeof(StreamClipState)));
+    if (clipSamplePool == nullptr || streamClips == nullptr)
     {
+        std::free(clipSamplePool);
+        std::free(streamClips);
         return false;
     }
 
@@ -787,18 +806,17 @@ bool WinMmAudio::Init(const WinMmAudioConfig& config) noexcept
     const MMRESULT openResult = ::waveOutOpen(&device, WAVE_MAPPER, &format, 0, 0, CALLBACK_NULL);
     if (openResult != MMSYSERR_NOERROR)
     {
+        std::free(clipSamplePool);
+        std::free(streamClips);
         return false;
     }
-
-    s_GlobalClipPoolInUse = true;
-    m_OwnsGlobalClipPool = true;
-    std::memset(s_ClipSamplePool, 0, sizeof(s_ClipSamplePool));
-    std::memset(s_StreamClips, 0, sizeof(s_StreamClips));
 
     m_Device = device;
     m_SampleRate = config.sampleRate;
     m_ChannelCount = config.channelCount;
     m_FramesPerBuffer = config.framesPerBuffer;
+    m_ClipSamplePool = clipSamplePool;
+    m_StreamClips = streamClips;
     m_IsInitialized = true;
     m_NextBufferIndex = 0;
     m_NextClipValue = 1;
@@ -807,6 +825,8 @@ bool WinMmAudio::Init(const WinMmAudioConfig& config) noexcept
     m_LoadedStreamClipCount = 0;
     m_StreamFileSystem = fs::FileSystemInterface{};
     m_HasStreamFileSystem = false;
+    m_UnderrunCount = 0;
+    m_SubmitErrorCount = 0;
     m_BusGains[0] = 1.0f;
     m_BusGains[1] = 1.0f;
     m_BusGains[2] = 1.0f;
@@ -870,6 +890,10 @@ void WinMmAudio::Shutdown() noexcept
     m_FramesPerBuffer = 1024;
     m_SampleRate = 48000;
     m_ChannelCount = 2;
+    std::free(m_ClipSamplePool);
+    std::free(m_StreamClips);
+    m_ClipSamplePool = nullptr;
+    m_StreamClips = nullptr;
     m_StreamFileSystem = fs::FileSystemInterface{};
     m_HasStreamFileSystem = false;
     m_BusGains[0] = 1.0f;
@@ -880,14 +904,6 @@ void WinMmAudio::Shutdown() noexcept
     m_SubmitErrorCount = 0;
     std::memset(m_WaveHeaders, 0, sizeof(m_WaveHeaders));
     std::memset(m_PcmBuffers, 0, sizeof(m_PcmBuffers));
-
-    if (m_OwnsGlobalClipPool)
-    {
-        std::memset(s_ClipSamplePool, 0, sizeof(s_ClipSamplePool));
-        std::memset(s_StreamClips, 0, sizeof(s_StreamClips));
-        s_GlobalClipPoolInUse = false;
-        m_OwnsGlobalClipPool = false;
-    }
 
     std::memset(m_Clips, 0, sizeof(m_Clips));
     std::memset(m_Voices, 0, sizeof(m_Voices));
@@ -1076,11 +1092,13 @@ AudioStatus WinMmAudio::Seek(AudioVoiceId voice, dng::u32 frameIndex) noexcept
     }
     else if (clip.storage == ClipStorageKind::Stream)
     {
-        if (clip.streamSlot >= kMaxStreamClips || !s_StreamClips[clip.streamSlot].valid)
+        if (clip.streamSlot >= kMaxStreamClips ||
+            m_StreamClips == nullptr ||
+            !m_StreamClips[clip.streamSlot].valid)
         {
             return AudioStatus::InvalidArg;
         }
-        clipFrameCount = s_StreamClips[clip.streamSlot].frameCount;
+        clipFrameCount = m_StreamClips[clip.streamSlot].frameCount;
     }
     else
     {
@@ -1196,13 +1214,13 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
         }
         else if (clip.storage == ClipStorageKind::Stream)
         {
-            if (clip.streamSlot >= kMaxStreamClips)
+            if (clip.streamSlot >= kMaxStreamClips || m_StreamClips == nullptr)
             {
                 ResetVoiceForInvalidClip(voice);
                 continue;
             }
 
-            streamState = &s_StreamClips[clip.streamSlot];
+            streamState = &m_StreamClips[clip.streamSlot];
             if (!streamState->valid ||
                 streamState->channelCount != clip.channelCount ||
                 streamState->sampleRate != clip.sampleRate)
@@ -1278,14 +1296,14 @@ void WinMmAudio::MixVoicesToBuffer(float* outSamples,
                 const dng::u32 srcBaseA = clip.sampleOffset + srcFrameA * static_cast<dng::u32>(clip.channelCount);
                 const dng::u32 srcBaseB = clip.sampleOffset + srcFrameB * static_cast<dng::u32>(clip.channelCount);
 
-                srcLeftA = Pcm16ToFloat(s_ClipSamplePool[srcBaseA]);
+                srcLeftA = Pcm16ToFloat(m_ClipSamplePool[srcBaseA]);
                 srcRightA = (clip.channelCount > 1u)
-                    ? Pcm16ToFloat(s_ClipSamplePool[srcBaseA + 1u])
+                    ? Pcm16ToFloat(m_ClipSamplePool[srcBaseA + 1u])
                     : srcLeftA;
 
-                srcLeftB = Pcm16ToFloat(s_ClipSamplePool[srcBaseB]);
+                srcLeftB = Pcm16ToFloat(m_ClipSamplePool[srcBaseB]);
                 srcRightB = (clip.channelCount > 1u)
-                    ? Pcm16ToFloat(s_ClipSamplePool[srcBaseB + 1u])
+                    ? Pcm16ToFloat(m_ClipSamplePool[srcBaseB + 1u])
                     : srcLeftB;
             }
             else

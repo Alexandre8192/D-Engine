@@ -360,16 +360,38 @@ int RunAudioSmoke()
         AudioSystemState secondPlatformState{};
         if (InitAudioSystem(secondPlatformState, secondPlatformConfig))
         {
-            ShutdownAudioSystem(secondPlatformState);
-            ShutdownAudioSystem(platformAutoState);
-            return 32;
-        }
+            if (secondPlatformState.backend != AudioSystemBackend::Platform)
+            {
+                ShutdownAudioSystem(secondPlatformState);
+                ShutdownAudioSystem(platformAutoState);
+                return 32;
+            }
 
-        if (secondPlatformState.isInitialized)
+            float secondPlatformBuffer[256]{};
+            AudioMixParams secondPlatformMix{};
+            secondPlatformMix.outSamples = secondPlatformBuffer;
+            secondPlatformMix.outputCapacitySamples = 256;
+            secondPlatformMix.sampleRate = secondPlatformConfig.platform.sampleRate;
+            secondPlatformMix.channelCount = secondPlatformConfig.platform.channelCount;
+            secondPlatformMix.requestedFrames = 64;
+
+            if (Mix(secondPlatformState, secondPlatformMix) != AudioStatus::Ok ||
+                secondPlatformMix.writtenSamples != 128 ||
+                GetLoadedClipCount(secondPlatformState) != 0 ||
+                GetClipPoolUsageSamples(secondPlatformState) != 0)
+            {
+                ShutdownAudioSystem(secondPlatformState);
+                ShutdownAudioSystem(platformAutoState);
+                return 33;
+            }
+
+            ShutdownAudioSystem(secondPlatformState);
+        }
+        else if (secondPlatformState.isInitialized)
         {
             ShutdownAudioSystem(secondPlatformState);
             ShutdownAudioSystem(platformAutoState);
-            return 33;
+            return 34;
         }
     }
 
