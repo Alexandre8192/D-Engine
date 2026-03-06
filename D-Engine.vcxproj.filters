@@ -60,9 +60,6 @@
     <ClInclude Include="Source\Core\Runtime\CoreRuntime.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Core\Timer.hpp">
-      <Filter>Source\Core</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Core\Types.hpp">
       <Filter>Source\Core</Filter>
     </ClInclude>
@@ -210,6 +207,9 @@
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\SelfContain\Audio_header_only.cpp">
+      <Filter>Source\Tests</Filter>
+    </ClCompile>
+    <ClCompile Include="tests\SelfContain\CoreMinimal_header_only.cpp">
       <Filter>Source\Tests</Filter>
     </ClCompile>
     <ClCompile Include="tests\SelfContain\CoreRuntime_header_only.cpp">
