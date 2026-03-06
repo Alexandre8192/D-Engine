@@ -15,7 +15,6 @@
 
 #include "Core/Platform/PlatformDefines.hpp"
 #include "Core/Platform/PlatformCompiler.hpp"
-#include "Core/Platform/PlatformTypes.hpp"
 #include "Core/Platform/PlatformMacros.hpp"
 #include "Core/Types.hpp"
 
