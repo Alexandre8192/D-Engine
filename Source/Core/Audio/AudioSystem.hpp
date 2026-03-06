@@ -7,12 +7,12 @@
 //           Lifetime of the backend is tied to AudioSystemState.
 //           Thread-safety and determinism follow AudioCaps from the backend;
 //           callers must serialize access per instance.
-// Notes   : Defaults to NullAudio. Platform backend (WinMM M2) can be
-//           selected via config with optional fallback to NullAudio when
-//           platform initialization fails. Voice control is command-queued
-//           through a fixed-capacity pool to avoid allocations in Mix(). WAV
-//           loading uses thread-local scratch storage and supports in-memory
-//           clips and streamed clips via FileSystem.
+// Notes   : Defaults to NullAudio. Platform backend can be selected via a
+//           generic audio-platform config with optional fallback to NullAudio
+//           when initialization fails. Voice control is command-queued through
+//           a fixed-capacity pool to avoid allocations in Mix(). WAV loading
+//           uses thread-local scratch storage and supports in-memory clips and
+//           streamed clips via FileSystem.
 //           Streamed clips require an explicit `BindStreamFileSystem()` and
 //           the bound FileSystem must outlive loaded streamed clips.
 // ============================================================================
@@ -29,8 +29,9 @@ namespace dng::audio
     inline constexpr dng::u32 kAudioSystemMaxVoices = 64;
     inline constexpr dng::u32 kAudioSystemMaxCommands = 256;
     inline constexpr dng::u32 kAudioSystemBusCount = static_cast<dng::u32>(AudioBus::Count);
+    inline constexpr dng::u32 kAudioSystemMaxInlineClipSamples = 65536u;
     inline constexpr dng::u32 kAudioSystemWavLoadScratchBytes =
-        (WinMmAudio::GetClipPoolCapacitySamples() * static_cast<dng::u32>(sizeof(dng::i16))) + 4096u;
+        (kAudioSystemMaxInlineClipSamples * static_cast<dng::u32>(sizeof(dng::i16))) + 4096u;
 
     enum class AudioSystemBackend : dng::u8
     {
@@ -39,10 +40,18 @@ namespace dng::audio
         External
     };
 
+    struct AudioPlatformConfig
+    {
+        dng::u32 sampleRate = 48000;
+        dng::u16 channelCount = 2;
+        dng::u16 reserved = 0;
+        dng::u32 framesPerBuffer = 1024;
+    };
+
     struct AudioSystemConfig
     {
         AudioSystemBackend backend = AudioSystemBackend::Null;
-        WinMmAudioConfig   platform{};
+        AudioPlatformConfig platform{};
         bool               fallbackToNullOnInitFailure = true;
     };
 
@@ -226,6 +235,16 @@ namespace dng::audio
                    a.vtable.readFile == b.vtable.readFile &&
                    a.vtable.readFileRange == b.vtable.readFileRange &&
                    a.vtable.getCaps == b.vtable.getCaps;
+        }
+
+        [[nodiscard]] inline WinMmAudioConfig ToWinMmAudioConfig(const AudioPlatformConfig& config) noexcept
+        {
+            WinMmAudioConfig backendConfig{};
+            backendConfig.sampleRate = config.sampleRate;
+            backendConfig.channelCount = config.channelCount;
+            backendConfig.reserved = config.reserved;
+            backendConfig.framesPerBuffer = config.framesPerBuffer;
+            return backendConfig;
         }
 
         [[nodiscard]] inline bool EnqueueCommand(AudioSystemState& state, const AudioCommand& command) noexcept
@@ -594,7 +613,7 @@ namespace dng::audio
             }
             case AudioSystemBackend::Platform:
             {
-                if (state.platformBackend.Init(config.platform))
+                if (state.platformBackend.Init(detail::ToWinMmAudioConfig(config.platform)))
                 {
                     AudioInterface iface = MakeWinMmAudioInterface(state.platformBackend);
                     return InitAudioSystemWithInterface(state, iface, AudioSystemBackend::Platform);
