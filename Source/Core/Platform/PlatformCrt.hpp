@@ -73,8 +73,9 @@ namespace dng::platform
 #if DNG_PLATFORM_WINDOWS
         return _aligned_malloc(size, align);
 #else
-        void* ptr = nullptr;
-        return (posix_memalign(&ptr, align, size) == 0) ? ptr : nullptr;
+        (void)size;
+        (void)align;
+        return nullptr;
 #endif
     }
 
@@ -83,7 +84,7 @@ namespace dng::platform
 #if DNG_PLATFORM_WINDOWS
         _aligned_free(ptr);
 #else
-        std::free(ptr);
+        (void)ptr;
 #endif
     }
 } // namespace dng::platform

@@ -10,7 +10,8 @@ int RunAudioSmoke()
         const AudioCaps caps = QueryCaps(state);
         return !state.isInitialized &&
                state.backend == AudioSystemBackend::Null &&
-               state.ownedBackendState == nullptr &&
+               state.ownedBackend.instance == nullptr &&
+               state.ownedBackend.destroy == nullptr &&
                caps.determinism == dng::DeterminismMode::Unknown &&
                caps.threadSafety == dng::ThreadSafetyMode::Unknown &&
                !caps.stableMixOrder;

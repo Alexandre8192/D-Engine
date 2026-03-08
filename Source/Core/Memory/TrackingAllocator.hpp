@@ -30,7 +30,6 @@
 #include <unordered_map>
 #endif
 #include <memory>
-#include <cstring>   // std::memset
 #include <cstddef>   // std::max_align_t
 #include <cstdint>   // std::uint64_t
 
@@ -297,189 +296,56 @@ namespace dng::core {
         // Notes   : Performs a defensive null check via `DNG_CHECK`.
         explicit TrackingAllocator(IAllocator* baseAllocator,
             std::uint32_t samplingRate = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SAMPLING_RATE),
-            std::uint32_t shardCount   = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS)) noexcept
-            : m_baseAllocator(baseAllocator)
-            , m_samplingRate(samplingRate == 0u ? 1u : samplingRate)
-        {
-            DNG_CHECK(baseAllocator != nullptr);
-#if DNG_MEM_TRACKING
-            InitializeShards(shardCount);
-#else
-            (void)shardCount;
-#endif
-        }
+            std::uint32_t shardCount   = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS)) noexcept;
 
         // Purpose : Optionally trigger leak reports on teardown based on compile-time policy flags.
         // Contract: No throwing; only active when both tracking and report-on-exit toggles are enabled.
         // Notes   : Keeps destructor lightweight when diagnostics are disabled.
-        ~TrackingAllocator() noexcept override {
-#if DNG_MEM_TRACKING && DNG_MEM_REPORT_ON_EXIT
-            ReportLeaks();
-#endif
-        }
+        ~TrackingAllocator() noexcept override;
 
         // IAllocator interface implementation
         // Purpose : Fallback entry point for callers without explicit tag metadata.
         // Contract: Normalizes alignment, funnels into `AllocateTagged` with default info.
         // Notes   : Keeps legacy callers functional while still counting monotonic stats.
-        [[nodiscard]] void* Allocate(usize size, usize alignment = alignof(std::max_align_t)) noexcept override {
-            AllocInfo defaultInfo(AllocTag::General, "Untagged");
-            return AllocateTagged(size, alignment, defaultInfo);
-        }
+        [[nodiscard]] void* Allocate(usize size, usize alignment = alignof(std::max_align_t)) noexcept override;
 
         // Purpose : Return memory to the wrapped allocator while updating diagnostics as available.
         // Contract: Accepts optional size/alignment hints; must match the original tuple when provided.
         // Notes   : Queries allocation map when full tracking is enabled to recover canonical tuple.
-        void Deallocate(void* ptr, usize size = 0, usize alignment = alignof(std::max_align_t)) noexcept override {
-            if (!ptr) return;
-
-            alignment = NormalizeAlignment(alignment);
-            usize forwardSize = size;
-            usize forwardAlignment = alignment;
-
-#if DNG_MEM_TRACKING
-            // Full tracking mode: look up allocation record
-            {
-                AllocationShard& shard = SelectShard(ptr);
-                std::lock_guard<std::mutex> lock(shard.mutex);
-                auto it = shard.allocations.find(ptr);
-                if (it != shard.allocations.end()) {
-                    const AllocationRecord& record = it->second;
-                    usize tagIndex = static_cast<usize>(record.info.tag);
-                    if (tagIndex < static_cast<usize>(AllocTag::Count)) {
-                        m_stats[tagIndex].RecordDeallocation(record.size);
-                    }
-                    forwardSize = record.size;
-                    forwardAlignment = record.alignment;
-                    shard.allocations.erase(it);
-                }
-            }
-#elif DNG_MEM_STATS_ONLY
-            // Statistics-only mode: use provided size hint
-            if (size > 0) {
-                m_stats[static_cast<usize>(AllocTag::General)].RecordDeallocation(size);
-            }
-#else
-            DNG_UNUSED(size);
-#endif
-            // Monotonic counters (free path)
-            m_totalFreeCalls.fetch_add(1, std::memory_order_relaxed);
-            if (forwardSize > 0) {
-                m_totalBytesFreed.fetch_add(static_cast<std::uint64_t>(forwardSize), std::memory_order_relaxed);
-            }
-
-            // Always forward the normalized (size, alignment) pair that matches the original allocation.
-            m_baseAllocator->Deallocate(ptr, forwardSize, forwardAlignment);
-        }
+        void Deallocate(void* ptr, usize size = 0, usize alignment = alignof(std::max_align_t)) noexcept override;
 
 
         // Purpose : Allocate memory while recording diagnostics metadata for the request.
         // Contract: Size must be non-zero; alignment normalized before delegating; invokes OOM policy on failure.
         // Notes   : Records into per-tag stats and optional allocation maps depending on build flags.
-        [[nodiscard]] void* AllocateTagged(usize size, usize alignment, const AllocInfo& info) noexcept {
-            if (size == 0) return nullptr;
-
-            alignment = NormalizeAlignment(alignment);
-
-            // Forward allocation to base allocator
-            void* ptr = m_baseAllocator->Allocate(size, alignment);
-            if (!ptr) {
-                DNG_MEM_CHECK_OOM(size, alignment, "TrackingAllocator::AllocateTagged");
-                return nullptr;
-            }
-            // Monotonic counters (allocation path)
-            m_totalAllocCalls.fetch_add(1, std::memory_order_relaxed);
-            m_totalBytesAllocated.fetch_add(static_cast<std::uint64_t>(size), std::memory_order_relaxed);
-
-#if DNG_MEM_TRACKING
-            // Full tracking mode: record allocation details
-            {
-                AllocationShard& shard = SelectShard(ptr);
-                std::lock_guard<std::mutex> lock(shard.mutex);
-                AllocationRecord record(size, alignment, info);
-                shard.allocations[ptr] = record;
-            }
-
-            // Update statistics
-            usize tagIndex = static_cast<usize>(info.tag);
-            if (tagIndex < static_cast<usize>(AllocTag::Count)) {
-                m_stats[tagIndex].RecordAllocation(size);
-            }
-#elif DNG_MEM_STATS_ONLY
-            // Statistics-only mode: update counters
-            usize tagIndex = static_cast<usize>(info.tag);
-            if (tagIndex < static_cast<usize>(AllocTag::Count)) {
-                m_stats[tagIndex].RecordAllocation(size);
-            }
-#else
-            DNG_UNUSED(info);
-#endif
-
-            return ptr;
-        }
+        [[nodiscard]] void* AllocateTagged(usize size, usize alignment, const AllocInfo& info) noexcept;
 
 #if DNG_MEM_TRACKING_ENABLED
         // Purpose : Expose per-tag live statistics collected for diagnostics.
         // Contract: `tag` must be within range; requires tracking or stats-only modes to be enabled.
         // Notes   : Returns a reference so callers can read atomic counters directly.
-        [[nodiscard]] const AllocatorStats& GetStats(AllocTag tag) const noexcept {
-            usize tagIndex = static_cast<usize>(tag);
-            DNG_CHECK(tagIndex < static_cast<usize>(AllocTag::Count));
-            return m_stats[tagIndex];
-        }
+        [[nodiscard]] const AllocatorStats& GetStats(AllocTag tag) const noexcept;
 
         // Purpose : Clear accumulated statistics without touching active allocation records.
         // Contract: Safe to invoke while allocations are ongoing; per-tag counters reset to zero.
         // Notes   : Available only when per-tag statistics are compiled in.
-        void ResetStats() noexcept {
-            for (auto& stats : m_stats) {
-                stats.Reset();
-            }
-        }
+        void ResetStats() noexcept;
 #endif // DNG_MEM_TRACKING_ENABLED
 
         // Purpose : Provide access to the wrapped allocator for advanced scenarios.
         // Contract: Pointer remains owned elsewhere; caller must not delete.
         // Notes   : Useful when callers need to forward requests without diagnostics.
-        [[nodiscard]] IAllocator* GetBaseAllocator() const noexcept {
-            return m_baseAllocator;
-        }
+        [[nodiscard]] IAllocator* GetBaseAllocator() const noexcept;
 
         // Purpose : Capture an instantaneous per-tag aggregate suitable for leak snapshot comparisons.
         // Contract: Thread-safe; callable concurrently with Allocate/Deallocate; yields zeros when stats disabled.
         // Notes   : Relies solely on relaxed atomic loads to avoid locking overhead.
-        [[nodiscard]] TrackingSnapshotView CaptureView() const noexcept
-        {
-            TrackingSnapshotView view{};
-
-#if DNG_MEM_TRACKING_ENABLED
-            for (std::size_t i = 0; i < view.byTag.size(); ++i)
-            {
-                const auto& stats = m_stats[i];
-                const std::size_t bytes = stats.current_bytes.load(std::memory_order_relaxed);
-                const std::size_t allocs = stats.current_allocations.load(std::memory_order_relaxed);
-                view.byTag[i].bytes = bytes;
-                view.byTag[i].allocs = allocs;
-                view.totalBytes += bytes;
-                view.totalAllocs += allocs;
-            }
-#endif
-
-            return view;
-        }
+        [[nodiscard]] TrackingSnapshotView CaptureView() const noexcept;
 
         // Purpose : Return a point-in-time copy of cumulative counters.
         // Contract: Lock-free; safe to invoke concurrently with allocations.
         // Notes   : Benchmarks consume the returned struct to compute deltas across iterations.
-        [[nodiscard]] TrackingMonotonicCounters CaptureMonotonic() const noexcept
-        {
-            TrackingMonotonicCounters s;
-            s.TotalAllocCalls     = m_totalAllocCalls.load(std::memory_order_relaxed);
-            s.TotalFreeCalls      = m_totalFreeCalls.load(std::memory_order_relaxed);
-            s.TotalBytesAllocated = m_totalBytesAllocated.load(std::memory_order_relaxed);
-            s.TotalBytesFreed     = m_totalBytesFreed.load(std::memory_order_relaxed);
-            return s;
-        }
+        [[nodiscard]] TrackingMonotonicCounters CaptureMonotonic() const noexcept;
 
         // Forward declarations for methods implemented in task 7.2
         // Purpose : Emit aggregate statistics to the engine logger or diagnostics sinks.
@@ -499,61 +365,6 @@ namespace dng::core {
         usize GetActiveAllocationCount() const noexcept;
 #endif
     };
-
-#if DNG_MEM_TRACKING
-    inline void TrackingAllocator::InitializeShards(std::uint32_t shardCount) noexcept
-    {
-        if (shardCount == 0u || !::dng::core::IsPowerOfTwo(shardCount))
-        {
-            m_shardCount = 1u;
-            m_shardMask = 0u;
-            m_shards.reset();
-            return;
-        }
-
-        m_shardCount = shardCount;
-        m_shardMask = shardCount - 1u;
-        if (m_shardCount > 1u)
-        {
-            m_shards = std::make_unique<AllocationShard[]>(m_shardCount);
-        }
-        else
-        {
-            m_shards.reset();
-            m_shardMask = 0u;
-        }
-    }
-
-    inline TrackingAllocator::AllocationShard& TrackingAllocator::SelectShard(void* ptr) noexcept
-    {
-        if (m_shardCount > 1u && m_shards)
-        {
-            const std::uint32_t index = ComputeShardIndex(ptr);
-            return m_shards[index];
-        }
-        return m_singleShard;
-    }
-
-    inline const TrackingAllocator::AllocationShard& TrackingAllocator::SelectShard(const void* ptr) const noexcept
-    {
-        if (m_shardCount > 1u && m_shards)
-        {
-            const std::uint32_t index = ComputeShardIndex(ptr);
-            return m_shards[index];
-        }
-        return m_singleShard;
-    }
-
-    inline std::uint32_t TrackingAllocator::ComputeShardIndex(const void* ptr) const noexcept
-    {
-        if (m_shardMask == 0u)
-        {
-            return 0u;
-        }
-        const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(ptr));
-        return static_cast<std::uint32_t>((address >> 4u) & m_shardMask);
-    }
-#endif
 
 #if DNG_MEM_TRACKING && DNG_MEM_REPORT_ON_EXIT
     // Purpose : Ensure ReportLeaks() is invoked on scope exit when diagnostics policy requires it.

@@ -59,11 +59,43 @@ int main()
         return 1;
     }
 
+    if (module_api.interface_count != 1u || module_api.interfaces == NULL)
+    {
+        printf("Module catalogue shape invalid\n");
+        return 14;
+    }
+
+    if (module_api.shutdown == NULL || module_api.module_ctx == NULL)
+    {
+        printf("Stateful module must export shutdown + non-null module_ctx\n");
+        return 15;
+    }
+
+    const dng_module_interface_v1* window_entry =
+        dng::FindModuleInterface(module_api, dng::ModuleAbiLiteral(DNG_MODULE_INTERFACE_NAME_WINDOW), DNG_ABI_VERSION_V1);
+    if (!window_entry || window_entry != module_api.interfaces)
+    {
+        printf("Exact window interface lookup failed\n");
+        return 16;
+    }
+
+    if (dng::FindModuleInterface(module_api, dng::ModuleAbiLiteral(DNG_MODULE_INTERFACE_NAME_WINDOW), DNG_ABI_VERSION_V1 + 1u) != nullptr)
+    {
+        printf("Unexpected window interface export for wrong version\n");
+        return 17;
+    }
+
     const dng_window_api_v1* window_api = dng::GetWindowApiV1(module_api);
     if (!window_api)
     {
         printf("Module did not expose dng.window v1\n");
         return 2;
+    }
+
+    if (window_entry->api != reinterpret_cast<const dng_abi_header_v1*>(window_api))
+    {
+        printf("Window interface payload pointer mismatch\n");
+        return 18;
     }
 
     if (dng::FindModuleInterface(module_api, dng::ModuleAbiLiteral("dng.audio"), DNG_ABI_VERSION_V1) != nullptr)

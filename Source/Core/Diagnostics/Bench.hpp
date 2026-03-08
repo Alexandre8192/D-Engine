@@ -28,17 +28,9 @@
 #include <type_traits> // std::is_same
 #include <limits>      // std::numeric_limits
 #include <cstdio>      // std::snprintf
-#include <cstdlib>     // std::getenv
-#include <errno.h>     // errno, EEXIST
-#include "Core/Platform/PlatformCompiler.hpp"
+#include "Core/Platform/PlatformCrt.hpp"
+#include "Core/Platform/PlatformDirectory.hpp"
 #include "Core/Platform/PlatformDefines.hpp"
-
-#if DNG_PLATFORM_WINDOWS
-    #include <direct.h>    // _mkdir
-#else
-    #include <sys/types.h>
-    #include <sys/stat.h>  // mkdir
-#endif
 
 // --- Optional memory tracking integration ----------------------------------
 // Define DNG_MEM_TRACKING to enable per-op memory/alloc counts.
@@ -75,15 +67,7 @@ namespace bench {
 #else
     static constexpr const char* kDefault = "artifacts/bench";
 #endif
-    // MSVC marks getenv as deprecated; use a targeted pragma to silence 4996 here.
-#if DNG_COMPILER_MSVC
-#   pragma warning(push)
-#   pragma warning(disable:4996)
-#endif
-    const char* env = std::getenv("DNG_BENCH_OUT");
-#if DNG_COMPILER_MSVC
-#   pragma warning(pop)
-#endif
+    const char* env = ::dng::platform::GetEnvNoWarn("DNG_BENCH_OUT");
     if (env && env[0] != '\0')
         return env;
     return kDefault;
@@ -99,66 +83,12 @@ namespace bench {
 //     paths longer than this are not supported and will fail gracefully.
 //   - Thread-safety: benign races if called concurrently; multiple callers may
 //     attempt to create the same component; EEXIST is tolerated.
-// Notes   : Avoids <filesystem>; uses _mkdir (Windows) or mkdir (POSIX).
+// Notes   : Delegates directory creation to the platform layer to stay
+//           toolchain-agnostic and avoid raw OS headers here.
 // ---
 [[nodiscard]] inline bool EnsureBenchOutputDirExists() noexcept
 {
-    const char* path = BenchOutputDir();
-    if (!path || path[0] == '\0')
-        return false;
-
-    constexpr std::size_t kMax = 1024; // hard ceiling to avoid dynamic allocs
-    char buf[kMax + 1]{};
-    std::size_t len = 0;
-
-#if DNG_PLATFORM_WINDOWS
-    const char kSep = '\\';
-#else
-    const char kSep = '/';
-#endif
-
-    // Build the path and create each prefix directory when a separator is seen.
-    for (const char* p = path; ; ++p)
-    {
-        const char c = *p;
-        const bool atEnd = (c == '\0');
-        const bool isSep = (!atEnd) && (c == '/' || c == '\\');
-
-        if (!atEnd)
-        {
-            const char outc = (c == '/' || c == '\\') ? kSep : c;
-            if (len >= kMax) return false;
-            buf[len++] = outc;
-        }
-
-        if (isSep || atEnd)
-        {
-            // Determine prefix length without trailing separators
-            std::size_t t = len;
-            while (t > 0 && buf[t - 1] == kSep) { --t; }
-            if (t > 0)
-            {
-                const char saved = buf[t];
-                buf[t] = '\0';
-#if DNG_PLATFORM_WINDOWS
-                if (_mkdir(buf) != 0)
-                {
-                    if (errno != EEXIST)
-                        return false;
-                }
-#else
-                if (mkdir(buf, 0777) != 0)
-                {
-                    if (errno != EEXIST)
-                        return false;
-                }
-#endif
-                buf[t] = saved;
-            }
-            if (atEnd) break;
-        }
-    }
-    return true;
+    return ::dng::platform::EnsureDirectoryTree(BenchOutputDir());
 }
 
 

@@ -4,10 +4,10 @@
 // Purpose : High-level audio system facade that owns built-in backends and
 //           exposes unified frame mixing to the rest of the engine.
 // Contract: Self-contained public header, no exceptions/RTTI. Built-in backend
-//           ownership stays opaque to callers through an implementation-owned
-//           pointer carried by AudioSystemState; platform-specific work is
-//           implemented in AudioSystem.cpp. Hot paths remain allocation-free
-//           once initialized.
+//           ownership stays opaque to callers through an init/shutdown-only
+//           type-erased handle carried by AudioSystemState; platform-specific
+//           work is implemented in AudioSystem.cpp. Hot paths remain
+//           allocation-free once initialized.
 // Notes   : Defaults to NullAudio. Platform backend can be selected via a
 //           generic audio-platform config with optional fallback to NullAudio
 //           when initialization fails. Voice control is command-queued through
@@ -90,11 +90,21 @@ namespace dng::audio
     static_assert(std::is_trivially_copyable_v<AudioCommand>);
     static_assert(std::is_trivially_copyable_v<AudioVoiceState>);
 
+    // Purpose : Carry ownership of one built-in backend instance without
+    //           exposing its concrete type in the public facade.
+    // Contract: Populated only during InitAudioSystem(); released only during
+    //           ShutdownAudioSystem(); hot paths must treat it as opaque.
+    struct AudioOwnedBackendHandle
+    {
+        void* instance = nullptr;
+        void (*destroy)(void* instance) noexcept = nullptr;
+    };
+
     struct AudioSystemState
     {
         AudioInterface          interface{};
         AudioSystemBackend      backend = AudioSystemBackend::Null;
-        void*                   ownedBackendState = nullptr;
+        AudioOwnedBackendHandle ownedBackend{};
         AudioVoiceState         voices[kAudioSystemMaxVoices]{};
         AudioCommand            commandQueue[kAudioSystemMaxCommands]{};
         dng::u32                commandReadIndex = 0;

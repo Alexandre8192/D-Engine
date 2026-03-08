@@ -25,6 +25,7 @@
     <ClInclude Include="Source\Core\Logger.hpp" />
     <ClInclude Include="Source\Core\Contracts\Audio.hpp" />
     <ClInclude Include="Source\Core\Audio\NullAudio.hpp" />
+    <ClInclude Include="Source\Core\Audio\WinMmAudioInternal.hpp" />
     <ClInclude Include="Source\Core\Audio\WinMmAudio.hpp" />
     <ClInclude Include="Source\Core\Audio\AudioSystem.hpp" />
     <ClInclude Include="Source\Core\Runtime\CoreRuntime.hpp" />
@@ -50,7 +51,9 @@
     <ClInclude Include="Source\Core\Memory\TrackingAllocator.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformCompiler.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformCrt.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformDirectory.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformDefines.hpp" />
+    <ClInclude Include="Source\Core\Platform\PlatformDynamicLibrary.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformMacros.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformProcess.hpp" />
     <ClInclude Include="Source\Core\Platform\PlatformTypes.hpp" />
@@ -66,10 +69,13 @@
   <ItemGroup>
     <ClCompile Include="Source\Core\Memory\Allocator.cpp" />
     <ClCompile Include="Source\Core\Audio\AudioSystem.cpp" />
+    <ClCompile Include="Source\Core\Audio\WinMmAudio.Device.cpp" />
+    <ClCompile Include="Source\Core\Audio\WinMmAudio.Mix.cpp" />
     <ClCompile Include="Source\Core\Audio\WinMmAudio.cpp" />
     <ClCompile Include="Source\Core\Runtime\CoreRuntime.cpp" />
     <ClCompile Include="Source\Core\Memory\MemorySystem.cpp" />
     <ClCompile Include="Source\Core\Memory\GlobalNewDelete.cpp" />
+    <ClCompile Include="Source\Core\Memory\SmallObjectAllocator.cpp" />
     <ClCompile Include="Source\Core\Memory\TrackingAllocator.cpp" />
     <ClCompile Include="Source\Core\Interop\ModuleLoader.cpp" />
     <ClCompile Include="Source\Core\Math\Math.cpp" />

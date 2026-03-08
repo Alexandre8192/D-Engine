@@ -10,12 +10,10 @@
 // ============================================================================
 #include "Core/Interop/ModuleLoader.hpp"
 #include "Core/Platform/PlatformDefines.hpp"
+#include "Core/Platform/PlatformDynamicLibrary.hpp"
 
 #if DNG_PLATFORM_WINDOWS
-    #include <windows.h>
     #include <stdio.h>
-#else
-    #include <dlfcn.h>
 #endif
 
 #include <string.h>
@@ -178,9 +176,9 @@ namespace
             return DNG_STATUS_INVALID_ARG;
         }
 
-        if (api->shutdown && !api->module_ctx)
+        if (api->shutdown != nullptr && api->module_ctx == nullptr)
         {
-            LogIssue(host, "ModuleApi module_ctx is null");
+            LogIssue(host, "ModuleApi shutdown requires non-null module_ctx");
             return DNG_STATUS_INVALID_ARG;
         }
 
@@ -220,9 +218,9 @@ namespace
             return;
         }
 
-        const DWORD err = ::GetLastError();
+        const unsigned long err = ::dng::platform::GetLastOsErrorCode();
         char buf[128];
-        const int n = ::snprintf(buf, sizeof(buf), "%s (err=%lu)", prefix, (unsigned long)err);
+        const int n = ::snprintf(buf, sizeof(buf), "%s (err=%lu)", prefix, err);
         (void)n;
 
         dng_str_view_v1 view;
@@ -275,52 +273,52 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     }
 
 #if DNG_PLATFORM_WINDOWS
-    HMODULE lib = ::LoadLibraryA(path);
+    ::dng::platform::SharedLibraryHandle lib = ::dng::platform::LoadSharedLibrary(path);
     if (!lib)
     {
         LogWin32Error(host, 1u, "LoadLibraryA failed");
         return DNG_STATUS_FAIL;
     }
 
-    FARPROC proc = ::GetProcAddress(lib, DNG_MODULE_GET_API_V2_NAME);
+    void* proc = ::dng::platform::LoadSharedLibrarySymbol(lib, DNG_MODULE_GET_API_V2_NAME);
     if (!proc)
     {
         // Optional x86 fallback: some toolchains decorate __cdecl exports with a leading underscore.
-        proc = ::GetProcAddress(lib, "_" DNG_MODULE_GET_API_V2_NAME);
+        proc = ::dng::platform::LoadSharedLibrarySymbol(lib, "_" DNG_MODULE_GET_API_V2_NAME);
     }
 
     if (!proc)
     {
         Log(host, 1u, "dngModuleGetApi_v2 not found");
-        ::FreeLibrary(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
         return DNG_STATUS_UNSUPPORTED;
     }
 
     auto entry = reinterpret_cast<dng_status_v1 (DNG_ABI_CALL *)(const dng_host_api_v1*, dng_module_api_v2*)>(proc);
 #else
     // RTLD_NOW resolves relocations at load time; RTLD_LOCAL avoids exporting symbols globally.
-    void* lib = ::dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    ::dng::platform::SharedLibraryHandle lib = ::dng::platform::LoadSharedLibrary(path);
     if (!lib)
     {
-        const char* err = ::dlerror();
+        const char* err = ::dng::platform::GetSharedLibraryLastErrorMessage();
         Log(host, 1u, err ? err : "dlopen failed");
         return DNG_STATUS_FAIL;
     }
 
     // Clear any prior error before calling dlsym.
-    (void)::dlerror();
-    void* sym = ::dlsym(lib, DNG_MODULE_GET_API_V2_NAME);
-    const char* sym_err = ::dlerror();
+    ::dng::platform::ClearSharedLibraryErrorState();
+    void* sym = ::dng::platform::LoadSharedLibrarySymbol(lib, DNG_MODULE_GET_API_V2_NAME);
+    const char* sym_err = ::dng::platform::GetSharedLibraryLastErrorMessage();
     if (sym_err != nullptr)
     {
         Log(host, 1u, sym_err);
-        ::dlclose(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
         return DNG_STATUS_UNSUPPORTED;
     }
     if (!sym)
     {
         Log(host, 1u, "dlsym returned null for dngModuleGetApi_v2");
-        ::dlclose(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
         return DNG_STATUS_UNSUPPORTED;
     }
 
@@ -332,9 +330,9 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     if (!scratch)
     {
 #if DNG_PLATFORM_WINDOWS
-        ::FreeLibrary(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
 #else
-        ::dlclose(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
 #endif
         return DNG_STATUS_OUT_OF_MEMORY;
     }
@@ -363,9 +361,9 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     {
         Log(host, 1u, "Module entrypoint overwrote the ABI scratch buffer");
 #if DNG_PLATFORM_WINDOWS
-        ::FreeLibrary(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
 #else
-        ::dlclose(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
 #endif
         host->free(host->user, scratch, sizeof(ModuleApiScratchBufferV2), alignof(ModuleApiScratchBufferV2));
         return DNG_STATUS_UNSUPPORTED;
@@ -374,9 +372,9 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     if (status != DNG_STATUS_OK)
     {
 #if DNG_PLATFORM_WINDOWS
-        ::FreeLibrary(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
 #else
-        ::dlclose(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
 #endif
         host->free(host->user, scratch, sizeof(ModuleApiScratchBufferV2), alignof(ModuleApiScratchBufferV2));
         return status;
@@ -387,9 +385,9 @@ dng_status_v1 ModuleLoader::Load(const char* path, const dng_host_api_v1* host, 
     {
         Log(host, 1u, "Module returned an invalid API table");
 #if DNG_PLATFORM_WINDOWS
-        ::FreeLibrary(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
 #else
-        ::dlclose(lib);
+        ::dng::platform::UnloadSharedLibrary(lib);
 #endif
         host->free(host->user, scratch, sizeof(ModuleApiScratchBufferV2), alignof(ModuleApiScratchBufferV2));
         return api_ok;
@@ -409,9 +407,9 @@ void ModuleLoader::Unload() noexcept
     }
 
 #if DNG_PLATFORM_WINDOWS
-    ::FreeLibrary(static_cast<HMODULE>(m_handle));
+    ::dng::platform::UnloadSharedLibrary(m_handle);
 #else
-    ::dlclose(m_handle);
+    ::dng::platform::UnloadSharedLibrary(m_handle);
 #endif
     m_handle = nullptr;
 }
