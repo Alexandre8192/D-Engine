@@ -37,39 +37,56 @@ namespace dng::input
         bool               isInitialized = false;
     };
 
-    [[nodiscard]] inline bool InitInputSystemWithInterface(InputSystemState& state,
-                                                           InputInterface interface,
-                                                           InputSystemBackend backend) noexcept
+    namespace detail
     {
-        if (interface.userData == nullptr ||
-            interface.vtable.getCaps == nullptr ||
-            interface.vtable.pollEvents == nullptr)
+        [[nodiscard]] inline bool IsValidInputSystemInterface(const InputInterface& interface) noexcept
         {
-            return false;
+            return interface.userData != nullptr &&
+                   interface.vtable.getCaps != nullptr &&
+                   interface.vtable.pollEvents != nullptr;
         }
 
-        state.interface     = interface;
-        state.backend       = backend;
-        state.isInitialized = true;
-        return true;
+        inline void ResetInputSystemState(InputSystemState& state) noexcept
+        {
+            state = InputSystemState{};
+        }
+
+        [[nodiscard]] inline bool BindInputSystemState(InputSystemState& state,
+                                                       InputInterface interface,
+                                                       InputSystemBackend backend) noexcept
+        {
+            if (!IsValidInputSystemInterface(interface))
+            {
+                return false;
+            }
+
+            state.interface     = interface;
+            state.backend       = backend;
+            state.isInitialized = true;
+            return true;
+        }
+    } // namespace detail
+
+    [[nodiscard]] inline bool InitInputSystemWithInterface(InputSystemState& state,
+                                                           InputInterface interface) noexcept
+    {
+        detail::ResetInputSystemState(state);
+        return detail::BindInputSystemState(state, interface, InputSystemBackend::External);
     }
 
     [[nodiscard]] inline bool InitInputSystem(InputSystemState& state,
                                               const InputSystemConfig& config) noexcept
     {
-        state = InputSystemState{};
+        detail::ResetInputSystemState(state);
 
         switch (config.backend)
         {
             case InputSystemBackend::Null:
             {
                 InputInterface iface = MakeNullInputInterface(state.nullBackend);
-                return InitInputSystemWithInterface(state, iface, InputSystemBackend::Null);
+                return detail::BindInputSystemState(state, iface, InputSystemBackend::Null);
             }
             case InputSystemBackend::External:
-            {
-                return false; // Must be injected via InitInputSystemWithInterface.
-            }
             default:
             {
                 return false;
@@ -79,10 +96,7 @@ namespace dng::input
 
     inline void ShutdownInputSystem(InputSystemState& state) noexcept
     {
-        state.interface     = InputInterface{};
-        state.backend       = InputSystemBackend::Null;
-        state.nullBackend   = NullInput{};
-        state.isInitialized = false;
+        detail::ResetInputSystemState(state);
     }
 
     [[nodiscard]] inline InputCaps QueryCaps(const InputSystemState& state) noexcept

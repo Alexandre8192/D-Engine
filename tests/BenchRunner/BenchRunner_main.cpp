@@ -16,6 +16,8 @@
 #include "Core/Memory/FrameAllocator.hpp"
 #include "Core/Memory/MemorySystem.hpp"
 #include "Core/Memory/PoolAllocator.hpp"
+#include "Core/Platform/PlatformCrt.hpp"
+#include "Core/Platform/PlatformProcess.hpp"
 #include "Core/Simulation/CrowdSim.hpp"
 #include "Core/Simulation/CrowdSimJobs.hpp"
 #include "Core/Simulation/CrowdSubmit.hpp"
@@ -38,11 +40,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#if defined(_WIN32) || defined(_WIN64)
-    #define NOMINMAX
-    #include <windows.h>
-#endif
 
 namespace
 {
@@ -161,16 +158,8 @@ namespace
 
     std::string GetEnv(const char* name)
     {
-        char* buffer = nullptr;
-        std::size_t len = 0;
-        if (_dupenv_s(&buffer, &len, name) != 0 || buffer == nullptr)
-        {
-            return {};
-        }
-
-        std::string value{buffer};
-        std::free(buffer);
-        return value;
+        const char* value = dng::platform::GetEnvNoWarn(name);
+        return (value != nullptr) ? std::string{value} : std::string{};
     }
 
     std::string BuildOutputPath()
@@ -353,38 +342,17 @@ namespace
 
     void PrintCpuInfo() noexcept
     {
-#if defined(_WIN32) || defined(_WIN64)
-        const HANDLE process = ::GetCurrentProcess();
-        DWORD_PTR processMask = 0;
-        DWORD_PTR systemMask = 0;
-        const BOOL maskOk = ::GetProcessAffinityMask(process, &processMask, &systemMask);
-
-        const DWORD logicalCpuCount = ::GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
-        const DWORD priorityClass = ::GetPriorityClass(process);
-
-        const char* priorityText = "UNKNOWN";
-        switch (priorityClass)
+        const dng::platform::ProcessRuntimeInfo info = dng::platform::QueryCurrentProcessRuntimeInfo();
+        if (!info.isAvailable)
         {
-            case IDLE_PRIORITY_CLASS:         priorityText = "IDLE"; break;
-            case BELOW_NORMAL_PRIORITY_CLASS: priorityText = "BELOW_NORMAL"; break;
-            case NORMAL_PRIORITY_CLASS:       priorityText = "NORMAL"; break;
-            case ABOVE_NORMAL_PRIORITY_CLASS: priorityText = "ABOVE_NORMAL"; break;
-            case HIGH_PRIORITY_CLASS:         priorityText = "HIGH"; break;
-            case REALTIME_PRIORITY_CLASS:     priorityText = "REALTIME"; break;
-            default:                          break;
+            std::printf("[CPU] cpu-info not supported on this platform\n");
+            return;
         }
 
-        const unsigned long long affinityValue = maskOk
-            ? static_cast<unsigned long long>(processMask)
-            : 0ull;
-
         std::printf("[CPU] logical=%lu affinity=0x%llx priority=%s\n",
-                    static_cast<unsigned long>(logicalCpuCount),
-                    affinityValue,
-                    priorityText);
-#else
-        std::printf("[CPU] cpu-info not supported on this platform\n");
-#endif
+                    static_cast<unsigned long>(info.logicalCpuCount),
+                    static_cast<unsigned long long>(info.processAffinityMask),
+                    info.priorityClassName);
     }
 
     double ComputeMean(const std::vector<double>& values)
@@ -1256,15 +1224,7 @@ namespace
         }
 
         std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-        if (fopen_s(&file, path, "wb") != 0)
-        {
-            file = nullptr;
-        }
-#else
-        file = std::fopen(path, "wb");
-#endif
-        if (file == nullptr)
+        if (!dng::platform::OpenFileWriteBinary(path, file))
         {
             return false;
         }
@@ -1342,15 +1302,7 @@ namespace
             }
 
             std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-            if (fopen_s(&file, cPath, "rb") != 0)
-            {
-                file = nullptr;
-            }
-#else
-            file = std::fopen(cPath, "rb");
-#endif
-            if (file == nullptr)
+            if (!dng::platform::OpenFileReadBinary(cPath, file))
             {
                 return dng::fs::FsStatus::NotFound;
             }
@@ -1369,15 +1321,7 @@ namespace
             }
 
             std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-            if (fopen_s(&file, cPath, "rb") != 0)
-            {
-                file = nullptr;
-            }
-#else
-            file = std::fopen(cPath, "rb");
-#endif
-            if (file == nullptr)
+            if (!dng::platform::OpenFileReadBinary(cPath, file))
             {
                 return dng::fs::FsStatus::NotFound;
             }
@@ -1417,15 +1361,7 @@ namespace
             }
 
             std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-            if (fopen_s(&file, cPath, "rb") != 0)
-            {
-                file = nullptr;
-            }
-#else
-            file = std::fopen(cPath, "rb");
-#endif
-            if (file == nullptr)
+            if (!dng::platform::OpenFileReadBinary(cPath, file))
             {
                 return dng::fs::FsStatus::NotFound;
             }
@@ -1468,15 +1404,7 @@ namespace
             }
 
             std::FILE* file = nullptr;
-#if defined(_MSC_VER)
-            if (fopen_s(&file, cPath, "rb") != 0)
-            {
-                file = nullptr;
-            }
-#else
-            file = std::fopen(cPath, "rb");
-#endif
-            if (file == nullptr)
+            if (!dng::platform::OpenFileReadBinary(cPath, file))
             {
                 return dng::fs::FsStatus::NotFound;
             }

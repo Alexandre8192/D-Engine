@@ -4,33 +4,63 @@ int RunFileSystemSmoke()
 {
     using namespace dng::fs;
 
+    const auto isReset = [](const FileSystemSystemState& state) noexcept
+    {
+        const FileSystemCaps caps = QueryCaps(state);
+        return !state.isInitialized &&
+               state.backend == FileSystemSystemBackend::Null &&
+               caps.determinism == dng::DeterminismMode::Unknown &&
+               caps.threadSafety == dng::ThreadSafetyMode::Unknown &&
+               !caps.stableOrderingRequired;
+    };
+
     FileSystemSystemState uninitialized{};
-    const FileSystemCaps uninitCaps = QueryCaps(uninitialized);
-    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
-        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
-        uninitCaps.stableOrderingRequired)
+    if (!isReset(uninitialized))
     {
         return 6;
     }
+
+    FileSystemSystemConfig config{};
 
     NullFileSystem nullBackendForValidation{};
     FileSystemInterface brokenInterface = MakeNullFileSystemInterface(nullBackendForValidation);
     brokenInterface.vtable.getCaps = nullptr;
     FileSystemSystemState rejected{};
-    if (InitFileSystemSystemWithInterface(rejected, brokenInterface, FileSystemSystemBackend::External))
+    if (!InitFileSystemSystem(rejected, config))
     {
         return 7;
     }
+    if (InitFileSystemSystemWithInterface(rejected, brokenInterface))
+    {
+        return 8;
+    }
+    if (!isReset(rejected))
+    {
+        return 9;
+    }
+
+    FileSystemSystemConfig rejectedConfig{};
+    rejectedConfig.backend = FileSystemSystemBackend::External;
+    if (!InitFileSystemSystem(rejected, config))
+    {
+        return 10;
+    }
+    if (InitFileSystemSystem(rejected, rejectedConfig))
+    {
+        return 11;
+    }
+    if (!isReset(rejected))
+    {
+        return 12;
+    }
 
     FileSystemSystemState state{};
-    FileSystemSystemConfig config{};
-
     if (!InitFileSystemSystem(state, config))
     {
         return 1;
     }
 
-    const FileSystemCaps caps = QueryCaps(state.interface);
+    const FileSystemCaps caps = QueryCaps(state);
     if (caps.determinism != dng::DeterminismMode::Replay ||
         caps.threadSafety != dng::ThreadSafetyMode::ExternalSync ||
         !caps.stableOrderingRequired)

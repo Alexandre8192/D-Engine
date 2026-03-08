@@ -86,6 +86,16 @@ namespace dng::jobs
         {
             return stats;
         }
+
+        // ---
+        // Purpose : Reset instrumentation counters without changing backend behavior.
+        // Contract: No allocations, no exceptions; restores all stats fields to zero.
+        // Notes   : Intended for tests and observability tooling. Job execution remains inline and deterministic.
+        // ---
+        void ResetStats() noexcept
+        {
+            stats = Stats{};
+        }
     };
 
     static_assert(JobsBackend<NullJobs>, "NullJobs must satisfy jobs backend concept.");
