@@ -336,7 +336,6 @@ namespace dng::audio
             return true;
         }
 
-        inline thread_local dng::u8 g_AudioWavLoadScratch[kAudioSystemWavLoadScratchBytes]{};
     } // namespace
 
     dng::u64 GetUnderrunCount(const AudioSystemState& state) noexcept
@@ -420,7 +419,7 @@ namespace dng::audio
 
         dng::u64 bytesRead = 0;
         const fs::FsStatus readStatus =
-            fs::ReadFile(fileSystem, path, g_AudioWavLoadScratch, fileSize, bytesRead);
+            fs::ReadFile(fileSystem, path, state.wavLoadScratch, fileSize, bytesRead);
         if (readStatus != fs::FsStatus::Ok)
         {
             return MapFsStatus(readStatus);
@@ -431,7 +430,7 @@ namespace dng::audio
             return AudioStatus::UnknownError;
         }
 
-        return backend->LoadWavPcm16Clip(g_AudioWavLoadScratch,
+        return backend->LoadWavPcm16Clip(state.wavLoadScratch,
                                          static_cast<dng::u32>(bytesRead),
                                          outClip);
     }
