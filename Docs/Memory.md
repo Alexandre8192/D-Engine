@@ -24,7 +24,7 @@ Last updated: 2025-10-31
 	- [PoolAllocator (Persistent, fixed shape)](#poolallocator-persistent-fixed-shape)
 	- [GuardAllocator (High-safety)](#guardallocator-high-safety)
 	- [TrackingAllocator (High-safety diagnostics)](#trackingallocator-high-safety-diagnostics)
-	- [Parent allocator fallback (High alignment / large payloads)](#parent-allocator-fallback-high-alignment--large-payloads)
+	- [Parent allocator fallback (High alignment / large payloads)](#parent-allocator-fallback-high-alignment-large-payloads)
 - [Effective defaults (Release)](#effective-defaults-release)
 - [Precedence and observability](#precedence-and-observability)
 - [Constraints and clamping](#constraints-and-clamping)

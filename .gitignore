@@ -83,6 +83,7 @@ Makefile
 # Benchmark outputs (local/CI artifacts)
 artifacts/
 out/
+site/
 **/*.bench.json
 **/*.bench.csv
 
@@ -94,6 +95,7 @@ build_log.txt
 
 # Optional editor caches
 .vscode/
+.venv-docs/
 
 # Researches data
 Researches/
