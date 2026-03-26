@@ -12,9 +12,9 @@
 //           generic audio-platform config with optional fallback to NullAudio
 //           when initialization fails. Voice control is command-queued through
 //           a fixed-capacity pool to avoid allocations in Mix(). WAV loading
-//           uses thread-local scratch storage and supports in-memory clips and
-//           streamed clips via FileSystem. Copying an initialized
-//           AudioSystemState is unsupported.
+//           uses per-state scratch storage (AudioSystemState::wavLoadScratch)
+//           and supports in-memory clips and streamed clips via FileSystem.
+//           Copying an initialized AudioSystemState is unsupported.
 // ============================================================================
 
 #pragma once
@@ -116,6 +116,7 @@ namespace dng::audio
         bool                    hasStreamFileSystem = false;
         bool                    isInitialized = false;
         dng::u8                 reserved[6]{};
+        dng::u8                 wavLoadScratch[kAudioSystemWavLoadScratchBytes]{};
     };
 
     [[nodiscard]] inline bool IsVoiceHandleInRange(AudioVoiceId voice) noexcept
