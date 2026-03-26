@@ -1,0 +1,72 @@
+site_name: D-Engine Docs
+site_url: https://alexandre8192.github.io/D-Engine/
+repo_url: https://github.com/Alexandre8192/D-Engine
+docs_dir: Docs
+site_dir: site
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.instant
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - tables
+  - toc:
+      permalink: true
+
+not_in_nav: |
+  dev/
+  ABI_Interop_Policy.md
+  ABI_Module_Authoring.md
+  ABI_Review_Checklist.md
+  Benchmarks.md
+  BenchProtocol.md
+  Containers.md
+  D-Engine_v0.1_Scope.md
+  DeterminismPolicy.md
+  HeaderFirstStrategy.md
+  Implementation_Snapshot.md
+  LanguagePolicy.md
+  Math.md
+  Memory.md
+  PolicyMatrix.md
+  Renderer_Vision.md
+  ThreadingRules.md
+  TimePolicy.md
+
+nav:
+  - Home: index.md
+  - Handbook: handbook/index.md
+  - Architecture:
+      - Overview: maps/index.md
+      - Landscape: _generated/architecture/landscape.md
+      - Containers: _generated/architecture/containers.md
+      - ABI and Modules: maps/abi-and-modules.md
+      - Memory: maps/memory.md
+      - Renderer M0: maps/renderer-m0.md
+      - Audio: maps/audio.md
+      - Jobs: maps/jobs.md
+      - Time: maps/time.md
+  - Historical Snapshots:
+      - Progress Summary v0.1: Progress_Summary_v0.1.md
+      - Window M0 Status: Window_M0_Status.md
+      - Renderer M0 Status: Renderer_M0_Status.md
+      - Time M0 Status: Time_M0_Status.md
+      - Jobs M0 Status: Jobs_M0_Status.md
+      - Input M0 Status: Input_M0_Status.md
+      - FileSystem M0 Status: FileSystem_M0_Status.md
+      - Audio M0 Status: Audio_M0_Status.md

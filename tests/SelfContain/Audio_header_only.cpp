@@ -74,7 +74,7 @@ namespace
         AudioInterface iface = MakeAudioInterface(backend);
         AudioSystemState state{};
 
-        (void)InitAudioSystemWithInterface(state, iface, AudioSystemBackend::External);
+        (void)InitAudioSystemWithInterface(state, iface);
         AudioMixParams params{};
         params.sampleRate = 48000;
         params.channelCount = 2;

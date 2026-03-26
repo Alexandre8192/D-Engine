@@ -9,7 +9,7 @@ Header-first C++ engine focused on contracts-first APIs and deterministic, audit
 
 ## Read next
 - Handbook (single source of truth): D-Engine_Handbook.md
-- Docs index (historical + pointers): Docs/INDEX.md
+- Docs index (navigation + historical pointers): Docs/index.md
 
 ## Historical milestone snapshots (can be stale)
 - Docs/Progress_Summary_v0.1.md

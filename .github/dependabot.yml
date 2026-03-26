@@ -9,11 +9,19 @@ updates:
       - "dependencies"
       - "security"
 
-  - package-ecosystem: "cargo"
-    directory: "/External/Rust/NullWindowModule"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    labels:
-      - "dependencies"
-      - "security"
+# 2026-03-26: Cargo monitoring was removed because
+# /External/Rust/NullWindowModule is currently a historical ABI v1 example and
+# its Cargo manifest/lockfile do not pull third-party crates, so Dependabot had
+# nothing useful to update there.
+#
+# If Rust becomes an actively maintained part of the repo again, restore Cargo
+# monitoring by re-adding the block below:
+#
+# - package-ecosystem: "cargo"
+#   directory: "/External/Rust/NullWindowModule"
+#   schedule:
+#     interval: "weekly"
+#   open-pull-requests-limit: 5
+#   labels:
+#     - "dependencies"
+#     - "security"

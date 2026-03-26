@@ -50,6 +50,230 @@
 
 namespace dng::core {
 
+    TrackingAllocator::TrackingAllocator(IAllocator* baseAllocator,
+        std::uint32_t samplingRate,
+        std::uint32_t shardCount) noexcept
+        : m_baseAllocator(baseAllocator)
+        , m_samplingRate(samplingRate == 0u ? 1u : samplingRate)
+    {
+        DNG_CHECK(baseAllocator != nullptr);
+#if DNG_MEM_TRACKING
+        InitializeShards(shardCount);
+#else
+        (void)shardCount;
+#endif
+    }
+
+    TrackingAllocator::~TrackingAllocator() noexcept
+    {
+#if DNG_MEM_TRACKING && DNG_MEM_REPORT_ON_EXIT
+        ReportLeaks();
+#endif
+    }
+
+    void* TrackingAllocator::Allocate(usize size, usize alignment) noexcept
+    {
+        AllocInfo defaultInfo(AllocTag::General, "Untagged");
+        return AllocateTagged(size, alignment, defaultInfo);
+    }
+
+    void TrackingAllocator::Deallocate(void* ptr, usize size, usize alignment) noexcept
+    {
+        if (!ptr)
+        {
+            return;
+        }
+
+        alignment = NormalizeAlignment(alignment);
+        usize forwardSize = size;
+        usize forwardAlignment = alignment;
+
+#if DNG_MEM_TRACKING
+        {
+            AllocationShard& shard = SelectShard(ptr);
+            std::lock_guard<std::mutex> lock(shard.mutex);
+            auto it = shard.allocations.find(ptr);
+            if (it != shard.allocations.end())
+            {
+                const AllocationRecord& record = it->second;
+                const usize tagIndex = static_cast<usize>(record.info.tag);
+                if (tagIndex < static_cast<usize>(AllocTag::Count))
+                {
+                    m_stats[tagIndex].RecordDeallocation(record.size);
+                }
+                forwardSize = record.size;
+                forwardAlignment = record.alignment;
+                shard.allocations.erase(it);
+            }
+        }
+#elif DNG_MEM_STATS_ONLY
+        if (size > 0)
+        {
+            m_stats[static_cast<usize>(AllocTag::General)].RecordDeallocation(size);
+        }
+#else
+        DNG_UNUSED(size);
+#endif
+
+        m_totalFreeCalls.fetch_add(1, std::memory_order_relaxed);
+        if (forwardSize > 0)
+        {
+            m_totalBytesFreed.fetch_add(static_cast<std::uint64_t>(forwardSize), std::memory_order_relaxed);
+        }
+
+        m_baseAllocator->Deallocate(ptr, forwardSize, forwardAlignment);
+    }
+
+    void* TrackingAllocator::AllocateTagged(usize size, usize alignment, const AllocInfo& info) noexcept
+    {
+        if (size == 0)
+        {
+            return nullptr;
+        }
+
+        alignment = NormalizeAlignment(alignment);
+
+        void* ptr = m_baseAllocator->Allocate(size, alignment);
+        if (!ptr)
+        {
+            DNG_MEM_CHECK_OOM(size, alignment, "TrackingAllocator::AllocateTagged");
+            return nullptr;
+        }
+
+        m_totalAllocCalls.fetch_add(1, std::memory_order_relaxed);
+        m_totalBytesAllocated.fetch_add(static_cast<std::uint64_t>(size), std::memory_order_relaxed);
+
+#if DNG_MEM_TRACKING
+        {
+            AllocationShard& shard = SelectShard(ptr);
+            std::lock_guard<std::mutex> lock(shard.mutex);
+            shard.allocations[ptr] = AllocationRecord(size, alignment, info);
+        }
+
+        const usize tagIndex = static_cast<usize>(info.tag);
+        if (tagIndex < static_cast<usize>(AllocTag::Count))
+        {
+            m_stats[tagIndex].RecordAllocation(size);
+        }
+#elif DNG_MEM_STATS_ONLY
+        const usize tagIndex = static_cast<usize>(info.tag);
+        if (tagIndex < static_cast<usize>(AllocTag::Count))
+        {
+            m_stats[tagIndex].RecordAllocation(size);
+        }
+#else
+        DNG_UNUSED(info);
+#endif
+
+        return ptr;
+    }
+
+#if DNG_MEM_TRACKING_ENABLED
+    const AllocatorStats& TrackingAllocator::GetStats(AllocTag tag) const noexcept
+    {
+        const usize tagIndex = static_cast<usize>(tag);
+        DNG_CHECK(tagIndex < static_cast<usize>(AllocTag::Count));
+        return m_stats[tagIndex];
+    }
+
+    void TrackingAllocator::ResetStats() noexcept
+    {
+        for (auto& stats : m_stats)
+        {
+            stats.Reset();
+        }
+    }
+#endif
+
+    IAllocator* TrackingAllocator::GetBaseAllocator() const noexcept
+    {
+        return m_baseAllocator;
+    }
+
+    TrackingSnapshotView TrackingAllocator::CaptureView() const noexcept
+    {
+        TrackingSnapshotView view{};
+
+#if DNG_MEM_TRACKING_ENABLED
+        for (std::size_t i = 0; i < view.byTag.size(); ++i)
+        {
+            const auto& stats = m_stats[i];
+            const std::size_t bytes = stats.current_bytes.load(std::memory_order_relaxed);
+            const std::size_t allocs = stats.current_allocations.load(std::memory_order_relaxed);
+            view.byTag[i].bytes = bytes;
+            view.byTag[i].allocs = allocs;
+            view.totalBytes += bytes;
+            view.totalAllocs += allocs;
+        }
+#endif
+
+        return view;
+    }
+
+    TrackingMonotonicCounters TrackingAllocator::CaptureMonotonic() const noexcept
+    {
+        TrackingMonotonicCounters counters;
+        counters.TotalAllocCalls = m_totalAllocCalls.load(std::memory_order_relaxed);
+        counters.TotalFreeCalls = m_totalFreeCalls.load(std::memory_order_relaxed);
+        counters.TotalBytesAllocated = m_totalBytesAllocated.load(std::memory_order_relaxed);
+        counters.TotalBytesFreed = m_totalBytesFreed.load(std::memory_order_relaxed);
+        return counters;
+    }
+
+#if DNG_MEM_TRACKING
+    void TrackingAllocator::InitializeShards(std::uint32_t shardCount) noexcept
+    {
+        if (shardCount == 0u || !::dng::core::IsPowerOfTwo(shardCount))
+        {
+            m_shardCount = 1u;
+            m_shardMask = 0u;
+            m_shards.reset();
+            return;
+        }
+
+        m_shardCount = shardCount;
+        m_shardMask = shardCount - 1u;
+        if (m_shardCount > 1u)
+        {
+            m_shards = std::make_unique<AllocationShard[]>(m_shardCount);
+        }
+        else
+        {
+            m_shards.reset();
+            m_shardMask = 0u;
+        }
+    }
+
+    TrackingAllocator::AllocationShard& TrackingAllocator::SelectShard(void* ptr) noexcept
+    {
+        if (m_shardCount > 1u && m_shards)
+        {
+            return m_shards[ComputeShardIndex(ptr)];
+        }
+        return m_singleShard;
+    }
+
+    const TrackingAllocator::AllocationShard& TrackingAllocator::SelectShard(const void* ptr) const noexcept
+    {
+        if (m_shardCount > 1u && m_shards)
+        {
+            return m_shards[ComputeShardIndex(ptr)];
+        }
+        return m_singleShard;
+    }
+
+    std::uint32_t TrackingAllocator::ComputeShardIndex(const void* ptr) const noexcept
+    {
+        if (m_shardMask == 0u)
+        {
+            return 0u;
+        }
+
+        const auto address = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(ptr));
+        return static_cast<std::uint32_t>((address >> 4u) & m_shardMask);
+    }
+#endif
+
     namespace {
         // ---------------------------------------------------------------------
         // Local hasher for enum class AllocTag (portability across libstdc++/MSVC)

@@ -13,7 +13,7 @@ Rules of the road:
 
 Start here:
 - Handbook: ../../D-Engine_Handbook.md
-- Docs index: ../../Docs/INDEX.md
+- Docs index: ../../Docs/index.md
 - Language policy: ../../Docs/LanguagePolicy.md
 - ABI policy: ../../Docs/ABI_Interop_Policy.md
 - ABI checklist: ../../Docs/ABI_Review_Checklist.md

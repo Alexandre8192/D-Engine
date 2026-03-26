@@ -159,6 +159,11 @@
     <ProjectReference Include="..\..\D-Engine.vcxproj">
       <Project>{F0B4BB1D-E72F-43AA-834C-0668A82907DC}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\..\Source\Modules\Window\NullWindowModule\NullWindowModule.vcxproj">
+      <Project>{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}</Project>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <UseLibraryDependencyInputs>false</UseLibraryDependencyInputs>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

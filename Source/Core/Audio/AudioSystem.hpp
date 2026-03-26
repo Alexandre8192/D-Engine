@@ -1,36 +1,37 @@
 // ============================================================================
 // D-Engine - Source/Core/Audio/AudioSystem.hpp
 // ----------------------------------------------------------------------------
-// Purpose : High-level audio system that owns a backend instance and exposes
-//           unified frame mixing to the rest of the engine.
-// Contract: Header-only, no exceptions/RTTI, no allocations in this layer.
-//           Lifetime of the backend is tied to AudioSystemState.
-//           Thread-safety and determinism follow AudioCaps from the backend;
-//           callers must serialize access per instance.
-// Notes   : Defaults to NullAudio. Platform backend (WinMM M2) can be
-//           selected via config with optional fallback to NullAudio when
-//           platform initialization fails. Voice control is command-queued
-//           through a fixed-capacity pool to avoid allocations in Mix(). WAV
-//           loading supports in-memory clips and streamed clips via FileSystem.
-//           Streamed clips require an explicit `BindStreamFileSystem()` and
-//           the bound FileSystem must outlive loaded streamed clips.
+// Purpose : High-level audio system facade that owns built-in backends and
+//           exposes unified frame mixing to the rest of the engine.
+// Contract: Self-contained public header, no exceptions/RTTI. Built-in backend
+//           ownership stays opaque to callers through an init/shutdown-only
+//           type-erased handle carried by AudioSystemState; platform-specific
+//           work is implemented in AudioSystem.cpp. Hot paths remain
+//           allocation-free once initialized.
+// Notes   : Defaults to NullAudio. Platform backend can be selected via a
+//           generic audio-platform config with optional fallback to NullAudio
+//           when initialization fails. Voice control is command-queued through
+//           a fixed-capacity pool to avoid allocations in Mix(). WAV loading
+//           uses thread-local scratch storage and supports in-memory clips and
+//           streamed clips via FileSystem. Copying an initialized
+//           AudioSystemState is unsupported.
 // ============================================================================
 
 #pragma once
 
 #include "Core/Contracts/Audio.hpp"
 #include "Core/Contracts/FileSystem.hpp"
-#include "Core/Audio/NullAudio.hpp"
-#include "Core/Audio/WinMmAudio.hpp"
+
+#include <type_traits>
 
 namespace dng::audio
 {
     inline constexpr dng::u32 kAudioSystemMaxVoices = 64;
     inline constexpr dng::u32 kAudioSystemMaxCommands = 256;
     inline constexpr dng::u32 kAudioSystemBusCount = static_cast<dng::u32>(AudioBus::Count);
+    inline constexpr dng::u32 kAudioSystemMaxInlineClipSamples = 65536u;
     inline constexpr dng::u32 kAudioSystemWavLoadScratchBytes =
-        (WinMmAudio::GetClipPoolCapacitySamples() * static_cast<dng::u32>(sizeof(dng::i16))) + 4096u;
-
+        (kAudioSystemMaxInlineClipSamples * static_cast<dng::u32>(sizeof(dng::i16))) + 4096u;
     enum class AudioSystemBackend : dng::u8
     {
         Null,
@@ -38,10 +39,18 @@ namespace dng::audio
         External
     };
 
+    struct AudioPlatformConfig
+    {
+        dng::u32 sampleRate = 48000;
+        dng::u16 channelCount = 2;
+        dng::u16 reserved = 0;
+        dng::u32 framesPerBuffer = 1024;
+    };
+
     struct AudioSystemConfig
     {
         AudioSystemBackend backend = AudioSystemBackend::Null;
-        WinMmAudioConfig   platform{};
+        AudioPlatformConfig platform{};
         bool               fallbackToNullOnInitFailure = true;
     };
 
@@ -81,25 +90,33 @@ namespace dng::audio
     static_assert(std::is_trivially_copyable_v<AudioCommand>);
     static_assert(std::is_trivially_copyable_v<AudioVoiceState>);
 
-    struct AudioSystemState
+    // Purpose : Carry ownership of one built-in backend instance without
+    //           exposing its concrete type in the public facade.
+    // Contract: Populated only during InitAudioSystem(); released only during
+    //           ShutdownAudioSystem(); hot paths must treat it as opaque.
+    struct AudioOwnedBackendHandle
     {
-        AudioInterface     interface{};
-        AudioSystemBackend backend = AudioSystemBackend::Null;
-        NullAudio          nullBackend{};
-        WinMmAudio         platformBackend{};
-        AudioVoiceState    voices[kAudioSystemMaxVoices]{};
-        AudioCommand       commandQueue[kAudioSystemMaxCommands]{};
-        dng::u32           commandReadIndex = 0;
-        dng::u32           commandWriteIndex = 0;
-        dng::u32           commandCount = 0;
-        dng::u32           activeVoiceCount = 0;
-        fs::FileSystemInterface streamFileSystem{};
-        float              busGains[kAudioSystemBusCount]{1.0f, 1.0f, 1.0f};
-        bool               hasStreamFileSystem = false;
-        bool               isInitialized = false;
+        void* instance = nullptr;
+        void (*destroy)(void* instance) noexcept = nullptr;
     };
 
-    inline void ShutdownAudioSystem(AudioSystemState& state) noexcept;
+    struct AudioSystemState
+    {
+        AudioInterface          interface{};
+        AudioSystemBackend      backend = AudioSystemBackend::Null;
+        AudioOwnedBackendHandle ownedBackend{};
+        AudioVoiceState         voices[kAudioSystemMaxVoices]{};
+        AudioCommand            commandQueue[kAudioSystemMaxCommands]{};
+        dng::u32                commandReadIndex = 0;
+        dng::u32                commandWriteIndex = 0;
+        dng::u32                commandCount = 0;
+        dng::u32                activeVoiceCount = 0;
+        fs::FileSystemInterface streamFileSystem{};
+        float                   busGains[kAudioSystemBusCount]{1.0f, 1.0f, 1.0f};
+        bool                    hasStreamFileSystem = false;
+        bool                    isInitialized = false;
+        dng::u8                 reserved[6]{};
+    };
 
     [[nodiscard]] inline bool IsVoiceHandleInRange(AudioVoiceId voice) noexcept
     {
@@ -127,62 +144,6 @@ namespace dng::audio
         return state.commandCount;
     }
 
-    [[nodiscard]] inline dng::u64 GetUnderrunCount(const AudioSystemState& state) noexcept
-    {
-        return (state.backend == AudioSystemBackend::Platform)
-            ? state.platformBackend.GetUnderrunCount()
-            : 0;
-    }
-
-    [[nodiscard]] inline dng::u64 GetSubmitErrorCount(const AudioSystemState& state) noexcept
-    {
-        return (state.backend == AudioSystemBackend::Platform)
-            ? state.platformBackend.GetSubmitErrorCount()
-            : 0;
-    }
-
-    [[nodiscard]] inline dng::u32 GetLoadedClipCount(const AudioSystemState& state) noexcept
-    {
-        return (state.backend == AudioSystemBackend::Platform)
-            ? state.platformBackend.GetLoadedClipCount()
-            : 0u;
-    }
-
-    [[nodiscard]] inline dng::u32 GetLoadedStreamClipCount(const AudioSystemState& state) noexcept
-    {
-        return (state.backend == AudioSystemBackend::Platform)
-            ? state.platformBackend.GetLoadedStreamClipCount()
-            : 0u;
-    }
-
-    [[nodiscard]] inline dng::u32 GetMaxStreamClipCount(const AudioSystemState& state) noexcept
-    {
-        return (state.backend == AudioSystemBackend::Platform)
-            ? state.platformBackend.GetMaxStreamClipCount()
-            : 0u;
-    }
-
-    [[nodiscard]] inline dng::u32 GetClipPoolUsageSamples(const AudioSystemState& state) noexcept
-    {
-        return (state.backend == AudioSystemBackend::Platform)
-            ? state.platformBackend.GetClipPoolUsageSamples()
-            : 0u;
-    }
-
-    [[nodiscard]] inline dng::u32 GetClipPoolCapacitySamples(const AudioSystemState& state) noexcept
-    {
-        return (state.backend == AudioSystemBackend::Platform)
-            ? state.platformBackend.GetClipPoolCapacitySamples()
-            : 0u;
-    }
-
-    [[nodiscard]] inline dng::u32 GetMaxClipCount(const AudioSystemState& state) noexcept
-    {
-        return (state.backend == AudioSystemBackend::Platform)
-            ? state.platformBackend.GetMaxClipCount()
-            : 0u;
-    }
-
     [[nodiscard]] inline bool HasBoundStreamFileSystem(const AudioSystemState& state) noexcept
     {
         return state.hasStreamFileSystem;
@@ -194,662 +155,71 @@ namespace dng::audio
         {
             return 0.0f;
         }
+
         return state.busGains[static_cast<dng::u32>(bus)];
     }
 
-    namespace detail
-    {
-        // Shared static scratch for WAV file loads (external sync required).
-        inline dng::u8 g_AudioWavLoadScratch[kAudioSystemWavLoadScratchBytes]{};
+    [[nodiscard]] dng::u64 GetUnderrunCount(const AudioSystemState& state) noexcept;
+    [[nodiscard]] dng::u64 GetSubmitErrorCount(const AudioSystemState& state) noexcept;
+    [[nodiscard]] dng::u32 GetLoadedClipCount(const AudioSystemState& state) noexcept;
+    [[nodiscard]] dng::u32 GetLoadedStreamClipCount(const AudioSystemState& state) noexcept;
+    [[nodiscard]] dng::u32 GetMaxStreamClipCount(const AudioSystemState& state) noexcept;
+    [[nodiscard]] dng::u32 GetClipPoolUsageSamples(const AudioSystemState& state) noexcept;
+    [[nodiscard]] dng::u32 GetClipPoolCapacitySamples(const AudioSystemState& state) noexcept;
+    [[nodiscard]] dng::u32 GetMaxClipCount(const AudioSystemState& state) noexcept;
 
-        [[nodiscard]] inline AudioStatus MapFsStatus(fs::FsStatus status) noexcept
-        {
-            switch (status)
-            {
-                case fs::FsStatus::Ok:           return AudioStatus::Ok;
-                case fs::FsStatus::InvalidArg:   return AudioStatus::InvalidArg;
-                case fs::FsStatus::NotSupported: return AudioStatus::NotSupported;
-                case fs::FsStatus::UnknownError: return AudioStatus::UnknownError;
-                case fs::FsStatus::NotFound:
-                case fs::FsStatus::AccessDenied: return AudioStatus::NotSupported;
-                default:                         return AudioStatus::UnknownError;
-            }
-        }
-
-        [[nodiscard]] inline bool IsSameFileSystemInterface(const fs::FileSystemInterface& a,
-                                                            const fs::FileSystemInterface& b) noexcept
-        {
-            return a.userData == b.userData &&
-                   a.vtable.exists == b.vtable.exists &&
-                   a.vtable.fileSize == b.vtable.fileSize &&
-                   a.vtable.readFile == b.vtable.readFile &&
-                   a.vtable.readFileRange == b.vtable.readFileRange &&
-                   a.vtable.getCaps == b.vtable.getCaps;
-        }
-
-        [[nodiscard]] inline bool EnqueueCommand(AudioSystemState& state, const AudioCommand& command) noexcept
-        {
-            if (state.commandCount >= kAudioSystemMaxCommands)
-            {
-                return false;
-            }
-
-            state.commandQueue[state.commandWriteIndex] = command;
-            state.commandWriteIndex = (state.commandWriteIndex + 1u) % kAudioSystemMaxCommands;
-            ++state.commandCount;
-            return true;
-        }
-
-        [[nodiscard]] inline bool DequeueCommand(AudioSystemState& state, AudioCommand& outCommand) noexcept
-        {
-            if (state.commandCount == 0)
-            {
-                return false;
-            }
-
-            outCommand = state.commandQueue[state.commandReadIndex];
-            state.commandReadIndex = (state.commandReadIndex + 1u) % kAudioSystemMaxCommands;
-            --state.commandCount;
-            return true;
-        }
-
-        [[nodiscard]] inline bool AcquireVoice(AudioSystemState& state,
-                                               const AudioPlayParams& params,
-                                               AudioVoiceId& outVoice) noexcept
-        {
-            for (dng::u32 slot = 0; slot < kAudioSystemMaxVoices; ++slot)
-            {
-                AudioVoiceState& voiceState = state.voices[slot];
-                if (voiceState.isActive)
-                {
-                    continue;
-                }
-
-                if (voiceState.generation == 0)
-                {
-                    voiceState.generation = 1;
-                }
-
-                voiceState.clip = params.clip;
-                voiceState.gain = params.gain;
-                voiceState.bus = params.bus;
-                voiceState.isActive = true;
-                voiceState.isPaused = false;
-                voiceState.loop = params.loop;
-
-                outVoice.slot = slot;
-                outVoice.generation = voiceState.generation;
-                ++state.activeVoiceCount;
-                return true;
-            }
-
-            outVoice = AudioVoiceId{};
-            return false;
-        }
-
-        inline void ReleaseVoice(AudioSystemState& state, AudioVoiceId voice) noexcept
-        {
-            if (!IsVoiceHandleInRange(voice))
-            {
-                return;
-            }
-
-            AudioVoiceState& voiceState = state.voices[voice.slot];
-            if (!voiceState.isActive || voiceState.generation != voice.generation)
-            {
-                return;
-            }
-
-            voiceState.clip = AudioClipId{};
-            voiceState.gain = 1.0f;
-            voiceState.bus = AudioBus::Master;
-            voiceState.isActive = false;
-            voiceState.isPaused = false;
-            voiceState.loop = false;
-            ++voiceState.generation;
-            if (voiceState.generation == 0)
-            {
-                voiceState.generation = 1;
-            }
-
-            if (state.activeVoiceCount > 0)
-            {
-                --state.activeVoiceCount;
-            }
-        }
-
-        [[nodiscard]] inline AudioStatus FlushCommands(AudioSystemState& state) noexcept
-        {
-            AudioStatus firstFailure = AudioStatus::Ok;
-            AudioCommand command{};
-            while (DequeueCommand(state, command))
-            {
-                AudioStatus commandStatus = AudioStatus::Ok;
-                switch (command.type)
-                {
-                    case AudioCommandType::Play:
-                    {
-                        commandStatus = dng::audio::Play(state.interface, command.voice, command.play);
-                        break;
-                    }
-                    case AudioCommandType::Stop:
-                    {
-                        commandStatus = dng::audio::Stop(state.interface, command.voice);
-                        break;
-                    }
-                    case AudioCommandType::Pause:
-                    {
-                        commandStatus = dng::audio::Pause(state.interface, command.voice);
-                        break;
-                    }
-                    case AudioCommandType::Resume:
-                    {
-                        commandStatus = dng::audio::Resume(state.interface, command.voice);
-                        break;
-                    }
-                    case AudioCommandType::Seek:
-                    {
-                        commandStatus = dng::audio::Seek(state.interface, command.voice, command.seekFrameIndex);
-                        break;
-                    }
-                    case AudioCommandType::SetGain:
-                    {
-                        commandStatus = dng::audio::SetGain(state.interface, command.voice, command.gain);
-                        break;
-                    }
-                    case AudioCommandType::SetBusGain:
-                    {
-                        commandStatus = dng::audio::SetBusGain(state.interface, command.bus, command.gain);
-                        break;
-                    }
-                    default:
-                    {
-                        commandStatus = AudioStatus::InvalidArg;
-                        break;
-                    }
-                }
-
-                if (commandStatus != AudioStatus::Ok && firstFailure == AudioStatus::Ok)
-                {
-                    firstFailure = commandStatus;
-                }
-            }
-
-            return firstFailure;
-        }
-
-        [[nodiscard]] inline bool MakePathView(const char* path, fs::PathView& outPath) noexcept
-        {
-            outPath = fs::PathView{};
-            if (path == nullptr)
-            {
-                return false;
-            }
-
-            dng::u32 length = 0;
-            while (path[length] != '\0')
-            {
-                ++length;
-            }
-            if (length == 0)
-            {
-                return false;
-            }
-
-            outPath.data = path;
-            outPath.size = length;
-            return true;
-        }
-    } // namespace detail
-
-    [[nodiscard]] inline AudioStatus LoadWavPcm16Clip(AudioSystemState& state,
-                                                      fs::FileSystemInterface& fileSystem,
-                                                      fs::PathView path,
-                                                      AudioClipId& outClip) noexcept
-    {
-        outClip = AudioClipId{};
-        if (!state.isInitialized || path.data == nullptr || path.size == 0)
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        if (state.backend != AudioSystemBackend::Platform)
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        dng::u64 fileSize = 0;
-        const fs::FsStatus sizeStatus = fs::FileSize(fileSystem, path, fileSize);
-        if (sizeStatus != fs::FsStatus::Ok)
-        {
-            return detail::MapFsStatus(sizeStatus);
-        }
-
-        if (fileSize == 0 ||
-            fileSize > static_cast<dng::u64>(kAudioSystemWavLoadScratchBytes) ||
-            fileSize > static_cast<dng::u64>(~dng::u32{0}))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        dng::u64 bytesRead = 0;
-        const fs::FsStatus readStatus =
-            fs::ReadFile(fileSystem, path, detail::g_AudioWavLoadScratch, fileSize, bytesRead);
-        if (readStatus != fs::FsStatus::Ok)
-        {
-            return detail::MapFsStatus(readStatus);
-        }
-
-        if (bytesRead != fileSize)
-        {
-            return AudioStatus::UnknownError;
-        }
-
-        return state.platformBackend.LoadWavPcm16Clip(detail::g_AudioWavLoadScratch,
-                                                      static_cast<dng::u32>(bytesRead),
-                                                      outClip);
-    }
-
-    [[nodiscard]] inline AudioStatus LoadWavPcm16Clip(AudioSystemState& state,
-                                                      fs::FileSystemInterface& fileSystem,
-                                                      const char* path,
-                                                      AudioClipId& outClip) noexcept
-    {
-        outClip = AudioClipId{};
-        fs::PathView pathView{};
-        if (!detail::MakePathView(path, pathView))
-        {
-            return AudioStatus::InvalidArg;
-        }
-        return LoadWavPcm16Clip(state, fileSystem, pathView, outClip);
-    }
-
-    [[nodiscard]] inline AudioStatus BindStreamFileSystem(AudioSystemState& state,
-                                                          fs::FileSystemInterface& fileSystem) noexcept
-    {
-        if (!state.isInitialized)
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        if (state.backend != AudioSystemBackend::Platform)
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        const AudioStatus bindStatus = state.platformBackend.BindStreamFileSystem(fileSystem);
-        if (bindStatus != AudioStatus::Ok)
-        {
-            return bindStatus;
-        }
-
-        state.streamFileSystem = fileSystem;
-        state.hasStreamFileSystem = true;
-        return AudioStatus::Ok;
-    }
-
-    [[nodiscard]] inline AudioStatus UnbindStreamFileSystem(AudioSystemState& state) noexcept
-    {
-        if (!state.isInitialized)
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        if (state.backend != AudioSystemBackend::Platform)
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        const AudioStatus unbindStatus = state.platformBackend.UnbindStreamFileSystem();
-        if (unbindStatus != AudioStatus::Ok)
-        {
-            return unbindStatus;
-        }
-
-        state.streamFileSystem = fs::FileSystemInterface{};
-        state.hasStreamFileSystem = false;
-        return AudioStatus::Ok;
-    }
-
-    [[nodiscard]] inline AudioStatus LoadWavPcm16StreamClip(AudioSystemState& state,
-                                                            fs::FileSystemInterface& fileSystem,
-                                                            fs::PathView path,
-                                                            AudioClipId& outClip) noexcept
-    {
-        outClip = AudioClipId{};
-        if (!state.isInitialized || path.data == nullptr || path.size == 0u)
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        if (state.backend != AudioSystemBackend::Platform)
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        if (!state.hasStreamFileSystem ||
-            !detail::IsSameFileSystemInterface(state.streamFileSystem, fileSystem))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        return state.platformBackend.LoadWavPcm16StreamClip(path, outClip);
-    }
-
-    [[nodiscard]] inline AudioStatus LoadWavPcm16StreamClip(AudioSystemState& state,
-                                                            fs::FileSystemInterface& fileSystem,
-                                                            const char* path,
-                                                            AudioClipId& outClip) noexcept
-    {
-        outClip = AudioClipId{};
-        fs::PathView pathView{};
-        if (!detail::MakePathView(path, pathView))
-        {
-            return AudioStatus::InvalidArg;
-        }
-        return LoadWavPcm16StreamClip(state, fileSystem, pathView, outClip);
-    }
-
-    [[nodiscard]] inline bool InitAudioSystemWithInterface(AudioSystemState& state,
-                                                           AudioInterface interface,
-                                                           AudioSystemBackend backend) noexcept
-    {
-        if (state.isInitialized)
-        {
-            ShutdownAudioSystem(state);
-        }
-
-        if (interface.userData == nullptr ||
-            interface.vtable.play == nullptr ||
-            interface.vtable.stop == nullptr ||
-            interface.vtable.pause == nullptr ||
-            interface.vtable.resume == nullptr ||
-            interface.vtable.seek == nullptr ||
-            interface.vtable.setGain == nullptr ||
-            interface.vtable.setBusGain == nullptr ||
-            interface.vtable.getCaps == nullptr ||
-            interface.vtable.mix == nullptr)
-        {
-            return false;
-        }
-
-        state.interface = interface;
-        state.backend = backend;
-        state.isInitialized = true;
-        return true;
-    }
-
-    [[nodiscard]] inline bool InitAudioSystem(AudioSystemState& state,
-                                              const AudioSystemConfig& config) noexcept
-    {
-        ShutdownAudioSystem(state);
-
-        switch (config.backend)
-        {
-            case AudioSystemBackend::Null:
-            {
-                AudioInterface iface = MakeNullAudioInterface(state.nullBackend);
-                return InitAudioSystemWithInterface(state, iface, AudioSystemBackend::Null);
-            }
-            case AudioSystemBackend::Platform:
-            {
-                if (state.platformBackend.Init(config.platform))
-                {
-                    AudioInterface iface = MakeWinMmAudioInterface(state.platformBackend);
-                    return InitAudioSystemWithInterface(state, iface, AudioSystemBackend::Platform);
-                }
-
-                if (config.fallbackToNullOnInitFailure)
-                {
-                    AudioInterface iface = MakeNullAudioInterface(state.nullBackend);
-                    return InitAudioSystemWithInterface(state, iface, AudioSystemBackend::Null);
-                }
-
-                return false;
-            }
-            case AudioSystemBackend::External:
-            {
-                return false; // Must be injected via InitAudioSystemWithInterface.
-            }
-            default:
-            {
-                return false;
-            }
-        }
-    }
-
-    inline void ShutdownAudioSystem(AudioSystemState& state) noexcept
-    {
-        state.platformBackend.Shutdown();
-        state = AudioSystemState{};
-    }
+    [[nodiscard]] AudioStatus LoadWavPcm16Clip(AudioSystemState& state,
+                                               fs::FileSystemInterface& fileSystem,
+                                               fs::PathView path,
+                                               AudioClipId& outClip) noexcept;
+    [[nodiscard]] AudioStatus LoadWavPcm16Clip(AudioSystemState& state,
+                                               fs::FileSystemInterface& fileSystem,
+                                               const char* path,
+                                               AudioClipId& outClip) noexcept;
+    [[nodiscard]] AudioStatus BindStreamFileSystem(AudioSystemState& state,
+                                                   fs::FileSystemInterface& fileSystem) noexcept;
+    [[nodiscard]] AudioStatus UnbindStreamFileSystem(AudioSystemState& state) noexcept;
+    [[nodiscard]] AudioStatus LoadWavPcm16StreamClip(AudioSystemState& state,
+                                                     fs::FileSystemInterface& fileSystem,
+                                                     fs::PathView path,
+                                                     AudioClipId& outClip) noexcept;
+    [[nodiscard]] AudioStatus LoadWavPcm16StreamClip(AudioSystemState& state,
+                                                     fs::FileSystemInterface& fileSystem,
+                                                     const char* path,
+                                                     AudioClipId& outClip) noexcept;
+    [[nodiscard]] bool InitAudioSystemWithInterface(AudioSystemState& state,
+                                                    AudioInterface interface) noexcept;
+    [[nodiscard]] bool InitAudioSystem(AudioSystemState& state,
+                                       const AudioSystemConfig& config) noexcept;
+    void ShutdownAudioSystem(AudioSystemState& state) noexcept;
 
     [[nodiscard]] inline AudioCaps QueryCaps(const AudioSystemState& state) noexcept
     {
-        return state.isInitialized ? QueryCaps(state.interface) : AudioCaps{};
+        return state.isInitialized ? dng::audio::QueryCaps(state.interface) : AudioCaps{};
     }
 
-    [[nodiscard]] inline AudioStatus UnloadClip(AudioSystemState& state, AudioClipId clip) noexcept
-    {
-        if (!state.isInitialized || !IsValid(clip))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        if (state.backend != AudioSystemBackend::Platform)
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        const AudioStatus flushStatus = detail::FlushCommands(state);
-
-        for (dng::u32 slot = 0; slot < kAudioSystemMaxVoices; ++slot)
-        {
-            const AudioVoiceState& voiceState = state.voices[slot];
-            if (!voiceState.isActive || voiceState.clip.value != clip.value)
-            {
-                continue;
-            }
-
-            AudioVoiceId voice{};
-            voice.slot = slot;
-            voice.generation = voiceState.generation;
-            (void)dng::audio::Stop(state.interface, voice);
-            detail::ReleaseVoice(state, voice);
-        }
-
-        const AudioStatus unloadStatus = state.platformBackend.UnloadClip(clip);
-        if (unloadStatus != AudioStatus::Ok)
-        {
-            return unloadStatus;
-        }
-
-        return flushStatus;
-    }
-
-    [[nodiscard]] inline AudioStatus Play(AudioSystemState& state,
-                                          const AudioPlayParams& params,
-                                          AudioVoiceId& outVoice) noexcept
-    {
-        outVoice = AudioVoiceId{};
-        if (!state.isInitialized)
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        if (!IsValid(params.clip) || !IsValid(params.bus) || !(params.gain >= 0.0f) || !(params.pitch > 0.0f))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        if (state.backend == AudioSystemBackend::Platform &&
-            !state.platformBackend.HasClip(params.clip))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        AudioVoiceId voice{};
-        if (!detail::AcquireVoice(state, params, voice))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        AudioCommand command{};
-        command.type = AudioCommandType::Play;
-        command.voice = voice;
-        command.play = params;
-        if (!detail::EnqueueCommand(state, command))
-        {
-            detail::ReleaseVoice(state, voice);
-            return AudioStatus::NotSupported;
-        }
-
-        outVoice = voice;
-        return AudioStatus::Ok;
-    }
-
-    [[nodiscard]] inline AudioStatus Stop(AudioSystemState& state, AudioVoiceId voice) noexcept
-    {
-        if (!state.isInitialized || !IsVoiceActive(state, voice))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        AudioCommand command{};
-        command.type = AudioCommandType::Stop;
-        command.voice = voice;
-        if (!detail::EnqueueCommand(state, command))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        detail::ReleaseVoice(state, voice);
-        return AudioStatus::Ok;
-    }
-
-    [[nodiscard]] inline AudioStatus SetGain(AudioSystemState& state,
-                                             AudioVoiceId voice,
-                                             float gain) noexcept
-    {
-        if (!state.isInitialized || !IsVoiceActive(state, voice) || !(gain >= 0.0f))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        AudioCommand command{};
-        command.type = AudioCommandType::SetGain;
-        command.voice = voice;
-        command.gain = gain;
-        if (!detail::EnqueueCommand(state, command))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        state.voices[voice.slot].gain = gain;
-        return AudioStatus::Ok;
-    }
-
-    [[nodiscard]] inline AudioStatus Pause(AudioSystemState& state, AudioVoiceId voice) noexcept
-    {
-        if (!state.isInitialized || !IsVoiceActive(state, voice))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        AudioCommand command{};
-        command.type = AudioCommandType::Pause;
-        command.voice = voice;
-        if (!detail::EnqueueCommand(state, command))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        state.voices[voice.slot].isPaused = true;
-        return AudioStatus::Ok;
-    }
-
-    [[nodiscard]] inline AudioStatus Resume(AudioSystemState& state, AudioVoiceId voice) noexcept
-    {
-        if (!state.isInitialized || !IsVoiceActive(state, voice))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        AudioCommand command{};
-        command.type = AudioCommandType::Resume;
-        command.voice = voice;
-        if (!detail::EnqueueCommand(state, command))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        state.voices[voice.slot].isPaused = false;
-        return AudioStatus::Ok;
-    }
-
-    [[nodiscard]] inline AudioStatus Seek(AudioSystemState& state,
-                                          AudioVoiceId voice,
-                                          dng::u32 frameIndex) noexcept
-    {
-        if (!state.isInitialized || !IsVoiceActive(state, voice))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        AudioCommand command{};
-        command.type = AudioCommandType::Seek;
-        command.voice = voice;
-        command.seekFrameIndex = frameIndex;
-        if (!detail::EnqueueCommand(state, command))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        return AudioStatus::Ok;
-    }
-
-    [[nodiscard]] inline AudioStatus SetBusGain(AudioSystemState& state,
-                                                AudioBus bus,
-                                                float gain) noexcept
-    {
-        if (!state.isInitialized || !IsValid(bus) || !(gain >= 0.0f))
-        {
-            return AudioStatus::InvalidArg;
-        }
-
-        AudioCommand command{};
-        command.type = AudioCommandType::SetBusGain;
-        command.bus = bus;
-        command.gain = gain;
-        if (!detail::EnqueueCommand(state, command))
-        {
-            return AudioStatus::NotSupported;
-        }
-
-        state.busGains[static_cast<dng::u32>(bus)] = gain;
-        return AudioStatus::Ok;
-    }
+    [[nodiscard]] AudioStatus UnloadClip(AudioSystemState& state, AudioClipId clip) noexcept;
+    [[nodiscard]] AudioStatus Play(AudioSystemState& state,
+                                   const AudioPlayParams& params,
+                                   AudioVoiceId& outVoice) noexcept;
+    [[nodiscard]] AudioStatus Stop(AudioSystemState& state, AudioVoiceId voice) noexcept;
+    [[nodiscard]] AudioStatus SetGain(AudioSystemState& state,
+                                      AudioVoiceId voice,
+                                      float gain) noexcept;
+    [[nodiscard]] AudioStatus Pause(AudioSystemState& state, AudioVoiceId voice) noexcept;
+    [[nodiscard]] AudioStatus Resume(AudioSystemState& state, AudioVoiceId voice) noexcept;
+    [[nodiscard]] AudioStatus Seek(AudioSystemState& state,
+                                   AudioVoiceId voice,
+                                   dng::u32 frameIndex) noexcept;
+    [[nodiscard]] AudioStatus SetBusGain(AudioSystemState& state,
+                                         AudioBus bus,
+                                         float gain) noexcept;
 
     [[nodiscard]] inline AudioStatus SetMasterGain(AudioSystemState& state, float gain) noexcept
     {
         return SetBusGain(state, AudioBus::Master, gain);
     }
 
-    [[nodiscard]] inline AudioStatus Mix(AudioSystemState& state, AudioMixParams& params) noexcept
-    {
-        if (!state.isInitialized)
-        {
-            params.writtenSamples = 0;
-            return AudioStatus::InvalidArg;
-        }
-
-        const AudioStatus commandStatus = detail::FlushCommands(state);
-        const AudioStatus mixStatus = dng::audio::Mix(state.interface, params);
-        if (mixStatus != AudioStatus::Ok)
-        {
-            return mixStatus;
-        }
-        return commandStatus;
-    }
+    [[nodiscard]] AudioStatus Mix(AudioSystemState& state, AudioMixParams& params) noexcept;
 
 } // namespace dng::audio

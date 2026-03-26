@@ -8,7 +8,7 @@
 //           underruns, and use-after-free scenarios deterministically. Relies
 //           exclusively on the canonical alignment helpers for padding/offset
 //           computations.
-// Contract: Header-only, dependency-free (beyond CoreMinimal.hpp). All public
+// Contract: Header-only with explicit low-level dependencies only. All public
 //           functions honour the IAllocator contract: callers must provide the
 //           same (size, alignment) pair on Deallocate. Construction requires a
 //           non-null parent allocator that handles bookkeeping when guards are
@@ -22,7 +22,9 @@
 //           drift from the engine's canonical semantics.
 // ============================================================================
 
-#include "Core/CoreMinimal.hpp"
+#include "Core/Diagnostics/Check.hpp"
+#include "Core/Logger.hpp"
+#include "Core/Types.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/PageAllocator.hpp"
 #include "Core/Memory/Alignment.hpp" // AlignUp / NormalizeAlignment / IsPowerOfTwo
@@ -40,7 +42,7 @@ namespace memory
 {
     namespace detail
     {
-        using usize = std::size_t;
+        using usize = ::dng::usize;
 
         // ---
         // Purpose : Pack the metadata required to tear down a guarded allocation.

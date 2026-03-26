@@ -13,6 +13,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MemoryStressSmokes", "tests
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "D-Engine-BenchRunner", "tests\BenchRunner\D-Engine-BenchRunner.vcxproj", "{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NullWindowModule", "Source\Modules\Window\NullWindowModule\NullWindowModule.vcxproj", "{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -61,6 +63,14 @@ Global
 		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Release|x64.Build.0 = Release|x64
 		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Release|x86.ActiveCfg = Release|Win32
 		{F89C48C7-3AB5-4F57-9A08-DCA0C09E99C5}.Release|x86.Build.0 = Release|Win32
+		{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}.Debug|x64.ActiveCfg = Debug|x64
+		{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}.Debug|x64.Build.0 = Debug|x64
+		{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}.Debug|x86.ActiveCfg = Debug|Win32
+		{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}.Debug|x86.Build.0 = Debug|Win32
+		{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}.Release|x64.ActiveCfg = Release|x64
+		{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}.Release|x64.Build.0 = Release|x64
+		{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}.Release|x86.ActiveCfg = Release|Win32
+		{9D6E31F7-244D-4A0E-8B55-EFF8C3B60B9A}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

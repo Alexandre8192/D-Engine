@@ -16,6 +16,8 @@
 //   - DNG_DEFINE_MINIMAL_ASSERT : defines a minimal DNG_ASSERT fallback if not already defined
 //
 
+#include "Core/Platform/PlatformCompiler.hpp"
+
 // ----------------------------------------------------------------------------
 // Debug detection (respects user-defined DNG_DEBUG; falls back to !NDEBUG)
 // ----------------------------------------------------------------------------
@@ -28,17 +30,10 @@
 #endif
 
 // ----------------------------------------------------------------------------
- // Internal cross-compiler debug break helper (Debug only)
+// Internal debug break helper (Debug only)
 // ----------------------------------------------------------------------------
 #if DNG_DEBUG
-#  if defined(_MSC_VER)
-#    define DNG_INTERNAL_DEBUG_BREAK() __debugbreak()
-#  elif defined(__clang__) || defined(__GNUC__)
-#    define DNG_INTERNAL_DEBUG_BREAK() __builtin_trap()
-#  else
-#    include <cstdlib>
-#    define DNG_INTERNAL_DEBUG_BREAK() std::abort()
-#  endif
+#  define DNG_INTERNAL_DEBUG_BREAK() DNG_DEBUGBREAK()
 #else
 #  define DNG_INTERNAL_DEBUG_BREAK() ((void)0)
 #endif
@@ -84,8 +79,13 @@
 // ----------------------------------------------------------------------------
 #if defined(DNG_DEFINE_MINIMAL_ASSERT) && !defined(DNG_ASSERT)
 #  if DNG_DEBUG
-#    define DNG_ASSERT(cond) do { if(!(cond)) { DNG_INTERNAL_DEBUG_BREAK(); } } while(0)
+#    define DNG_ASSERT_FALLBACK_EXPAND(x) x
+#    define DNG_ASSERT_FALLBACK_GET_MACRO(_1,_2,NAME,...) NAME
+#    define DNG_ASSERT_FALLBACK_1(cond) do { if(!(cond)) { DNG_INTERNAL_DEBUG_BREAK(); } } while(0)
+#    define DNG_ASSERT_FALLBACK_2(cond, msg) do { if(!(cond)) { DNG_INTERNAL_DEBUG_BREAK(); } } while(0)
+#    define DNG_ASSERT(...) \
+        DNG_ASSERT_FALLBACK_EXPAND(DNG_ASSERT_FALLBACK_GET_MACRO(__VA_ARGS__, DNG_ASSERT_FALLBACK_2, DNG_ASSERT_FALLBACK_1)(__VA_ARGS__))
 #  else
-#    define DNG_ASSERT(cond) ((void)0)
+#    define DNG_ASSERT(...) ((void)0)
 #  endif
 #endif

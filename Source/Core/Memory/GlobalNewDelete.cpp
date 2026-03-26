@@ -15,8 +15,10 @@ static_assert(DNG_GLOBAL_NEW_SMALL_THRESHOLD >= 0, "DNG_GLOBAL_NEW_SMALL_THRESHO
 static_assert(DNG_GLOBAL_NEW_FALLBACK_MALLOC == 0 || DNG_GLOBAL_NEW_FALLBACK_MALLOC == 1,
               "DNG_GLOBAL_NEW_FALLBACK_MALLOC must be 0 or 1");
 
-#include "Core/CoreMinimal.hpp"
 #include "Core/Diagnostics/Check.hpp"
+#include "Core/Logger.hpp"
+#include "Core/Memory/Alignment.hpp"
+#include "Core/Memory/Allocator.hpp"
 #include "Core/Memory/MemorySystem.hpp"
 #include "Core/Memory/OOM.hpp"
 

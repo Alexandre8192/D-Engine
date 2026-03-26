@@ -1,15 +1,17 @@
 // Basic smoke test for ABI module loading and Window API calls.
+#include "Core/Interop/ModuleAbi.hpp"
 #include "Core/Interop/ModuleLoader.hpp"
 #include "Core/Interop/WindowAbi.hpp"
+#include "Core/Platform/PlatformCrt.hpp"
+#include "Core/Platform/PlatformDefines.hpp"
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 
-#if defined(_WIN32) || defined(_WIN64)
-    #include <malloc.h>
+#if DNG_PLATFORM_WINDOWS
     static const char* kModulePath = "NullWindowModule.dll";
-#elif defined(__APPLE__)
+#elif DNG_PLATFORM_APPLE
     static const char* kModulePath = "libNullWindowModule.dylib";
 #else
     static const char* kModulePath = "libNullWindowModule.so";
@@ -19,20 +21,7 @@
 static void* DNG_ABI_CALL TestAlloc(void* user, dng_u64 size, dng_u64 align)
 {
     (void)user;
-    if (align < sizeof(void*))
-    {
-        align = sizeof(void*);
-    }
-#if defined(_WIN32) || defined(_WIN64)
-    return _aligned_malloc((size_t)size, (size_t)align);
-#else
-    void* ptr = NULL;
-    if (posix_memalign(&ptr, (size_t)align, (size_t)size) != 0)
-    {
-        return NULL;
-    }
-    return ptr;
-#endif
+    return dng::platform::AllocAligned((size_t)size, (size_t)align);
 }
 
 static void DNG_ABI_CALL TestFree(void* user, void* ptr, dng_u64 size, dng_u64 align)
@@ -40,11 +29,7 @@ static void DNG_ABI_CALL TestFree(void* user, void* ptr, dng_u64 size, dng_u64 a
     (void)user;
     (void)size;
     (void)align;
-#if defined(_WIN32) || defined(_WIN64)
-    _aligned_free(ptr);
-#else
-    free(ptr);
-#endif
+    dng::platform::FreeAligned(ptr);
 }
 
 static void DNG_ABI_CALL TestLog(void* user, dng_u32 level, dng_str_view_v1 msg)
@@ -66,12 +51,57 @@ int main()
     host.free = &TestFree;
 
     dng::ModuleLoader loader;
-    dng_module_api_v1 module_api = {};
+    dng_module_api_v2 module_api = {};
     dng_status_v1 status = loader.Load(kModulePath, &host, &module_api);
     if (status != DNG_STATUS_OK)
     {
         printf("Load failed: %u\n", (unsigned)status);
         return 1;
+    }
+
+    if (module_api.interface_count != 1u || module_api.interfaces == NULL)
+    {
+        printf("Module catalogue shape invalid\n");
+        return 14;
+    }
+
+    if (module_api.shutdown == NULL || module_api.module_ctx == NULL)
+    {
+        printf("Stateful module must export shutdown + non-null module_ctx\n");
+        return 15;
+    }
+
+    const dng_module_interface_v1* window_entry =
+        dng::FindModuleInterface(module_api, dng::ModuleAbiLiteral(DNG_MODULE_INTERFACE_NAME_WINDOW), DNG_ABI_VERSION_V1);
+    if (!window_entry || window_entry != module_api.interfaces)
+    {
+        printf("Exact window interface lookup failed\n");
+        return 16;
+    }
+
+    if (dng::FindModuleInterface(module_api, dng::ModuleAbiLiteral(DNG_MODULE_INTERFACE_NAME_WINDOW), DNG_ABI_VERSION_V1 + 1u) != nullptr)
+    {
+        printf("Unexpected window interface export for wrong version\n");
+        return 17;
+    }
+
+    const dng_window_api_v1* window_api = dng::GetWindowApiV1(module_api);
+    if (!window_api)
+    {
+        printf("Module did not expose dng.window v1\n");
+        return 2;
+    }
+
+    if (window_entry->api != reinterpret_cast<const dng_abi_header_v1*>(window_api))
+    {
+        printf("Window interface payload pointer mismatch\n");
+        return 18;
+    }
+
+    if (dng::FindModuleInterface(module_api, dng::ModuleAbiLiteral("dng.audio"), DNG_ABI_VERSION_V1) != nullptr)
+    {
+        printf("Unexpected audio interface export\n");
+        return 3;
     }
 
     dng_window_desc_v1 desc = {};
@@ -87,85 +117,87 @@ int main()
     dng_window_desc_v1 bad_desc = desc;
     bad_desc.flags = 1u;
     dng_window_handle_v1 bad_handle = 0u;
-    status = dng::WindowCreate(module_api.window, &bad_desc, &bad_handle);
+    status = dng::WindowCreate(*window_api, &bad_desc, &bad_handle);
     if (status != DNG_STATUS_INVALID_ARG || bad_handle != 0u)
     {
         printf("Create with invalid flags did not fail as expected: %u\n", (unsigned)status);
-        return 2;
-    }
-
-    status = dng::WindowCreate(module_api.window, &desc, &handle);
-    if (status != DNG_STATUS_OK || handle == 0u)
-    {
-        printf("Create failed: %u\n", (unsigned)status);
-        return 3;
-    }
-
-    dng_window_size_v1 size = {};
-    status = dng::WindowGetSize(module_api.window, handle, &size);
-    if (status != DNG_STATUS_OK || size.width != desc.width || size.height != desc.height)
-    {
-        printf("GetSize failed: %u\n", (unsigned)status);
         return 4;
     }
 
+    status = dng::WindowCreate(*window_api, &desc, &handle);
+    if (status != DNG_STATUS_OK || handle == 0u)
+    {
+        printf("Create failed: %u\n", (unsigned)status);
+        return 5;
+    }
+
+    dng_window_size_v1 size = {};
+    status = dng::WindowGetSize(*window_api, handle, &size);
+    if (status != DNG_STATUS_OK || size.width != desc.width || size.height != desc.height)
+    {
+        printf("GetSize failed: %u\n", (unsigned)status);
+        return 6;
+    }
+
     dng_str_view_v1 new_title = { "Updated", 7u };
-    status = dng::WindowSetTitle(module_api.window, handle, new_title);
+    status = dng::WindowSetTitle(*window_api, handle, new_title);
     if (status != DNG_STATUS_OK)
     {
         printf("SetTitle failed: %u\n", (unsigned)status);
-        return 5;
+        return 7;
     }
 
     // Negative: non-empty title requires non-null pointer.
     dng_str_view_v1 bad_title = { NULL, 1u };
-    status = dng::WindowSetTitle(module_api.window, handle, bad_title);
+    status = dng::WindowSetTitle(*window_api, handle, bad_title);
     if (status != DNG_STATUS_INVALID_ARG)
     {
         printf("SetTitle with invalid view did not fail as expected: %u\n", (unsigned)status);
-        return 6;
+        return 8;
     }
 
-    status = dng::WindowPoll(module_api.window);
+    status = dng::WindowPoll(*window_api);
     if (status != DNG_STATUS_OK)
     {
         printf("Poll failed: %u\n", (unsigned)status);
-        return 7;
+        return 9;
     }
 
-    status = dng::WindowDestroy(module_api.window, handle);
+    status = dng::WindowDestroy(*window_api, handle);
     if (status != DNG_STATUS_OK)
     {
         printf("Destroy failed: %u\n", (unsigned)status);
-        return 8;
+        return 10;
     }
 
     // Negative: window handle is invalid once destroyed.
     dng_window_size_v1 size_after_destroy = {};
-    status = dng::WindowGetSize(module_api.window, handle, &size_after_destroy);
+    status = dng::WindowGetSize(*window_api, handle, &size_after_destroy);
     if (status != DNG_STATUS_INVALID_ARG)
     {
         printf("GetSize after destroy did not fail as expected: %u\n", (unsigned)status);
-        return 9;
+        return 11;
     }
 
-    status = dng::WindowDestroy(module_api.window, handle);
+    status = dng::WindowDestroy(*window_api, handle);
     if (status != DNG_STATUS_INVALID_ARG)
     {
         printf("Destroy twice did not fail as expected: %u\n", (unsigned)status);
-        return 10;
+        return 12;
     }
 
     if (module_api.shutdown)
     {
-        status = module_api.shutdown(module_api.window.ctx, &host);
+        status = module_api.shutdown(module_api.module_ctx, &host);
         if (status != DNG_STATUS_OK)
         {
             printf("Shutdown failed: %u\n", (unsigned)status);
-            return 11;
+            return 13;
         }
         // Shutdown is single-use for dynamically allocated contexts.
-        module_api.window.ctx = NULL;
+        module_api.module_ctx = NULL;
+        module_api.interfaces = NULL;
+        module_api.interface_count = 0u;
         module_api.shutdown = NULL;
     }
 

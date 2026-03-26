@@ -11,8 +11,9 @@
 //           mixes voices before submitting to the default output device.
 //           Uses short gain ramps on play/stop/set-gain to reduce clicks and
 //           linear resampling when clip sample-rate differs from device rate.
-//           Clip samples and stream caches use shared static pools, so only one
-//           initialized WinMmAudio instance can own those pools at a time.
+//           Clip samples and stream caches are provisioned per instance during
+//           Init(), so multiple backend instances can coexist without sharing
+//           mutable global audio state.
 //           Streamed clips require a bound FileSystem interface that remains
 //           valid until streamed clips are unloaded and unbound.
 // ============================================================================
@@ -195,18 +196,14 @@ namespace dng::audio
         dng::u32 m_SampleRate = 48000;
         dng::u16 m_ChannelCount = 2;
         dng::u16 m_Reserved = 0;
+        dng::i16* m_ClipSamplePool = nullptr;
+        StreamClipState* m_StreamClips = nullptr;
         fs::FileSystemInterface m_StreamFileSystem{};
         float    m_BusGains[kAudioBusCount]{1.0f, 1.0f, 1.0f};
         bool     m_IsInitialized = false;
         bool     m_HasStreamFileSystem = false;
-        bool     m_OwnsGlobalClipPool = false;
-        dng::u8  m_Padding[5]{};
         dng::u64 m_UnderrunCount = 0;
         dng::u64 m_SubmitErrorCount = 0;
-
-        static dng::i16 s_ClipSamplePool[kMaxClipSamplePool];
-        static StreamClipState s_StreamClips[kMaxStreamClips];
-        static bool     s_GlobalClipPoolInUse;
     };
 
     static_assert(AudioBackend<WinMmAudio>, "WinMmAudio must satisfy audio backend concept.");

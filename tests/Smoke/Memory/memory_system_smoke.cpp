@@ -27,6 +27,27 @@ int RunMemorySystemSmoke()
         return 1;
     }
 
+    ::dng::core::MemoryConfig activeConfig{};
+    if (!::dng::memory::MemorySystem::TryGetActiveConfig(activeConfig))
+    {
+        ::dng::memory::MemorySystem::Shutdown();
+        return 6;
+    }
+
+    if (!::dng::memory::MemorySystem::IsConfigCompatible(cfg))
+    {
+        ::dng::memory::MemorySystem::Shutdown();
+        return 7;
+    }
+
+    ::dng::core::MemoryConfig conflictingConfig = activeConfig;
+    conflictingConfig.SetThreadFrameAllocatorBytes(activeConfig.thread_frame_allocator_bytes + 64u);
+    if (::dng::memory::MemorySystem::IsConfigCompatible(conflictingConfig))
+    {
+        ::dng::memory::MemorySystem::Shutdown();
+        return 8;
+    }
+
     ::dng::core::AllocatorRef defaultAllocator = ::dng::memory::MemorySystem::GetDefaultAllocator();
     if (!defaultAllocator.IsValid())
     {

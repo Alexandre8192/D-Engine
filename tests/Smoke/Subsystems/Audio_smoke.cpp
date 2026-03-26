@@ -1,14 +1,24 @@
 #include "Core/Audio/AudioSystem.hpp"
+#include "Core/Audio/NullAudio.hpp"
 
 int RunAudioSmoke()
 {
     using namespace dng::audio;
 
+    const auto isReset = [](const AudioSystemState& state) noexcept
+    {
+        const AudioCaps caps = QueryCaps(state);
+        return !state.isInitialized &&
+               state.backend == AudioSystemBackend::Null &&
+               state.ownedBackend.instance == nullptr &&
+               state.ownedBackend.destroy == nullptr &&
+               caps.determinism == dng::DeterminismMode::Unknown &&
+               caps.threadSafety == dng::ThreadSafetyMode::Unknown &&
+               !caps.stableMixOrder;
+    };
+
     AudioSystemState uninitialized{};
-    const AudioCaps uninitCaps = QueryCaps(uninitialized);
-    if (uninitCaps.determinism != dng::DeterminismMode::Unknown ||
-        uninitCaps.threadSafety != dng::ThreadSafetyMode::Unknown ||
-        uninitCaps.stableMixOrder)
+    if (!isReset(uninitialized))
     {
         return 1;
     }
@@ -25,9 +35,18 @@ int RunAudioSmoke()
     AudioInterface brokenInterface = MakeNullAudioInterface(nullBackendForValidation);
     brokenInterface.vtable.getCaps = nullptr;
     AudioSystemState rejected{};
-    if (InitAudioSystemWithInterface(rejected, brokenInterface, AudioSystemBackend::External))
+    AudioSystemConfig resetConfig{};
+    if (!InitAudioSystem(rejected, resetConfig))
     {
         return 3;
+    }
+    if (InitAudioSystemWithInterface(rejected, brokenInterface))
+    {
+        return 42;
+    }
+    if (!isReset(rejected))
+    {
+        return 43;
     }
 
     AudioSystemState state{};
@@ -276,7 +295,7 @@ int RunAudioSmoke()
         }
     }
 
-    if (state.nullBackend.lastFrameIndex != 3)
+    if (state.backend != AudioSystemBackend::Null)
     {
         ShutdownAudioSystem(state);
         return 8;
@@ -360,16 +379,38 @@ int RunAudioSmoke()
         AudioSystemState secondPlatformState{};
         if (InitAudioSystem(secondPlatformState, secondPlatformConfig))
         {
-            ShutdownAudioSystem(secondPlatformState);
-            ShutdownAudioSystem(platformAutoState);
-            return 32;
-        }
+            if (secondPlatformState.backend != AudioSystemBackend::Platform)
+            {
+                ShutdownAudioSystem(secondPlatformState);
+                ShutdownAudioSystem(platformAutoState);
+                return 32;
+            }
 
-        if (secondPlatformState.isInitialized)
+            float secondPlatformBuffer[256]{};
+            AudioMixParams secondPlatformMix{};
+            secondPlatformMix.outSamples = secondPlatformBuffer;
+            secondPlatformMix.outputCapacitySamples = 256;
+            secondPlatformMix.sampleRate = secondPlatformConfig.platform.sampleRate;
+            secondPlatformMix.channelCount = secondPlatformConfig.platform.channelCount;
+            secondPlatformMix.requestedFrames = 64;
+
+            if (Mix(secondPlatformState, secondPlatformMix) != AudioStatus::Ok ||
+                secondPlatformMix.writtenSamples != 128 ||
+                GetLoadedClipCount(secondPlatformState) != 0 ||
+                GetClipPoolUsageSamples(secondPlatformState) != 0)
+            {
+                ShutdownAudioSystem(secondPlatformState);
+                ShutdownAudioSystem(platformAutoState);
+                return 33;
+            }
+
+            ShutdownAudioSystem(secondPlatformState);
+        }
+        else if (secondPlatformState.isInitialized)
         {
             ShutdownAudioSystem(secondPlatformState);
             ShutdownAudioSystem(platformAutoState);
-            return 33;
+            return 34;
         }
     }
 

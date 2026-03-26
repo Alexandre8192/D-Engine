@@ -5,12 +5,16 @@
 
 // Platform-stable scalar and pointer-sized types, plus sanity checks.
 // D-Engine policy: **UTF-8 everywhere**, no TCHAR abstraction.
+// Prefer including Core/Types.hpp from engine code; this header is the lower
+// level source of truth for the platform layer itself.
 
 #include <cstdint>   // std::int*_t, std::uint*_t, std::intptr_t, std::uintptr_t
 #include <cstddef>   // std::size_t, std::ptrdiff_t
 #include <type_traits> // std::conditional_t
 #include "PlatformDefines.hpp" // for 32/64-bit checks
 
+namespace dng::platform
+{
 // -----------------------------
 // Fixed-width integers
 // -----------------------------
@@ -86,6 +90,7 @@ static_assert(sizeof(void*) == 8, "64-bit platform must have 8-byte pointers");
 #else
 static_assert(sizeof(void*) == 4, "32-bit platform must have 4-byte pointers");
 #endif
+} // namespace dng::platform
 
 // Endianness macros come from PlatformDefines.hpp:
 // - DNG_PLATFORM_LITTLE_ENDIAN (1/0)
