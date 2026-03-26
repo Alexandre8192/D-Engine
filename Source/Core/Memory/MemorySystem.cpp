@@ -391,7 +391,10 @@ namespace detail
                lhs.capture_callsite == rhs.capture_callsite &&
                lhs.report_on_exit == rhs.report_on_exit &&
                lhs.global_thread_safe == rhs.global_thread_safe &&
-               lhs.global_thread_policy == rhs.global_thread_policy &&
+               // global_thread_policy is only meaningful when global_thread_safe is on;
+               // ignore it when thread safety is disabled on both sides (the preceding
+               // global_thread_safe equality check guarantees they share the same value here).
+               (!(lhs.global_thread_safe || rhs.global_thread_safe) || lhs.global_thread_policy == rhs.global_thread_policy) &&
                lhs.enable_smallobj_tls_bins == rhs.enable_smallobj_tls_bins &&
                lhs.tracking_sampling_rate == rhs.tracking_sampling_rate &&
                lhs.tracking_shard_count == rhs.tracking_shard_count &&

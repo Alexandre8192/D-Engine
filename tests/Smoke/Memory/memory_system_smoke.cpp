@@ -81,5 +81,30 @@ int RunMemorySystemSmoke()
         return 5;
     }
 
+    // Verify that global_thread_policy is ignored when global_thread_safe is false.
+    // Two configs that differ only in global_thread_policy while global_thread_safe==false
+    // must be treated as compatible (the policy has no effect when thread-safety is off).
+    {
+        ::dng::core::MemoryConfig baseConfig{};
+        baseConfig.global_thread_safe   = false;
+        baseConfig.global_thread_policy = 0;
+        ::dng::memory::MemorySystem::Init(baseConfig);
+        if (!::dng::memory::MemorySystem::IsInitialized())
+        {
+            return 9;
+        }
+
+        ::dng::core::MemoryConfig altPolicyConfig{};
+        altPolicyConfig.global_thread_safe   = false;
+        altPolicyConfig.global_thread_policy = 1; // different policy, but thread-safety is off
+        if (!::dng::memory::MemorySystem::IsConfigCompatible(altPolicyConfig))
+        {
+            ::dng::memory::MemorySystem::Shutdown();
+            return 10;
+        }
+
+        ::dng::memory::MemorySystem::Shutdown();
+    }
+
     return 0;
 }
