@@ -5,22 +5,28 @@
 // Contract: C ABI; POD-only ABI structs; no exceptions/RTTI; single-window only;
 //           context allocated via host->alloc in dngModuleGetApi_v2 and freed
 //           in shutdown; host allocator used for title copies; caller must call
-//           shutdown exactly once before module unload.
+//           shutdown exactly once before module unload. The exported module API
+//           table references data stored inside the persistent NullWindowCtx, so
+//           module_ctx, the interface catalogue, and the window API payload stay
+//           valid until shutdown returns.
 // Notes   : set_title allocates via host->alloc and frees previous via host->free;
 //           not intended for hot paths. Determinism follows host pump cadence.
 //           Context is thread-safe per-instance (one context per module load).
 // ============================================================================
 #define DNG_ABI_EXPORTS
 #include "Core/Abi/DngModuleApi.h"
+#include "Core/Abi/DngWindowApi.h"
 
 #include <string.h>
 
 typedef struct NullWindowCtx {
-    const dng_host_api_v1* host; // Non-owning pointer to host services.
-    dng_window_handle_v1   handle;
-    dng_window_size_v1     size;
-    char*                  title;
-    dng_u32                title_size;
+    const dng_host_api_v1*  host; // Non-owning pointer to host services.
+    dng_window_handle_v1    handle;
+    dng_window_size_v1      size;
+    char*                   title;
+    dng_u32                 title_size;
+    dng_window_api_v1       window_api;
+    dng_module_interface_v1 interface_entry;
 } NullWindowCtx;
 
 // Context and title allocation constants (size and align must match free).
@@ -189,6 +195,8 @@ static dng_status_v1 DNG_ABI_CALL NullWindow_Shutdown(void* raw_ctx, const dng_h
 
 static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v2* api)
 {
+    // Store exported tables inside the persistent module context so every
+    // published pointer remains valid until shutdown/module unload.
     api->header.struct_size = (dng_u32)sizeof(dng_module_api_v2);
     api->header.abi_version = DNG_MODULE_API_VERSION_V2;
 
@@ -198,9 +206,16 @@ static void NullWindow_FillModuleApi(NullWindowCtx* ctx, dng_module_api_v2* api)
     api->module_version_minor = 0u;
     api->module_version_patch = 0u;
 
+    api->module_ctx = ctx;
+    api->interfaces = &ctx->interface_entry;
+    api->interface_count = 1u;
     api->shutdown = &NullWindow_Shutdown;
 
-    NullWindow_InitWindowApi(ctx, &api->window);
+    NullWindow_InitWindowApi(ctx, &ctx->window_api);
+    ctx->interface_entry.interface_name.data = DNG_MODULE_INTERFACE_NAME_WINDOW;
+    ctx->interface_entry.interface_name.size = NullWindow_StrLen(DNG_MODULE_INTERFACE_NAME_WINDOW);
+    ctx->interface_entry.interface_version = DNG_ABI_VERSION_V1;
+    ctx->interface_entry.api = (const dng_abi_header_v1*)&ctx->window_api;
 }
 
 DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v2(const dng_host_api_v1* host, dng_module_api_v2* out_api)
@@ -220,7 +235,8 @@ DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v2(const dng_host_api_v1*
         return DNG_STATUS_UNSUPPORTED;
     }
 
-    // Allocate module context via host allocator (caller owns lifetime).
+    // Allocate module-owned context via host allocator; exported pointers refer
+    // back to this storage and therefore remain stable until shutdown.
     void* mem = host->alloc(host->user, kNullWindowCtxSize, kNullWindowCtxAlign);
     if (!mem)
     {
@@ -228,12 +244,8 @@ DNG_ABI_API dng_status_v1 DNG_ABI_CALL dngModuleGetApi_v2(const dng_host_api_v1*
     }
 
     NullWindowCtx* ctx = (NullWindowCtx*)mem;
+    memset(ctx, 0, (size_t)kNullWindowCtxSize);
     ctx->host = host;
-    ctx->handle = 0u;
-    ctx->size.width = 0u;
-    ctx->size.height = 0u;
-    ctx->title = NULL;
-    ctx->title_size = 0u;
 
     NullWindow_FillModuleApi(ctx, out_api);
     return DNG_STATUS_OK;
