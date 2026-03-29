@@ -30,7 +30,7 @@
 #include <cstdio>      // std::snprintf
 #include <cstdlib>     // std::getenv
 #include <errno.h>     // errno, EEXIST
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
     #include <direct.h>    // _mkdir
 #else
     #include <sys/types.h>
@@ -67,18 +67,18 @@ namespace bench {
 // ---
 [[nodiscard]] inline const char* BenchOutputDir() noexcept
 {
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
     static constexpr const char* kDefault = "artifacts\\bench";
 #else
     static constexpr const char* kDefault = "artifacts/bench";
 #endif
     // MSVC marks getenv as deprecated; use a targeted pragma to silence 4996 here.
-#if defined(_MSC_VER)
+#if DNG_COMPILER_MSVC
 #   pragma warning(push)
 #   pragma warning(disable:4996)
 #endif
     const char* env = std::getenv("DNG_BENCH_OUT");
-#if defined(_MSC_VER)
+#if DNG_COMPILER_MSVC
 #   pragma warning(pop)
 #endif
     if (env && env[0] != '\0')
@@ -108,7 +108,7 @@ namespace bench {
     char buf[kMax + 1]{};
     std::size_t len = 0;
 
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
     const char kSep = '\\';
 #else
     const char kSep = '/';
@@ -137,7 +137,7 @@ namespace bench {
             {
                 const char saved = buf[t];
                 buf[t] = '\0';
-#if defined(_WIN32)
+#if DNG_PLATFORM_WINDOWS
                 if (_mkdir(buf) != 0)
                 {
                     if (errno != EEXIST)

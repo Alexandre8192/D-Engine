@@ -6,6 +6,8 @@
 // Compiler/attributes/visibility helpers.
 // Keep simple. Prefer standard C++ attributes where possible.
 
+#include "PlatformDefines.hpp"
+
 // -----------------------------
 // Compiler detection
 // -----------------------------
@@ -54,6 +56,23 @@
 #endif
 
 // -----------------------------
+// Calling convention helpers
+// -----------------------------
+#if DNG_COMPILER_MSVC
+#define DNG_CDECL   __cdecl
+#define DNG_STDCALL __stdcall
+#define DNG_VARARGS __cdecl
+#elif DNG_PLATFORM_WINDOWS && (DNG_COMPILER_CLANG || DNG_COMPILER_GCC)
+#define DNG_CDECL   __attribute__((cdecl))
+#define DNG_STDCALL __attribute__((stdcall))
+#define DNG_VARARGS __attribute__((cdecl))
+#else
+#define DNG_CDECL
+#define DNG_STDCALL
+#define DNG_VARARGS
+#endif
+
+// -----------------------------
 // Symbol visibility (DLL/DSO)
 // -----------------------------
 // Use these *base* macros to build per-module APIs (e.g., DNG_CORE_API).
@@ -91,6 +110,17 @@
 #else
   // Hint to optimizer for impossible paths
 #define DNG_ASSUME(x) do { if (!(x)) __builtin_unreachable(); } while (0)
+#endif
+
+// -----------------------------
+// Debug break
+// -----------------------------
+#if DNG_COMPILER_MSVC
+#define DNG_DEBUGBREAK() __debugbreak()
+#elif DNG_COMPILER_CLANG || DNG_COMPILER_GCC
+#define DNG_DEBUGBREAK() __builtin_trap()
+#else
+#define DNG_DEBUGBREAK() ((void)0)
 #endif
 
 // -----------------------------
