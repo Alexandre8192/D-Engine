@@ -8,7 +8,14 @@
 // Notes   : Uses `float32` as the primary scalar type.
 // ============================================================================
 
-#include "Core/CoreMinimal.hpp"
+#ifndef DNG_ASSERT
+#define DNG_DEFINE_MINIMAL_ASSERT
+#include "Core/Diagnostics/Check.hpp"
+#undef DNG_DEFINE_MINIMAL_ASSERT
+#else
+#include "Core/Diagnostics/Check.hpp"
+#endif
+#include "Core/Types.hpp"
 #include <cmath>
 #include <limits>
 #include <algorithm>
@@ -332,16 +339,13 @@ namespace dng
     // Optional debug helpers: they are no-op in builds where DNG_ASSERT is compiled out.
     // ---
     // Purpose : Debug-time guard ensuring a float stays finite before use.
-    // Contract: Enabled only when DNG_ASSERT is defined; otherwise compiles to no-op.
+    // Contract: Enabled only when DNG_ASSERT is active; otherwise compiles to no-op.
     // Notes   : Keeps diagnostics lightweight without forcing call sites to branch.
     // ---
     inline void AssertFinite(float32 value) noexcept
     {
-#if defined(DNG_ASSERT)
-        DNG_ASSERT(IsFinite(value) && "Non-finite float32 detected.");
-#else
+        DNG_ASSERT(IsFinite(value));
         (void)value;
-#endif
     }
 
     // ---
@@ -351,12 +355,9 @@ namespace dng
     // ---
     inline void AssertUnitLength(float32 lengthSquared, float32 tolerance = 1e-3f) noexcept
     {
-#if defined(DNG_ASSERT)
-        DNG_ASSERT(IsUnitLength(lengthSquared, tolerance) && "Expected normalized value (length ~= 1).");
-#else
+        DNG_ASSERT(IsUnitLength(lengthSquared, tolerance));
         (void)lengthSquared;
         (void)tolerance;
-#endif
     }
 
 } // namespace dng
