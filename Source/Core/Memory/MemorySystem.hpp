@@ -374,6 +374,75 @@ namespace memory
             return result;
         }
 
+        struct CompatibilityResolution
+        {
+            MemoryConfig effectiveConfig{};
+        };
+
+        [[nodiscard]] inline CompatibilityResolution ResolveCompatibilityConfig(const MemoryConfig& config) noexcept
+        {
+            CompatibilityResolution resolution{};
+            resolution.effectiveConfig = config;
+
+            const std::size_t rawFrameBytes = resolution.effectiveConfig.thread_frame_allocator_bytes;
+            resolution.effectiveConfig.thread_frame_allocator_bytes = (rawFrameBytes == 0u)
+                ? 0u
+                : ::dng::core::AlignUp<std::size_t>(rawFrameBytes, alignof(std::max_align_t));
+
+            const auto sampling = ResolveTrackingSampling(resolution.effectiveConfig);
+            const auto shards   = ResolveTrackingShards(resolution.effectiveConfig);
+            const auto batch    = ResolveSmallObjectBatch(resolution.effectiveConfig);
+
+            std::uint32_t effectiveSampling = sampling.value;
+            if (effectiveSampling == 0u || effectiveSampling > 1u)
+            {
+                effectiveSampling = 1u;
+            }
+
+            std::uint32_t effectiveShards = shards.value;
+            if (!::dng::core::IsPowerOfTwo(effectiveShards))
+            {
+                effectiveShards = static_cast<std::uint32_t>(DNG_MEM_TRACKING_SHARDS);
+            }
+
+            const bool trackingCompiled = ::dng::core::CompiledTracking() || ::dng::core::CompiledStatsOnly();
+            const bool guardsCompiled = ::dng::core::CompiledGuards();
+            const bool tlsBinsCompiled = (DNG_SMALLOBJ_TLS_BINS != 0);
+            const bool trackingRequested = resolution.effectiveConfig.enable_tracking;
+            const bool guardsRequested = resolution.effectiveConfig.enable_guards;
+            const bool tlsBinsRequested = resolution.effectiveConfig.enable_smallobj_tls_bins;
+
+            resolution.effectiveConfig.tracking_sampling_rate = effectiveSampling;
+            resolution.effectiveConfig.tracking_shard_count = effectiveShards;
+            resolution.effectiveConfig.small_object_batch = batch.value;
+            resolution.effectiveConfig.enable_tracking = trackingCompiled && trackingRequested;
+            resolution.effectiveConfig.enable_guards = guardsCompiled && guardsRequested;
+            resolution.effectiveConfig.enable_smallobj_tls_bins = tlsBinsCompiled && tlsBinsRequested;
+            return resolution;
+        }
+
+        [[nodiscard]] inline bool AreEquivalentMemoryConfigs(const MemoryConfig& lhs, const MemoryConfig& rhs) noexcept
+        {
+            return lhs.enable_tracking == rhs.enable_tracking &&
+                   lhs.enable_stats_only == rhs.enable_stats_only &&
+                   lhs.fatal_on_oom == rhs.fatal_on_oom &&
+                   lhs.enable_guards == rhs.enable_guards &&
+                   lhs.poison_on_free == rhs.poison_on_free &&
+                   lhs.capture_callsite == rhs.capture_callsite &&
+                   lhs.report_on_exit == rhs.report_on_exit &&
+                   lhs.global_thread_safe == rhs.global_thread_safe &&
+                   (!(lhs.global_thread_safe || rhs.global_thread_safe) || lhs.global_thread_policy == rhs.global_thread_policy) &&
+                   lhs.enable_smallobj_tls_bins == rhs.enable_smallobj_tls_bins &&
+                   lhs.tracking_sampling_rate == rhs.tracking_sampling_rate &&
+                   lhs.tracking_shard_count == rhs.tracking_shard_count &&
+                   lhs.small_object_batch == rhs.small_object_batch &&
+                   lhs.thread_frame_allocator_bytes == rhs.thread_frame_allocator_bytes &&
+                   lhs.thread_frame_return_null == rhs.thread_frame_return_null &&
+                   lhs.thread_frame_poison_on_reset == rhs.thread_frame_poison_on_reset &&
+                   lhs.thread_frame_poison_value == rhs.thread_frame_poison_value &&
+                   lhs.collect_stacks == rhs.collect_stacks;
+        }
+
         [[nodiscard]] inline AllocatorRef MakeAllocatorRef(DefaultAllocator* alloc) noexcept
         {
             return AllocatorRef(static_cast<::dng::core::IAllocator*>(alloc));
@@ -946,6 +1015,40 @@ namespace memory
         [[nodiscard]] static bool IsInitialized() noexcept
         {
             return detail::Globals().initialized;
+        }
+
+        // Purpose : Return the normalized config currently driving the memory system.
+        // Contract: Thread-safe; returns false when MemorySystem has not been initialized.
+        // Notes   : The returned config reflects runtime normalization and compile-time feature gating.
+        [[nodiscard]] static bool TryGetActiveConfig(MemoryConfig& outConfig) noexcept
+        {
+            auto& globals = detail::Globals();
+            detail::ThreadLock lock(globals.mutex);
+
+            if (!globals.initialized)
+            {
+                return false;
+            }
+
+            outConfig = globals.activeConfig;
+            return true;
+        }
+
+        // Purpose : Check whether a requested config would attach cleanly to the active system.
+        // Contract: Thread-safe; returns false when MemorySystem is not initialized.
+        // Notes   : Uses the same normalization rules as Init() before comparing with the active config.
+        [[nodiscard]] static bool IsConfigCompatible(const MemoryConfig& config) noexcept
+        {
+            auto& globals = detail::Globals();
+            detail::ThreadLock lock(globals.mutex);
+
+            if (!globals.initialized)
+            {
+                return false;
+            }
+
+            const auto resolution = detail::ResolveCompatibilityConfig(config);
+            return detail::AreEquivalentMemoryConfigs(globals.activeConfig, resolution.effectiveConfig);
         }
 
         // Purpose : Provide a facade over the default allocator wired during `Init()`.
