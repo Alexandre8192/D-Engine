@@ -37,42 +37,59 @@ namespace dng::fs
         bool                       isInitialized = false;
     };
 
-    [[nodiscard]] inline bool InitFileSystemSystemWithInterface(FileSystemSystemState& state,
-                                                                FileSystemInterface interface,
-                                                                FileSystemSystemBackend backend) noexcept
+    namespace detail
     {
-        if (interface.userData == nullptr ||
-            interface.vtable.getCaps == nullptr ||
-            interface.vtable.exists == nullptr ||
-            interface.vtable.fileSize == nullptr ||
-            interface.vtable.readFile == nullptr ||
-            interface.vtable.readFileRange == nullptr)
+        [[nodiscard]] inline bool IsValidFileSystemSystemInterface(const FileSystemInterface& interface) noexcept
         {
-            return false;
+            return interface.userData != nullptr &&
+                   interface.vtable.getCaps != nullptr &&
+                   interface.vtable.exists != nullptr &&
+                   interface.vtable.fileSize != nullptr &&
+                   interface.vtable.readFile != nullptr &&
+                   interface.vtable.readFileRange != nullptr;
         }
 
-        state.interface     = interface;
-        state.backend       = backend;
-        state.isInitialized = true;
-        return true;
+        inline void ResetFileSystemSystemState(FileSystemSystemState& state) noexcept
+        {
+            state = FileSystemSystemState{};
+        }
+
+        [[nodiscard]] inline bool BindFileSystemSystemState(FileSystemSystemState& state,
+                                                            FileSystemInterface interface,
+                                                            FileSystemSystemBackend backend) noexcept
+        {
+            if (!IsValidFileSystemSystemInterface(interface))
+            {
+                return false;
+            }
+
+            state.interface     = interface;
+            state.backend       = backend;
+            state.isInitialized = true;
+            return true;
+        }
+    } // namespace detail
+
+    [[nodiscard]] inline bool InitFileSystemSystemWithInterface(FileSystemSystemState& state,
+                                                                FileSystemInterface interface) noexcept
+    {
+        detail::ResetFileSystemSystemState(state);
+        return detail::BindFileSystemSystemState(state, interface, FileSystemSystemBackend::External);
     }
 
     [[nodiscard]] inline bool InitFileSystemSystem(FileSystemSystemState& state,
                                                    const FileSystemSystemConfig& config) noexcept
     {
-        state = FileSystemSystemState{};
+        detail::ResetFileSystemSystemState(state);
 
         switch (config.backend)
         {
             case FileSystemSystemBackend::Null:
             {
                 FileSystemInterface iface = MakeNullFileSystemInterface(state.nullBackend);
-                return InitFileSystemSystemWithInterface(state, iface, FileSystemSystemBackend::Null);
+                return detail::BindFileSystemSystemState(state, iface, FileSystemSystemBackend::Null);
             }
             case FileSystemSystemBackend::External:
-            {
-                return false; // Must be injected via InitFileSystemSystemWithInterface.
-            }
             default:
             {
                 return false;
@@ -82,10 +99,7 @@ namespace dng::fs
 
     inline void ShutdownFileSystemSystem(FileSystemSystemState& state) noexcept
     {
-        state.interface     = FileSystemInterface{};
-        state.backend       = FileSystemSystemBackend::Null;
-        state.nullBackend   = NullFileSystem{};
-        state.isInitialized = false;
+        detail::ResetFileSystemSystemState(state);
     }
 
     [[nodiscard]] inline FileSystemCaps QueryCaps(const FileSystemSystemState& state) noexcept

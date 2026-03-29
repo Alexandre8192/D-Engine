@@ -209,7 +209,6 @@ int RunCoreRuntimeSmoke()
         injected.audioSystem = &audioIface;
         injected.audioBackend = dng::audio::AudioSystemBackend::External;
         injected.rendererSystem = &rendererIface;
-        injected.rendererBackend = dng::render::RendererSystemBackend::Null;
 
         if (InitCoreRuntime(injectedState, config, injected) != CoreRuntimeStatus::Ok)
         {
@@ -223,7 +222,7 @@ int RunCoreRuntimeSmoke()
             injectedState.window.backend != dng::win::WindowSystemBackend::External ||
             injectedState.fileSystem.backend != dng::fs::FileSystemSystemBackend::External ||
             injectedState.audio.backend != dng::audio::AudioSystemBackend::External ||
-            injectedState.renderer.backend != dng::render::RendererSystemBackend::Null)
+            injectedState.renderer.backend != dng::render::RendererSystemBackend::External)
         {
             ShutdownCoreRuntime(injectedState);
             return 18;
@@ -345,7 +344,7 @@ int RunCoreRuntimeSmoke()
 
     {
         CoreRuntimeConfig rendererFailConfig = config;
-        rendererFailConfig.renderer.backend = dng::render::RendererSystemBackend::Forward;
+        rendererFailConfig.renderer.backend = dng::render::RendererSystemBackend::External;
         const CoreRuntimeInjectedInterfaces injected{};
         const int result = expectFailureReset(CoreRuntimeStatus::RendererInitFailed, rendererFailConfig, injected, 32);
         if (result != 0)
