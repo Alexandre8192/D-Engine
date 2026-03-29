@@ -27,6 +27,13 @@ int RunMemorySystemSmoke()
         return 1;
     }
 
+    ::dng::core::MemoryConfig activeConfig{};
+    if (!::dng::memory::MemorySystem::TryGetActiveConfig(activeConfig))
+    {
+        ::dng::memory::MemorySystem::Shutdown();
+        return 6;
+    }
+
     ::dng::core::AllocatorRef defaultAllocator = ::dng::memory::MemorySystem::GetDefaultAllocator();
     if (!defaultAllocator.IsValid())
     {
