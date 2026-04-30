@@ -6,7 +6,7 @@
 > Other documents that used to define policies/roadmaps now act as thin
 > pointers to sections of this handbook to avoid contradictions.
 
-Last updated: 2026-02-14
+Last updated: 2026-04-30
 
 -------------------------------------------------------------------------------
 
@@ -20,7 +20,8 @@ and to keep D-Engine coherent as it grows.
 1) **Product charter + reality checks** (Sections 0-2)
    - What D-Engine is trying to be.
    - What it explicitly does NOT promise.
-   - The chosen wedge (Crowd-first Musou performance) and why it is realistic.
+   - The chosen commercial wedge (Deterministic Core first, crowd proof second)
+     and why it is realistic.
 
 2) **Principles + architecture** (Sections 3-6)
    - The non-negotiables.
@@ -34,6 +35,8 @@ and to keep D-Engine coherent as it grows.
 4) **Roadmap + implementation snapshot** (Sections 17-20)
    - Roadmap: where we want to go next (planning).
    - Snapshot: what the code actually does today (reality).
+   - Commercial path: how the engine can become sellable without pretending to
+     be a full Unreal/Unity replacement.
 
 ### Suggested reading paths
 
@@ -62,14 +65,24 @@ and to keep D-Engine coherent as it grows.
 - **Backend**: a concrete implementation of a contract (Null, Win32, DX12, etc.).
 - **System**: the orchestrator that owns lifecycle and ties contracts together safely.
 - **Replay mode**: a configuration where simulation is structured to be reproducible.
-- **Wedge**: a narrow, demonstrable use case used to prove value (Crowd-first Musou).
+- **Wedge**: a narrow, demonstrable use case used to prove value.
+- **Deterministic Core**: the first product-shaped nucleus of D-Engine:
+  fixed-step simulation, input logs, snapshots, replay, state hashes, and
+  deterministic tests.
+- **Commercial path**: the route by which D-Engine can plausibly make money:
+  prove a specialized core, package it as an SDK, then monetize tooling,
+  integrations, licenses, and support.
+- **AI-readable architecture**: project structure, docs, contracts, naming,
+  tests, and metadata designed so human developers and AI assistants can reason
+  about the engine with low ambiguity.
+- **Vertical slice**: a small but complete demo proving a claim end-to-end.
 
 -------------------------------------------------------------------------------
 
 ## Table of contents
 
 0. [Why D-Engine exists (product charter)](#0-why-d-engine-exists-product-charter)
-1. [The wedge: Crowd-first (Musou) performance as proof](#1-the-wedge-crowd-first-musou-performance-as-proof)
+1. [The product wedge: Deterministic Core first, crowd as proof](#1-the-product-wedge-deterministic-core-first-crowd-as-proof)
 2. [What D-Engine does NOT promise (explicit non-goals)](#2-what-d-engine-does-not-promise-explicit-non-goals)
 3. [Guiding principles (the "dream engine" rules)](#3-guiding-principles-the-dream-engine-rules)
 4. [Architecture model](#4-architecture-model)
@@ -85,7 +98,7 @@ and to keep D-Engine coherent as it grows.
 14. [ABI and interop policy (stable C ABI for modules)](#14-abi-and-interop-policy-stable-c-abi-for-modules)
 15. [ABI review checklist](#15-abi-review-checklist)
 16. [Benchmark protocol](#16-benchmark-protocol)
-17. [Roadmap (two tracks: SDK stability + crowd slice)](#17-roadmap-two-tracks-sdk-stability--crowd-slice)
+17. [Roadmap (commercial core + crowd slice)](#17-roadmap-commercial-core--crowd-slice)
 18. [Implementation snapshot (code-backed reality)](#18-implementation-snapshot-code-backed-reality)
 19. [Contribution workflow and review checklist](#19-contribution-workflow-and-review-checklist)
 20. [Appendix: historical snapshots and where to look next](#20-appendix-historical-snapshots-and-where-to-look-next)
@@ -94,63 +107,172 @@ and to keep D-Engine coherent as it grows.
 
 ## 0. Why D-Engine exists (product charter)
 
-D-Engine is a programmer-first engine project built around four promises:
+D-Engine exists because some programmers want an engine that feels controllable,
+understandable, replaceable, and honest about cost.
 
-1) **Contracts-first**: every subsystem starts as a backend-agnostic contract
-   with explicit ownership, error behavior, determinism notes, and a visible cost
-   model.
-2) **Determinism and auditability**: the engine is structured so that simulation
-   can be made reproducible (Replay mode) and debugged with stable ordering.
-3) **Header-first clarity**: the public surface is readable and self-contained.
+The project is not only a technical dream. It also has a commercial goal:
+D-Engine should eventually be able to generate revenue. This must be stated
+explicitly because it changes the strategy.
+
+The commercial strategy is NOT:
+
+- "build a full Unreal/Unity competitor first, then hope people pay for it"
+- "add AI and call it a product"
+- "copy every major engine feature"
+- "win by being bigger"
+
+The commercial strategy is:
+
+1) Build a narrow technical core that is genuinely differentiated.
+2) Prove it with reproducible demos and benchmarks.
+3) Package the useful part as a product-shaped SDK.
+4) Add integrations and tooling that save developers time or reduce risk.
+5) Monetize licenses, advanced tooling, support, consulting, or hosted services.
+
+D-Engine is a programmer-first C++ engine and simulation SDK built around these
+promises:
+
+1) **Contracts-first modularity**: every subsystem starts as a backend-agnostic
+   contract with explicit ownership, error behavior, determinism notes, and a
+   visible cost model.
+2) **Determinism and auditability**: simulation should be reproducible in Replay
+   mode, inspectable through stable ordering, and debuggable with state hashes
+   and input logs.
+3) **AI-readable architecture**: the engine should be structured so humans and
+   AI assistants can understand, modify, and extend it without guessing hidden
+   rules.
+4) **Header-first clarity**: the public surface is readable and self-contained.
    "What does this do and what does it cost?" should be answerable by reading a
    header.
-4) **Performance by design, not by luck**: no hidden allocations on hot paths,
+5) **Performance by design, not by luck**: no hidden allocations on hot paths,
    explicit data layouts, and benchmarks treated as first-class tests.
+6) **Freedom without magic**: D-Engine should give programmers control instead of
+   forcing them through opaque editor-driven systems or implicit engine behavior.
 
 Platform scope (current): **Windows-only**.
 
-This file also contains explicit reality checks. The goal is to avoid
-"wishful architecture" that feels inspiring but cannot ship.
+This handbook exists to prevent "wishful architecture" that feels inspiring but
+cannot ship. When in doubt, prefer the smallest demonstrable proof over the
+largest theoretical engine design.
+
+### 0.1 The emotional promise
+
+The engine should feel good to use because it is:
+
+- understandable,
+- explicit,
+- replaceable,
+- predictable,
+- inspectable,
+- and honest about trade-offs.
+
+This emotional promise must be translated into technical rules:
+
+- small contracts instead of giant opaque systems,
+- Null backends before real backends,
+- visible allocation behavior,
+- fixed-step simulation where determinism matters,
+- replay and state hashes for debugging,
+- strong documentation at module boundaries,
+- and no hidden "engine magic" in the Core.
+
+### 0.2 The market reality
+
+A solo or very small team should not try to monetize D-Engine first as a full
+general-purpose game engine. That is one of the hardest possible routes.
+
+The more realistic path is to create a specialized product from D-Engine:
+
+- a deterministic simulation SDK,
+- a rollback/replay/debug SDK,
+- a headless gameplay runtime,
+- a crowd simulation benchmark framework,
+- a plugin/integration for existing engines,
+- or a vertical game framework for a narrow genre.
+
+The engine can still grow into a broader engine later. But the first sellable
+artifact should be specialized, demonstrable, and useful even before D-Engine has
+a full editor.
 
 -------------------------------------------------------------------------------
 
-## 1. The wedge: Crowd-first (Musou) performance as proof
+## 1. The product wedge: Deterministic Core first, crowd as proof
 
 D-Engine does not need to "beat Unreal/Unity at everything" to be valuable.
-The strategy is to win hard on a narrow, concrete use case that:
+The strategy is to win on a narrow axis where general-purpose engines are often
+heavy, hard to audit, or not designed for strict reproducibility.
 
-- is easy to demonstrate,
-- is easy to benchmark,
-- benefits from determinism and low-latency scheduling,
-- and is painful in general-purpose engines.
+### 1.1 Primary wedge: Deterministic Core
 
-### 1.1 The chosen wedge
+The first product-shaped nucleus is the **D-Engine Deterministic Core**.
 
-**Crowd-first action (Musou / Dynasty Warriors-like)**:
+Minimum scope:
 
-- hundreds to thousands of animated agents,
-- lots of VFX, collisions, and gameplay logic,
-- stable 60 fps target,
-- minimal stutter (frame-time stability matters more than average fps).
+- fixed-step SimulationClock,
+- deterministic CommandBuffer per tick,
+- explicit RNG,
+- state snapshots,
+- state restore,
+- stable state hashing,
+- input logs,
+- replay verification,
+- clear memory and allocation behavior,
+- deterministic job mode or single-thread Replay mode.
 
-This wedge is compatible with D-Engine's core philosophy:
-data-oriented simulation, deterministic-friendly update rules, and explicit cost.
+This is not a full game engine yet. It is the foundation that can later power:
 
-### 1.2 What "winning" looks like
+- rollback,
+- lockstep,
+- desync inspection,
+- headless server simulation,
+- authoritative gameplay simulation,
+- deterministic AI experiments,
+- crowd simulation,
+- and integrations with existing engines.
+
+### 1.2 Secondary proof: Crowd-first action
+
+The crowd-first Musou / Dynasty Warriors-like benchmark remains a strong proof,
+but it should be treated as the first major vertical slice, not as the only
+identity of the engine.
+
+The crowd proof should demonstrate:
+
+- hundreds to thousands of agents,
+- stable fixed-step simulation,
+- deterministic state hashes,
+- explicit memory behavior,
+- job partitioning with deterministic merge,
+- stable frame-time measurements,
+- and a clear cost model.
+
+The reason this proof matters commercially:
+
+- it is visual and easy to understand,
+- it is benchmarkable,
+- it stresses scheduling, memory, simulation, animation, and rendering,
+- it shows why D-Engine exists better than a static architecture document.
+
+### 1.3 What "winning" looks like
 
 The first believable win is NOT "a full engine". It is a reproducible proof:
 
-- a fixed benchmark scene,
-- a stable simulation tick,
-- agent update + animation sampling + visibility/VFX submission,
-- a frame-time graph that stays flat under load,
-- and a clearly explained cost model.
+- a deterministic headless simulation benchmark,
+- a replay that produces the same hashes,
+- a documented state snapshot format,
+- a small demo that can be inspected and replayed,
+- a report with tick time, memory, allocations, and scaling data.
 
-If this proof is strong, it becomes a marketing and adoption lever. It also
-forces the engine to become real (windowing, input, jobs, renderer path, asset
-loading), but in a scoped way.
+A later visual win adds:
 
-### 1.3 Why this wedge can plausibly differentiate
+- a window,
+- input,
+- renderer path,
+- visible crowd,
+- frame-time graph,
+- and stress cases.
+
+### 1.4 Why this wedge can plausibly differentiate
 
 General-purpose engines pay overhead for:
 
@@ -158,59 +280,114 @@ General-purpose engines pay overhead for:
 - editor-first pipelines,
 - dynamic reflection/serialization,
 - flexible but expensive entity models,
-- multi-purpose job scheduling.
+- large runtime surfaces,
+- and multi-purpose job scheduling.
 
 D-Engine can choose to be:
 
 - narrow in scope at first,
 - explicit about data and ownership,
-- strict about determinism/stable ordering,
-- and willing to optimize for one scenario.
+- strict about determinism and stable ordering,
+- designed for replay/debug from day one,
+- and optimized for specific scenarios before generality.
 
-This does not guarantee superiority, but it makes a measurable win plausible.
+This does not guarantee commercial success. It makes a measurable, explainable,
+and marketable win plausible.
 
 -------------------------------------------------------------------------------
 
 ## 2. What D-Engine does NOT promise (explicit non-goals)
 
-These non-goals are part of the charter. They are here to reduce future doubt
-and prevent the roadmap from drifting into impossibility.
+These non-goals are part of the charter. They reduce doubt and prevent the
+roadmap from drifting into impossibility.
 
-### 2.1 Not a "Unreal replacement" across all use cases
+### 2.1 Not a full Unreal/Unity replacement
 
-D-Engine aims to be a serious alternative for some teams and some genres.
-It is not designed to cover the full Unreal/Unity surface area.
+D-Engine aims to be a serious alternative for some teams, some genres, and some
+technical problems. It is not designed to cover the full Unreal/Unity surface
+area.
 
-### 2.2 Not instantly studio-ready
+D-Engine is especially NOT trying to compete first on:
+
+- virtual production,
+- cinema,
+- archviz,
+- photoreal character pipelines,
+- full AAA editor tooling,
+- asset marketplaces,
+- or a complete beginner-friendly visual workflow.
+
+### 2.2 Not "Unreal Engine 2.0" as a clone
+
+The phrase "Unreal Engine 2.0" can be useful emotionally, but it must not become
+a design trap.
+
+The correct interpretation is:
+
+- D-Engine wants to fix some frustrations programmers have with large engines.
+- D-Engine wants to be more controllable, modular, deterministic, and readable.
+- D-Engine does not try to reproduce every Unreal feature.
+
+D-Engine should be a counter-position, not a clone.
+
+### 2.3 Not "AI native" as a vague product
+
+AI is important, but "AI native" is too vague to be a product strategy.
+
+D-Engine should not compete first on:
+
+- generic chatbots inside the editor,
+- asset generation,
+- NPC personality platforms,
+- or model hosting.
+
+Instead, D-Engine should be **AI-readable by construction**:
+
+- small contracts,
+- stable naming,
+- explicit docs,
+- predictable folder layout,
+- testable examples,
+- deterministic repro cases,
+- and prompts/guides that help AI assistants make safe changes.
+
+AI can later become a first-class tool layer, but the Core must remain useful
+without AI.
+
+### 2.4 Not instantly studio-ready
 
 Large studios choose engines based on:
 
 - shipping track record,
 - tooling maturity,
 - long-term support guarantees,
-- stability (API/ABI),
+- stability of API/ABI,
 - debug/profiling pipelines,
 - hiring and onboarding cost.
 
-D-Engine can become attractive over time, but "studio-ready" is a result of
-multiple shipped projects, not a document.
+D-Engine can become attractive over time, but "studio-ready" is earned through
+working products, demos, documentation, tests, and shipped projects.
 
-### 2.3 Not designer-friendly "by magic"
+### 2.5 Not designer-friendly by magic
 
-AI assistants help, but a designer-friendly engine requires:
+D-Engine is intentionally programmer-first.
 
-- robust tooling (editor, content pipeline),
-- iteration workflows,
-- safe scripting or visual logic,
-- documentation and UX.
+Designer friendliness can be added later through:
 
-D-Engine is intentionally programmer-first. Designer friendliness can be added
-later, but it is not a v0.x requirement.
+- editor tooling,
+- safe scripting,
+- content pipelines,
+- visual inspection tools,
+- and templates.
 
-### 2.4 Not bitwise identical simulation across all machines
+It is not a v0.x requirement.
+
+### 2.6 Not bitwise identical simulation across all machines by default
 
 Replay determinism is defined in this handbook, but "bitwise identical across
-different hardware and compilers" is out of scope by default.
+different hardware, OS versions, and compilers" is out of scope by default.
+
+Stronger determinism can become an experimental mode later.
 
 -------------------------------------------------------------------------------
 
@@ -223,59 +400,179 @@ These are the non-negotiables that shape every subsystem.
 - Start every subsystem by writing the contract.
 - The contract must be readable, stable, and explicit.
 - Then implement:
-  - a Null backend (deterministic reference),
+  - a Null backend,
   - a System/orchestrator layer,
   - and only then a real platform backend.
 
-### 3.2 No hidden allocations and visible costs
+A contract is not just an interface. It is a promise about:
+
+- inputs,
+- outputs,
+- ownership,
+- allocation,
+- errors,
+- determinism,
+- threading,
+- lifetime,
+- and cost.
+
+### 3.2 Modularity by replacement, not by wishful abstraction
+
+The engine should allow a subsystem to be replaced if the contract is respected.
+
+Examples:
+
+- Renderer can be Null, DX12, Vulkan, or external.
+- Audio can be Null or real backend.
+- Physics can be simple, custom, or third-party.
+- AI can be local, scripted, or external service-backed.
+- Netcode can be disabled, authoritative, rollback, or lockstep.
+
+But replacement is only valid when the contract defines enough behavior to make
+the swap safe.
+
+### 3.3 No hidden allocations and visible costs
 
 - Public APIs must document allocation behavior.
 - Hot paths must avoid hidden allocations.
 - Prefer caller-provided buffers or explicit arenas.
+- If an option costs CPU, memory, bandwidth, or determinism, document it.
 
-### 3.3 Determinism as a first-class mode
+### 3.4 Determinism as a first-class mode
 
 - Replay mode exists to make bugs reproducible.
 - Stable ordering rules are mandatory when results depend on order.
 - Multithreading is allowed only with deterministic merge rules.
+- Simulation must not depend on renderer, audio, OS timing, or pointer addresses.
 
-### 3.4 Header-first, self-contained public surface
+### 3.5 Header-first, self-contained public surface
 
 - Contracts are in headers.
 - Every public header compiles in isolation.
-- "Thin facade" pattern: keep heavy templates in `detail/` and `.cpp`.
+- Heavy templates stay in `detail/` or implementation files.
+- The public surface should be readable by humans and AI assistants.
 
-### 3.5 Minimal magic, maximum clarity
+### 3.6 Minimal magic, maximum clarity
 
 - Avoid opaque macros.
 - Prefer explicit types, explicit ownership, explicit error returns.
 - Teach through code: Purpose/Contract/Notes are expected.
+- Do not hide lifecycle, allocation, or global state behind convenience APIs.
 
-### 3.6 Modular by construction
+### 3.7 AI-readable architecture
 
-- A project can pick which backends to use.
-- The engine should not force a single "one true" implementation.
-- If a backend respects the contract, it should plug in.
+D-Engine should be built so that AI assistants can help without destroying the
+architecture.
+
+Rules:
+
+- Keep contracts small and explicit.
+- Keep file responsibilities narrow.
+- Keep naming stable.
+- Put invariants in headers and tests.
+- Prefer mechanical patterns that can be repeated safely.
+- Provide examples and smoke tests for every subsystem.
+- Document why a rule exists, not only what the rule is.
+- Do not rely on undocumented project lore.
+
+This is not only for AI. It also helps future maintainers and contributors.
+
+### 3.8 Commercial realism
+
+A feature is more valuable if it can eventually support at least one of these:
+
+- saves development time,
+- reduces production risk,
+- improves debugging,
+- improves determinism/replay,
+- improves performance predictability,
+- makes integration easier,
+- or helps a team ship.
+
+Not every feature must be commercial. But the roadmap must keep the future
+product path visible.
 
 -------------------------------------------------------------------------------
 
 ## 4. Architecture model
 
-The engine is organized around three layers:
+The engine is organized around five conceptual layers.
 
 1) **Contract layer** (source-level, C++):
-   - backend-agnostic types and functions
-   - stable shape for in-repo backends
+   - backend-agnostic types and functions,
+   - stable shape for in-repo backends,
+   - explicit ownership, cost, and determinism notes.
+
 2) **System layer** (C++):
-   - orchestrates initialization, lifetime, validation, and dispatch
-   - owns "policy" decisions (Replay mode, error handling, threading mode)
+   - orchestrates initialization, lifetime, validation, and dispatch,
+   - owns policy decisions such as Replay mode, error handling, and threading
+     mode.
+
 3) **Backend layer**:
-   - Null backend (reference)
-   - platform backend (Win32, audio device, etc.)
-   - external backend (third-party)
-   - optional loadable module via C ABI
+   - Null backend,
+   - platform backend,
+   - external backend,
+   - optional loadable module via C ABI.
+
+4) **Tooling layer**:
+   - tests,
+   - benches,
+   - replay tools,
+   - desync tools,
+   - diagnostics,
+   - code generation,
+   - editor or CLI tools.
+
+5) **Integration layer**:
+   - optional wrappers for existing engines,
+   - optional language bindings,
+   - optional services,
+   - product packaging.
 
 This separation keeps the Core understandable and makes evolution safer.
+
+### 4.1 Product-shaped architecture
+
+The architecture should support two futures at the same time:
+
+- D-Engine as a standalone engine.
+- D-Engine Core as a reusable SDK embedded in another engine or tool.
+
+This means the Core must not assume:
+
+- a specific renderer,
+- a specific editor,
+- a specific asset pipeline,
+- a specific scripting language,
+- or a specific networking model.
+
+### 4.2 Contract / Null backend / System pattern
+
+Every serious subsystem should follow this sequence:
+
+1) Contract first.
+2) Null backend second.
+3) System/orchestrator third.
+4) Smoke tests fourth.
+5) Real backend fifth.
+6) Bench/replay tests when the subsystem can affect performance or determinism.
+
+The Null backend is not a placeholder. It is the deterministic reference and the
+simplest way to test lifecycle, API shape, and tooling.
+
+### 4.3 Static and dynamic replacement
+
+D-Engine supports two replacement styles:
+
+- **Static replacement**: compile-time C++ backend selection, concepts, CRTP, or
+  direct system wiring.
+- **Dynamic replacement**: C ABI module boundary with function tables and explicit
+  lifetime.
+
+Default preference:
+
+- static for hot paths and internal engine code,
+- dynamic for plugins, external modules, and language interop.
 
 -------------------------------------------------------------------------------
 
@@ -292,6 +589,33 @@ High-level map:
 - `Docs/` : thin pointers and historical snapshots
 
 Core rule: **Contracts live in `Source/Core/Contracts/`**.
+
+### 5.1 Layering rules
+
+The Core must stay usable without:
+
+- editor,
+- renderer,
+- audio,
+- networking,
+- scripting,
+- third-party services,
+- or AI tools.
+
+This keeps the Deterministic Core embeddable and testable.
+
+### 5.2 Product docs vs historical docs
+
+This handbook is the canonical source for:
+
+- vision,
+- policies,
+- roadmap,
+- non-goals,
+- and review rules.
+
+Other docs may explain a subsystem, but they must not redefine global policy.
+Historical docs should either point here or clearly mark themselves as stale.
 
 -------------------------------------------------------------------------------
 
@@ -318,6 +642,45 @@ Contract requirements (minimum):
 - **Determinism notes**: what is stable in Replay mode.
 - **Allocation model**: explicit call-outs for any allocation.
 - **Ordering guarantees**: if ordering affects results, define it.
+- **Cost model**: CPU, memory, bandwidth, sync, or compile-time costs.
+- **AI modification notes**: what must not be changed casually.
+
+### 6.1 Contract quality checklist
+
+A contract is not ready if a reader cannot answer:
+
+- What are the inputs and outputs?
+- Who owns memory?
+- Who frees memory?
+- Can it allocate?
+- Can it fail?
+- What status is returned on failure?
+- Is it usable in Replay mode?
+- Does call order matter?
+- Is it thread-safe?
+- What is the expected hot path?
+- What is intentionally not supported?
+
+### 6.2 Backend quality checklist
+
+A backend is not ready if it lacks:
+
+- a Null or reference equivalent,
+- lifecycle tests,
+- error path tests,
+- allocation documentation,
+- and integration notes.
+
+### 6.3 AI-safe modification notes
+
+For important contracts, include notes that help AI-assisted tools preserve
+architecture:
+
+- invariants that must remain true,
+- forbidden shortcuts,
+- expected extension points,
+- tests that must be updated when behavior changes,
+- and examples of valid/invalid backend behavior.
 
 -------------------------------------------------------------------------------
 
@@ -1078,19 +1441,20 @@ Notes:
 
 -------------------------------------------------------------------------------
 
-## 17. Roadmap (two tracks: SDK stability + crowd slice)
+## 17. Roadmap (commercial core + crowd slice)
 
-The roadmap is split into two tracks:
+The roadmap is split into three tracks:
 
 - Track A: engine foundation (contracts, ABI, determinism, memory, runtime)
-- Track B: crowd-first vertical slice (the proof)
+- Track B: product-shaped Deterministic Core SDK
+- Track C: crowd-first vertical slice (the public proof)
 
-The point of Track B is to create a concrete public demonstration while Track A
-keeps the architecture honest.
+Track B is the commercial bridge. It prevents the project from becoming only a
+large engine dream with no sellable intermediate product.
 
 ### 17.1 Track A - Foundation
 
-Phase A0 (done): Contract SDK stabilization
+Phase A0 (done or mostly done): Contract SDK stabilization
 
 - contracts and ABI shape established
 - Null backends + systems + smoke coverage
@@ -1101,40 +1465,130 @@ Phase A1 (next): Core runtime solidity
 
 - runtime orchestration (init/shutdown) remains clean and rollback-safe
 - memory system continues to harden (tracking, OOM policy, reporting)
-- deterministic job mode (Replay-friendly) with instrumentation
+- deterministic job mode with instrumentation
 - ABI loader hardening and packaging of SDK
+- repository entry points updated to reflect the commercial direction
 
 Phase A2: Platform-ready renderer and windowing (Windows)
 
 - choose renderer strategy (DX12 recommended but not mandatory)
 - Win32 windowing + swapchain + input path
 - GPU resource lifetime rules and frame submission contract
+- renderer must not feed nondeterminism back into simulation
 
-### 17.2 Track B - Crowd-first vertical slice
+### 17.2 Track B - Deterministic Core SDK
 
-Milestone B0: Deterministic crowd simulation harness
+Milestone B0: Deterministic simulation harness
+
+- fixed-step simulation loop
+- deterministic CommandBuffer per tick
+- explicit seeded RNG
+- stable entity IDs
+- stable update order
+- state hash baseline
+
+Milestone B1: Snapshot and restore
+
+- state snapshot API
+- restore API
+- snapshot size reporting
+- ownership and allocation model
+- smoke tests proving restore correctness
+
+Milestone B2: Replay and verification
+
+- input log recording
+- replay execution
+- per-tick or periodic state hash
+- mismatch report
+- minimal desync diagnostic output
+
+Milestone B3: Product packaging
+
+- small public SDK sample
+- getting-started doc
+- CLI or test runner for replay verification
+- license/pricing notes remain separate from Core code
+- integration boundary documented
+
+Deliverable:
+
+- a headless deterministic SDK demo that can be run, replayed, and verified.
+
+Commercial value:
+
+- useful for rollback,
+- useful for server-authoritative gameplay simulation,
+- useful for deterministic tests,
+- useful for debugging complex gameplay,
+- useful as a future plugin inside another engine.
+
+### 17.3 Track C - Crowd-first vertical slice
+
+Milestone C0: Deterministic crowd simulation harness
 
 - headless simulation benchmark: update N agents per tick
 - stable ordering, explicit RNG, fixed-step
 - state hash baseline (Replay test)
 
-Milestone B1: Animation sampling and submission
+Milestone C1: Animation sampling and submission
 
 - skeletal pose sampling for N agents
 - memory and job partitioning rules
 - stable merge and determinism notes
 
-Milestone B2: Minimal renderer path
+Milestone C2: Minimal renderer path
 
 - enough rendering to visualize the crowd
 - stable frame pacing and frame-time measurement
 
-Milestone B3: VFX and interaction stress
+Milestone C3: VFX and interaction stress
 
-- bursts (impacts), simple collisions, VFX submissions
+- bursts, impacts, simple collisions, VFX submissions
 - demonstrate frame-time stability under stress
 
-Deliverable: a documented, reproducible benchmark scene and a report.
+Deliverable:
+
+- a documented, reproducible benchmark scene and a report.
+
+### 17.4 Track D - AI-readable tooling
+
+This track supports every other track. It is not about adding a generic chatbot.
+It is about making the engine safe to modify with AI assistance.
+
+Milestone D0: AI-readable repo rules
+
+- architecture rules documented in this handbook
+- prompts for common contribution tasks
+- examples of correct contract/backend/system pattern
+- "do not do this" anti-pattern list
+
+Milestone D1: Modification checklists
+
+- per-subsystem review checklist
+- tests that must be run after common changes
+- stable naming conventions
+- documentation update checklist
+
+Milestone D2: Optional assistant layer
+
+- only after the Core is stable enough
+- may help generate backends, tests, docs, or migration reports
+- must never replace deterministic tests or code review
+
+### 17.5 Commercial path
+
+The commercial path should evolve in this order:
+
+1) **Proof**: deterministic replay works and is documented.
+2) **Demo**: a small vertical slice proves why the Core matters.
+3) **SDK**: the useful Core is packageable outside the full engine.
+4) **Integration**: wrappers or plugins make adoption easier.
+5) **Tooling**: replay/desync/perf tools become a paid or premium layer.
+6) **Licensing/support**: commercial users can pay for support, features, or
+   licensing once the product saves them time or reduces risk.
+
+Do not monetize too early in a way that kills adoption. The early goal is trust.
 
 -------------------------------------------------------------------------------
 
@@ -1160,6 +1614,16 @@ Test/target reality:
 - header self-containment: `tests/SelfContain/`
 - policy tests: `tests/Policy/`
 
+Strategic reality as of this handbook update:
+
+- D-Engine is not yet a complete commercial engine.
+- The most realistic first commercial artifact is the Deterministic Core SDK.
+- The crowd-first demo remains a strong proof, but it depends on the Core being
+  stable first.
+- AI should be treated as an architecture multiplier and tooling layer, not as a
+  vague product promise.
+- The contract model remains the central design advantage.
+
 If this section becomes wrong, it must be updated when code changes.
 
 -------------------------------------------------------------------------------
@@ -1176,6 +1640,7 @@ If this section becomes wrong, it must be updated when code changes.
 5) Add/adjust header self-containment tests.
 6) Run policy lint and gates.
 7) Update this handbook if any policy/roadmap/architecture rule changes.
+8) Update AI-readable notes/prompts when a subsystem pattern changes.
 
 ### 19.2 Review checklist (engine-wide)
 
@@ -1196,6 +1661,19 @@ Tooling coherence:
 
 - gates and bench CI match benchmark protocol
 - policy lint remains strict
+- replay/desync/perf claims have tests or benches
+
+Commercial coherence:
+
+- the change supports the Deterministic Core, the crowd proof, or a documented
+  future integration path
+- the change does not expand scope without a clear proof or product reason
+
+AI-readable coherence:
+
+- contract changes include enough notes for AI-assisted modification
+- examples and tests remain easy to discover
+- prompts/checklists are updated when architectural patterns change
 
 -------------------------------------------------------------------------------
 
