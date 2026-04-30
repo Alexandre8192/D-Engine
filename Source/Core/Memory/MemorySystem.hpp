@@ -11,7 +11,7 @@
 //           singleton, guarded according to DNG_MEM_THREAD_POLICY. Clients must
 //           call MemorySystem::Init() exactly once prior to using any global
 //           allocator, and Shutdown() may be called multiple times (idempotent).
-// Notes   : Designed for inclusion from CoreMinimal.hpp. No external runtime
+// Notes   : Header-only and explicit about its dependencies. No external runtime
 //           dependencies are introduced and diagnostics leverage the existing
 //           DNG_LOG_* and DNG_ASSERT/DNG_CHECK infrastructure. A convenience
 //           RAII helper (MemorySystemScope) is offered for scope-based usage.
@@ -21,9 +21,9 @@
 //           Core site permitted to emit std::bad_alloc.
 // ============================================================================
 
-#include "Core/CoreMinimal.hpp"
 #include "Core/Diagnostics/Check.hpp"
 #include "Core/Logger.hpp"
+#include "Core/Types.hpp"
 #include "Core/Memory/MemMacros.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/DefaultAllocator.hpp"

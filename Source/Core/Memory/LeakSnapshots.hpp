@@ -21,13 +21,15 @@
 //   - Future extensions: ToCSV(), ToJSON(), rolling snapshot history.
 // ============================================================================
 
-#include "Core/CoreMinimal.hpp"
+#include "Core/Logger.hpp"
 #include "Core/Memory/MemoryConfig.hpp"
 #include "Core/Memory/MemorySystem.hpp"
 #include "Core/Memory/TrackingAllocator.hpp"
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <iomanip>
 #include <sstream>
 #include <string>
